@@ -184,3 +184,7 @@ class CumSumPianoRollProcessor(object):
     def reset(self) -> None:
         self.piano_roll_slices = []
         self.active_notes = dict()
+
+
+if __name__ == "__main__":
+    pass

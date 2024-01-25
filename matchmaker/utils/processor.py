@@ -96,3 +96,7 @@ class SequentialOutputProcessor(object):
         for proc in self.processors:
             if hasattr(proc, "reset"):
                 proc.reset()
+
+
+if __name__ == "__main__":
+    pass

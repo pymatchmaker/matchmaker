@@ -21,3 +21,7 @@ class OnlineAlignment(object):
         Return the current position
         """
         raise NotImplementedError
+
+
+if __name__ == "__main__":
+    pass

@@ -2,6 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 This module implements the specific HMM for the score follower for Accompanion.
+
+TODO
+----
+* The definition of the HMMs need to be updated to work with audio
 """
 from typing import Optional
 
@@ -10,7 +14,7 @@ import scipy.spatial.distance as sp_dist
 from hiddenmarkov import ConstantTransitionModel, HiddenMarkovModel, ObservationModel
 from scipy.stats import gumbel_l
 
-from accompanion.accompanist.tempo_models import SyncModel
+from matchmaker.utils.tempo_models import TempoModel
 from matchmaker.base import OnlineAlignment
 
 
@@ -192,7 +196,7 @@ class PitchIOIHMM(HiddenMarkovModel):
         pitch_profiles: np.ndarray,
         ioi_matrix: np.ndarray,
         score_onsets: np.ndarray,
-        tempo_model: SyncModel,
+        tempo_model: TempoModel,
         ioi_precision: float = 1,
         initial_probabilities: Optional[np.ndarray] = None,
         has_insertions=True,
@@ -393,7 +397,7 @@ def compute_pitch_profiles(
         the one in question.
 
     eps : float
-        The epsilon value to be added to each pre-domputed pitch profile.
+        The epsilon value to be added to each pre-computed pitch profile.
 
     piano_range : boolean
         Indicates whether the possible MIDI pitches are to be restricted
@@ -523,7 +527,7 @@ class PitchIOIKHMM(HiddenMarkovModel):
             Default = None.
         """
 
-        from accompanion.accompanist.tempo_models import KalmanTempoSyncModel
+        from accompanion.accompanist.tempo_models import KalmanTempoTempoModel
 
         # reference_features = (transition_matrix, pitch_profiles, ioi_matrix)
 
@@ -545,7 +549,7 @@ class PitchIOIKHMM(HiddenMarkovModel):
 
         self.prev_perf_onset = None
 
-        self.tempo_model = KalmanTempoSyncModel(
+        self.tempo_model = KalmanTempoTempoModel(
             init_beat_period=init_beat_period,
             init_score_onset=self.state_space[0],
             trans_par=trans_par,
@@ -594,3 +598,6 @@ if __name__ == "__main__":
     n_onsets = 100
 
     onsets = 100 * rng.rand(100)
+
+if __name__ == "__main__":
+    pass
