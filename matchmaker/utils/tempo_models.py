@@ -103,6 +103,7 @@ class TempoModel(object):
         Needs to be implemented for each variant of the model
         """
         raise NotImplementedError
-    
+
+
 if __name__ == "__main__":
-        pass
+    pass

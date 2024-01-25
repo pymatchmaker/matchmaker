@@ -53,6 +53,7 @@ class ProcessorWrapper(Processor):
     func : Callable
         Function wrapped as a processor.
     """
+
     func: Callable[[Any], Any]
 
     def __init__(self, func: Callable[[Any], Any]) -> None:
