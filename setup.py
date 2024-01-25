@@ -3,12 +3,12 @@
 
 import io
 import os
-import sys
-from shutil import rmtree
 
-from setuptools import find_packages, setup, Command
-from distutils.extension import Extension
-from Cython.Build import cythonize
+from setuptools import find_packages, setup, Extension
+
+# from distutils.extension import Extension
+
+# from Cython.Build import cythonize
 
 import numpy as np
 
@@ -18,21 +18,38 @@ DESCRIPTION = "A package for real-time music alignment"
 KEYWORDS = "music alignment midi audio"
 URL = "https://github.com/neosatrapahereje/matchmaker"
 EMAIL = "carloscancinochacon@gmail.com"
-AUTHOR = "Carlos Cancino-Chacón, Jiyun Park"
+AUTHOR = "Matchmaker Development Team"
 REQUIRES_PYTHON = ">=3.9"
 VERSION = "0.0.1"
 
-# What packages are required for this module to be executed?
-REQUIRED = ["python-rtmidi", "mido", "cython", "numpy", "scipy", "madmom", "partitura"]
+SETUP_REQUIRES = [
+    # Setuptools 18.0 properly handles Cython extensions.
+    "setuptools>=18.0",
+    "cython>=3.0.0",
+    "numpy>=1.26.0",
+]
 
-# What packages are optional?
+# What packages are required for this module to be executed?
+REQUIRED = [
+    "cython>=3.0.0",
+    "python-rtmidi>=1.5.8",
+    "mido>=1.3.0",
+    "numpy>=1.26.0",
+    "scipy>=1.11.3",
+    "librosa>=0.10.1",
+    # For now, madmom needs to be installed directly from GitHub
+    "partitura>=1.3.0",
+    "madmom>=0.17.dev0",
+    "python-hiddenmarkov>=0.1.3",
+    "pyaudio>=0.2.14",
+]
+
+
 EXTRAS = {
     # 'fancy feature': ['django'],
 }
 
-SCRIPTS = [
-    "bin/Audio2AudioAlignment",
-]
+SCRIPTS = []
 
 include_dirs = [np.get_include()]
 
@@ -52,12 +69,6 @@ extensions = [
         # extra_link_args=['-fopenmp'],
     ),
 ]
-
-
-# The rest you shouldn't have to touch too much :)
-# ------------------------------------------------
-# Except, perhaps the License and Trove Classifiers!
-# If you do change the License, remember to change the Trove Classifier for that!
 
 here = os.path.abspath(os.path.dirname(__file__))
 
@@ -91,8 +102,10 @@ setup(
     python_requires=REQUIRES_PYTHON,
     url=URL,
     packages=find_packages(exclude=("tests",)),
-    ext_modules=cythonize(extensions, language_level=3),
+    # ext_modules=cythonize(extensions, language_level=3),
+    ext_modules=extensions,
     install_requires=REQUIRED,
+    setup_requires=SETUP_REQUIRES,
     scripts=SCRIPTS,
     # extras_require=EXTRAS,
     # include_package_data=True,
@@ -100,9 +113,10 @@ setup(
     classifiers=[
         # Trove classifiers
         # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers
-        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: Apache Software License",
         "Programming Language :: Python",
         "Programming Language :: Python :: 3",
+        "Programming Language :: Cython",
         "Programming Language :: Python :: Implementation :: CPython",
         "Programming Language :: Python :: Implementation :: PyPy",
         "Topic :: Multimedia :: Sound/Audio",

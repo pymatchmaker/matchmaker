@@ -7,6 +7,5 @@ python-rtmidi>=1.5.8
 scipy>=1.11.3
 partitura>=1.3.0
 git+https://github.com/CPJKU/madmom.git
-pyaudio
+pyaudio>=0.2.14
 python-hiddenmarkov>=0.1.3
-
