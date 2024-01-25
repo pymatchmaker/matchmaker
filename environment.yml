@@ -1,0 +1,27 @@
+name: matchmaker
+
+channels:
+  - anaconda
+  - pytorch
+  - defaults
+
+dependencies:
+  - python=3.9
+  - Cython==3.0.0
+  - matplotlib==3.8.0
+  - numpy==1.26.0
+  - pytorch==2.1.0
+  - scipy==1.11.3
+  - tqdm==4.65.0
+  - pip
+
+  - pip:
+    - fastdtw==0.3.4
+    - librosa==0.10.1
+    - mido==1.3.0
+    - python-rtmidi==1.5.8
+    - git+https://github.com/CPJKU/madmom.git
+    - pyyaml==6.0.1
+    - PySimpleGUI==4.18.2
+    - partitura>=1.3.0
+    - python-hiddenmarkov==0.1.3
