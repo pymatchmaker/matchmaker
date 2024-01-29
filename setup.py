@@ -58,15 +58,11 @@ extensions = [
         "matchmaker.utils.distances",
         ["matchmaker/utils/distances.pyx"],
         include_dirs=include_dirs,
-        # extra_compile_args=['-fopenmp'],
-        # extra_link_args=['-fopenmp'],
     ),
     Extension(
-        "matchmaker.alignment.offline.dtw",
-        ["matchmaker/alignment/offline/dtw.pyx"],
+        "matchmaker.dp.dtw_loop",
+        ["matchmaker/dp/dtw_loop.pyx"],
         include_dirs=include_dirs,
-        # extra_compile_args=['-fopenmp'],
-        # extra_link_args=['-fopenmp'],
     ),
 ]
 
