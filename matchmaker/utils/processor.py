@@ -5,7 +5,7 @@ Processor related utilities
 
 This module contains all processor related functionality.
 """
-from typing import List, Any, Union, Dict, Tuple, Callable
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 
 class Processor(object):

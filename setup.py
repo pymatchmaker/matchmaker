@@ -4,13 +4,13 @@
 import io
 import os
 
-from setuptools import find_packages, setup, Extension
+import numpy as np
+from setuptools import Extension, find_packages, setup
 
 # from distutils.extension import Extension
 
 # from Cython.Build import cythonize
 
-import numpy as np
 
 # Package meta-data.
 NAME = "matchmaker"

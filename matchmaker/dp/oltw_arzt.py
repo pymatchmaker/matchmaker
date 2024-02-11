@@ -3,20 +3,17 @@
 """
 On-line Dynamic Time Warping
 """
-from typing import Callable, List, Tuple, Union, Dict, Any
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import numpy as np
 from numpy.typing import NDArray
 
-from matchmaker.utils.misc import MatchmakerInvalidOptionError
-from matchmaker.utils import distances
-from matchmaker.utils import (
-    CYTHONIZED_METRICS_W_ARGUMENTS,
-    CYTHONIZED_METRICS_WO_ARGUMENTS,
-)
 from matchmaker.base import OnlineAlignment
-from matchmaker.utils.distances import Metric, vdist
 from matchmaker.dp.dtw_loop import oltw_arzt_loop, reset_cost_matrix
+from matchmaker.utils import (CYTHONIZED_METRICS_W_ARGUMENTS,
+                              CYTHONIZED_METRICS_WO_ARGUMENTS, distances)
+from matchmaker.utils.distances import Metric, vdist
+from matchmaker.utils.misc import MatchmakerInvalidOptionError
 
 DEFAULT_LOCAL_COST: str = "Manhattan"
 WINDOW_SIZE: int = 100

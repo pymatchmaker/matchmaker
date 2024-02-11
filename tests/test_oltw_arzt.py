@@ -1,20 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-This module contains tests for the oltw_arzt module.
+This module contains tests for the dp.oltw_arzt module.
 """
 import unittest
+
 import numpy as np
 
 from matchmaker.dp.oltw_arzt import OnlineTimeWarpingArzt
-
+from matchmaker.utils import (CYTHONIZED_METRICS_W_ARGUMENTS,
+                              CYTHONIZED_METRICS_WO_ARGUMENTS)
 from matchmaker.utils.misc import MatchmakerInvalidOptionError
-from matchmaker.utils import (
-    CYTHONIZED_METRICS_W_ARGUMENTS,
-    CYTHONIZED_METRICS_WO_ARGUMENTS,
-)
-
-
 from tests.utils import generate_example_sequences
 
 RNG = np.random.RandomState(1984)

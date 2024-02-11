@@ -11,11 +11,12 @@ from typing import Optional
 
 import numpy as np
 import scipy.spatial.distance as sp_dist
-from hiddenmarkov import ConstantTransitionModel, HiddenMarkovModel, ObservationModel
+from hiddenmarkov import (ConstantTransitionModel, HiddenMarkovModel,
+                          ObservationModel)
 from scipy.stats import gumbel_l
 
-from matchmaker.utils.tempo_models import TempoModel
 from matchmaker.base import OnlineAlignment
+from matchmaker.utils.tempo_models import TempoModel
 
 
 class PitchIOIObservationModel(ObservationModel):

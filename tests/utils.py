@@ -5,7 +5,8 @@ Utilities for tests
 """
 
 import numbers
-from typing import Tuple, Iterable, Optional
+from typing import Iterable, Optional, Tuple
+
 import numpy as np
 
 # Random number generator
