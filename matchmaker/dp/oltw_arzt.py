@@ -124,7 +124,8 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         if isinstance(self.local_cost_fun, Metric):
             self.vdist = vdist
         else:
-            self.vdist = lambda X, y, lcf: lcf(X, y)
+            # TODO: Speed this up somehow
+            self.vdist = lambda X, y, lcf: np.array([lcf(x, y) for x in X])
 
         self.N_ref: int = self.reference_features.shape[0]
         self.window_size: int = window_size
