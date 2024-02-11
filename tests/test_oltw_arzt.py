@@ -22,7 +22,7 @@ RNG = np.random.RandomState(1984)
 
 class TestOnlineTimeWarpingArzt(unittest.TestCase):
 
-    def test_init(self):
+    def test_local_cost_fun(self):
         """
         Test initialization of the class
         """
