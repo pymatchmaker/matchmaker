@@ -9,7 +9,6 @@ CYTHONIZED_METRICS_WO_ARGUMENTS = [
     "Euclidean",
     "Cosine",
     "L1",
-    # "Lp",
     "Linf",
 ]
 
