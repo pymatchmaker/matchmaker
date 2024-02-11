@@ -8,7 +8,6 @@ import unittest
 import numpy as np
 
 from matchmaker.base import OnlineAlignment
-
 from tests.utils import generate_example_sequences
 
 RNG = np.random.RandomState(1984)

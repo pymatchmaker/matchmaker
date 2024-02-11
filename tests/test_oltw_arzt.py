@@ -6,14 +6,11 @@ This module contains tests for the dp.oltw_arzt module.
 import unittest
 
 import numpy as np
-
 from scipy.spatial import distance as sp_distance
 
 from matchmaker.dp.oltw_arzt import OnlineTimeWarpingArzt
-from matchmaker.utils import (
-    CYTHONIZED_METRICS_W_ARGUMENTS,
-    CYTHONIZED_METRICS_WO_ARGUMENTS,
-)
+from matchmaker.utils import (CYTHONIZED_METRICS_W_ARGUMENTS,
+                              CYTHONIZED_METRICS_WO_ARGUMENTS)
 from matchmaker.utils.misc import MatchmakerInvalidOptionError
 from tests.utils import generate_example_sequences
 

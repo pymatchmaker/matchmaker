@@ -10,11 +10,8 @@ from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.dp.dtw_loop import oltw_arzt_loop, reset_cost_matrix
-from matchmaker.utils import (
-    CYTHONIZED_METRICS_W_ARGUMENTS,
-    CYTHONIZED_METRICS_WO_ARGUMENTS,
-    distances,
-)
+from matchmaker.utils import (CYTHONIZED_METRICS_W_ARGUMENTS,
+                              CYTHONIZED_METRICS_WO_ARGUMENTS, distances)
 from matchmaker.utils.distances import Metric, vdist
 from matchmaker.utils.misc import MatchmakerInvalidOptionError
 
