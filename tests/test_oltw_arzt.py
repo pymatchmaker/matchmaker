@@ -9,12 +9,16 @@ import numpy as np
 from matchmaker.dp.oltw_arzt import OnlineTimeWarpingArzt
 
 from matchmaker.utils.misc import MatchmakerInvalidOptionError
-from matchmaker.utils import CYTHONIZED_METRICS_W_ARGUMENTS, CYTHONIZED_METRICS_WO_ARGUMENTS
+from matchmaker.utils import (
+    CYTHONIZED_METRICS_W_ARGUMENTS,
+    CYTHONIZED_METRICS_WO_ARGUMENTS,
+)
 
 
 from tests.utils import generate_example_sequences
 
 RNG = np.random.RandomState(1984)
+
 
 class TestOnlineTimeWarpingArzt(unittest.TestCase):
 
@@ -36,16 +40,8 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
         )
 
         # Test local_cost_fun as string
-        valid_local_cost_strs = [
-            "Manhattan",
-            "Euclidean",
-            "Cosine",
-            "L1",
-            "Linf",
-            ]
+        for local_cost_fun in CYTHONIZED_METRICS_WO_ARGUMENTS:
 
-        for local_cost_fun in valid_local_cost_strs:
-            
             oltw = OnlineTimeWarpingArzt(
                 reference_features=X,
                 window_size=2,
@@ -61,4 +57,22 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
                 # Check that outputs are integers
                 self.assertTrue(isinstance(current_position, int))
 
+        # Test local_cost_fun as tuple
+        for local_cost_fun in CYTHONIZED_METRICS_W_ARGUMENTS:
 
+            if local_cost_fun == "Lp":
+                for p in RNG.uniform(low=1, high=10, size=10):
+                    oltw = OnlineTimeWarpingArzt(
+                        reference_features=X,
+                        window_size=2,
+                        step_size=1,
+                        local_cost_fun=(local_cost_fun, dict(p=p)),
+                        start_window_size=2,
+                    )
+
+                    for i, obs in enumerate(Y):
+                        current_position = oltw(obs)
+                        # check that the alignments are correct
+                        self.assertTrue(np.all(path[i] == (current_position, i)))
+                        # Check that outputs are integers
+                        self.assertTrue(isinstance(current_position, int))

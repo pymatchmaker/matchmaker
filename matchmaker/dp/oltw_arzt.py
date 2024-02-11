@@ -3,7 +3,7 @@
 """
 On-line Dynamic Time Warping
 """
-from typing import Callable, List, Tuple, Union
+from typing import Callable, List, Tuple, Union, Dict, Any
 
 import numpy as np
 from numpy.typing import NDArray
@@ -41,7 +41,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
     step_size : int
         Size of the step
 
-    local_cost_fun : Union[str, Callable]
+    local_cost_fun : str, tuple (str, dict) or callable
         Local metric for computing pairwise distances.
 
     start_window_size: int
@@ -79,7 +79,11 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         reference_features: NDArray[np.float64],
         window_size: int = WINDOW_SIZE,
         step_size: int = STEP_SIZE,
-        local_cost_fun: Union[str, Callable] = DEFAULT_LOCAL_COST,
+        local_cost_fun: Union[
+            str,
+            Callable,
+            Tuple[str, Dict[str, Any]],
+        ] = DEFAULT_LOCAL_COST,
         start_window_size: int = START_WINDOW_SIZE,
     ) -> None:
         super().__init__(reference_features=reference_features)
