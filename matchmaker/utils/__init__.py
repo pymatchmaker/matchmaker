@@ -3,3 +3,16 @@
 """
 Top level of the utilities module.
 """
+
+CYTHONIZED_METRICS_WO_ARGUMENTS = [
+    "Manhattan",
+    "Euclidean",
+    "Cosine",
+    "L1",
+    # "Lp",
+    "Linf",
+]
+
+CYTHONIZED_METRICS_W_ARGUMENTS = [
+    "Lp",
+]

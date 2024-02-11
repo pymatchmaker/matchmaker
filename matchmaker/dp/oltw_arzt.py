@@ -8,7 +8,12 @@ from typing import Callable, List, Tuple, Union
 import numpy as np
 from numpy.typing import NDArray
 
+from matchmaker.utils.misc import MatchmakerInvalidOptionError
 from matchmaker.utils import distances
+from matchmaker.utils import (
+    CYTHONIZED_METRICS_W_ARGUMENTS,
+    CYTHONIZED_METRICS_WO_ARGUMENTS,
+)
 from matchmaker.base import OnlineAlignment
 from matchmaker.utils.distances import Metric, vdist
 from matchmaker.dp.dtw_loop import oltw_arzt_loop, reset_cost_matrix
@@ -19,7 +24,7 @@ STEP_SIZE: int = 5
 START_WINDOW_SIZE: int = 60
 
 
-class OnlineTimeWarping(OnlineAlignment):
+class OnlineTimeWarpingArzt(OnlineAlignment):
     """
     Fast On-line Time Warping
 
@@ -41,7 +46,7 @@ class OnlineTimeWarping(OnlineAlignment):
 
     start_window_size: int
         Size of the starting window size.
-    
+
     Attributes
     ----------
     reference_features : np.ndarray
@@ -55,7 +60,7 @@ class OnlineTimeWarping(OnlineAlignment):
 
     input_features : list
         List with the input features (updates every time there is a step).
-    
+
     current_position : int
         Index of the current position.
 
@@ -83,10 +88,24 @@ class OnlineTimeWarping(OnlineAlignment):
 
         # Set local cost function
         if isinstance(local_cost_fun, str):
+
+            if local_cost_fun not in CYTHONIZED_METRICS_WO_ARGUMENTS:
+                raise MatchmakerInvalidOptionError(
+                    parameter_name="local_cost_fun",
+                    valid_options=CYTHONIZED_METRICS_WO_ARGUMENTS,
+                    value=local_cost_fun,
+                )
             # If local_cost_fun is a string
             self.local_cost_fun = getattr(distances, local_cost_fun)()
 
         elif isinstance(local_cost_fun, tuple):
+
+            if local_cost_fun[0] not in CYTHONIZED_METRICS_W_ARGUMENTS:
+                raise MatchmakerInvalidOptionError(
+                    parameter_name="local_cost_fun",
+                    valid_options=CYTHONIZED_METRICS_W_ARGUMENTS,
+                    value=local_cost_fun[0],
+                )
             # local_cost_fun is a tuple with the arguments to instantiate
             # the cost
             self.local_cost_fun = getattr(distances, local_cost_fun[0])(
@@ -148,14 +167,14 @@ class OnlineTimeWarping(OnlineAlignment):
             input_features,
             self.local_cost_fun,
         )
-        if self.restart:
-            self.global_cost_matrix = reset_cost_matrix(
-                global_cost_matrix=self.global_cost_matrix,
-                window_cost=window_cost,
-                score_index=window_start,
-                N=self.N_ref + 1,
-            )
-            self.restart = False
+        # if self.restart:
+        #     self.global_cost_matrix = reset_cost_matrix(
+        #         global_cost_matrix=self.global_cost_matrix,
+        #         window_cost=window_cost,
+        #         score_index=window_start,
+        #         N=self.N_ref + 1,
+        #     )
+        #     self.restart = False
 
         self.global_cost_matrix, min_index, min_costs = oltw_arzt_loop(
             global_cost_matrix=self.global_cost_matrix,
@@ -169,10 +188,19 @@ class OnlineTimeWarping(OnlineAlignment):
 
         # adapt current_position: do not go backwards,
         # but also go a maximum of N steps forward
-        self.current_position = min(
-            max(self.current_position, min_index),
-            self.current_position + self.step_size,
-        )
+
+        if self.input_index == 0:
+            # enforce the first time step to stay at the
+            # initial position
+            self.current_position = min(
+                max(self.current_position, min_index),
+                self.current_position,
+            )
+        else:
+            self.current_position = min(
+                max(self.current_position, min_index),
+                self.current_position + self.step_size,
+            )
 
         # update input index
         self.input_index += 1
