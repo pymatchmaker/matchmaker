@@ -26,29 +26,43 @@ class OnlineTimeWarping(OnlineAlignment):
     Parameters
     ----------
     reference_features : np.ndarray
-        A 2D array with dimensions (n_timesteps, n_features) containing the
+        A 2D array with dimensions (`n_timesteps`, `n_features`) containing the
         features of the reference the input is going to be aligned to.
+
     window_size : int
         Size of the window for searching the optimal path in the cumulative
-        cost matrix
+        cost matrix.
+
     step_size : int
         Size of the step
+
     local_cost_fun : Union[str, Callable]
         Local metric for computing pairwise distances.
+
     start_window_size: int
-        Size of the starting window size
+        Size of the starting window size.
+    
     Attributes
     ----------
     reference_features : np.ndarray
+        See description above.
+
     window_size : int
+        See description above.
+
     step_size : int
+        See description above.
+
     input_features : list
-        List with the input features (updates every time there is a step)
+        List with the input features (updates every time there is a step).
+    
     current_position : int
-        Index of the current position
+        Index of the current position.
+
     warping_path : list
         List of tuples containing the current position and the corresponding
         index in the array of `reference_features`.
+
     positions : list
         List of the positions for each input.
     """
@@ -64,7 +78,7 @@ class OnlineTimeWarping(OnlineAlignment):
         start_window_size: int = START_WINDOW_SIZE,
     ) -> None:
         super().__init__(reference_features=reference_features)
-        # self.reference_features = reference_features
+
         self.input_features: List[NDArray[np.float64]] = []
 
         # Set local cost function
