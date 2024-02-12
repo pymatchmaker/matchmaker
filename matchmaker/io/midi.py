@@ -9,11 +9,13 @@ import tempfile
 import threading
 import time
 from multiprocessing import Pipe
-from queue import Empty, Queue
+
 
 from typing import Any, Tuple, List, Union, Optional
 
 import mido
+
+from matchmaker.utils.misc import RECVQueue
 
 # Default polling period (in seconds)
 POLLING_PERIOD = 0.01
@@ -36,31 +38,7 @@ def dummy_pipeline(inputs: Any) -> Any:
     return inputs
 
 
-class RECVQueue(Queue):
-    """
-    RECVQueue
-    
-    This class uses python's Queue.get with a timeout makes it interruptable via KeyboardInterrupt
-    and even for the future where that is possibly out-dated, the interrupt can happen after each timeout
-    so periodically query the queue with a timeout of 1s each attempt, finding a middleground
-    between busy-waiting and uninterruptable blocked waiting
-    """
-    def __init__(self) -> None:
-        Queue.__init__(self)
 
-
-    def recv(self) -> Any:
-        """
-        Return and remove an item from the queue.
-        """
-        while True:
-            try:
-                return self.get(timeout=1)
-            except Empty:
-                pass
-
-    def poll(self) -> bool:
-        return self.empty()
 
 
 class MidiInputProcess(multiprocessing.Process):
@@ -416,7 +394,7 @@ class FramedMidiInputThread(MidiInputThread):
                     frame.reset(c_time)
 
 
-def create_midi_poll(
+def create_midi_stream(
     port,
     polling_period,
     pipeline,

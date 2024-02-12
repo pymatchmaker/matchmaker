@@ -4,7 +4,8 @@
 Miscellaneous utilities
 """
 import numbers
-from typing import Iterable, Union
+from typing import Iterable, Union, Any
+from queue import Empty, Queue
 
 import numpy as np
 
@@ -73,3 +74,30 @@ def ensure_rng(
             "`seed` should be an integer or an instance of "
             f"`np.random.RandomState` but is {type(seed)}"
         )
+
+
+class RECVQueue(Queue):
+    """
+    Queue with a recv method (like Pipe)
+    
+    This class uses python's Queue.get with a timeout makes it interruptable via KeyboardInterrupt
+    and even for the future where that is possibly out-dated, the interrupt can happen after each timeout
+    so periodically query the queue with a timeout of 1s each attempt, finding a middleground
+    between busy-waiting and uninterruptable blocked waiting
+    """
+    def __init__(self) -> None:
+        Queue.__init__(self)
+
+
+    def recv(self) -> Any:
+        """
+        Return and remove an item from the queue.
+        """
+        while True:
+            try:
+                return self.get(timeout=1)
+            except Empty:
+                pass
+
+    def poll(self) -> bool:
+        return self.empty()

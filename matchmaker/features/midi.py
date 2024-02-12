@@ -1,7 +1,7 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 """
-Features from symbolic files
+This module contains methods to compute features from MIDI signals.
 """
 from typing import Dict, List, Optional, Tuple
 

@@ -10,10 +10,13 @@ from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.dp.dtw_loop import oltw_arzt_loop, reset_cost_matrix
-from matchmaker.utils import (CYTHONIZED_METRICS_W_ARGUMENTS,
-                              CYTHONIZED_METRICS_WO_ARGUMENTS, distances)
+from matchmaker.utils import (
+    CYTHONIZED_METRICS_W_ARGUMENTS,
+    CYTHONIZED_METRICS_WO_ARGUMENTS,
+    distances,
+)
 from matchmaker.utils.distances import Metric, vdist
-from matchmaker.utils.misc import MatchmakerInvalidOptionError
+from matchmaker.utils.misc import MatchmakerInvalidOptionError, MatchmakerInvalidParameterTypeError
 
 DEFAULT_LOCAL_COST: str = "Manhattan"
 WINDOW_SIZE: int = 100
@@ -70,6 +73,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
     """
 
     local_cost_fun: Callable[[NDArray[np.float64]], NDArray[np.float64]]
+    vdist: Callable[[NDArray[np.float64]], NDArray[np.float64]]
 
     def __init__(
         self,
@@ -82,10 +86,18 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             Tuple[str, Dict[str, Any]],
         ] = DEFAULT_LOCAL_COST,
         start_window_size: int = START_WINDOW_SIZE,
+        current_position: int = 0,
     ) -> None:
         super().__init__(reference_features=reference_features)
 
         self.input_features: List[NDArray[np.float64]] = []
+
+        if not (isinstance(local_cost_fun, (str, tuple)) or callable(local_cost_fun)):
+            raise MatchmakerInvalidParameterTypeError(
+                parameter_name="local_cost_fun",
+                required_parameter_type=(str, tuple, Callable),
+                actual_parameter_type=type(local_cost_fun)
+            )
 
         # Set local cost function
         if isinstance(local_cost_fun, str):
@@ -121,14 +133,14 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         if isinstance(self.local_cost_fun, Metric):
             self.vdist = vdist
         else:
-            # TODO: Speed this up somehow
+            # TODO: Speed this up somehow instead of list comprehension
             self.vdist = lambda X, y, lcf: np.array([lcf(x, y) for x in X])
 
         self.N_ref: int = self.reference_features.shape[0]
         self.window_size: int = window_size
         self.step_size: int = step_size
         self.start_window_size: int = start_window_size
-        self.current_position: int = 0
+        self.current_position: int = current_position
         self.positions: List[int] = []
         self.warping_path: List = []
         self.global_cost_matrix: NDArray[np.float64] = (

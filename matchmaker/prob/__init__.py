@@ -3,3 +3,4 @@
 """
 Probabilistic methods for music alignment
 """
+from .score_hmm import PitchIOIHMM

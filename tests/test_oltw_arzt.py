@@ -11,7 +11,7 @@ from scipy.spatial import distance as sp_distance
 from matchmaker.dp.oltw_arzt import OnlineTimeWarpingArzt
 from matchmaker.utils import (CYTHONIZED_METRICS_W_ARGUMENTS,
                               CYTHONIZED_METRICS_WO_ARGUMENTS)
-from matchmaker.utils.misc import MatchmakerInvalidOptionError
+from matchmaker.utils.misc import MatchmakerInvalidOptionError, MatchmakerInvalidParameterTypeError
 from tests.utils import generate_example_sequences
 
 RNG = np.random.RandomState(1984)
@@ -56,6 +56,18 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             # alignments
             noise_scale=0.00,
             random_state=RNG,
+        )
+
+        # Test raising error if local_cost_fun is invalid type
+        self.assertRaises(
+            MatchmakerInvalidParameterTypeError,
+            OnlineTimeWarpingArzt,
+            reference_features=X,
+            window_size=2,
+            step_size=1,
+            # Invalid type (not str, tuple or callable)
+            local_cost_fun=RNG.rand(19),
+            start_window_size=2,
         )
 
         # Test local_cost_fun as string
