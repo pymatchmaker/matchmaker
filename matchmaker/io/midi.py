@@ -3,156 +3,56 @@
 """
 Input MIDI stream
 """
-import multiprocessing
+
 import os
 import tempfile
 import threading
 import time
-from multiprocessing import Pipe
 
 
-from typing import Any, Tuple, List, Union, Optional
+from typing import Any, Tuple, List, Union, Optional, Callable
 
 import mido
 
+from mido.ports import BaseInput as MidiInputPort
+
 from matchmaker.utils.misc import RECVQueue
+from matchmaker.utils.processor import Stream, DummySequentialOutputProcessor
 
 # Default polling period (in seconds)
 POLLING_PERIOD = 0.01
 
 
-def dummy_pipeline(inputs: Any) -> Any:
+class MidiStream(threading.Thread, Stream):
     """
-    Dummy pipeline, which always returns the inputs
-
-    Parameters
-    ----------
-    inputs : Any
-        The inputs to the pipeline
-
-    Returns
-    -------
-    inputs : Any
-        The unmodified inputs
+    Input MIDI stream
     """
-    return inputs
+    midi_in = MidiInputPort
+    init_time: float
+    listen: bool
+    queue: RECVQueue
+    features: List[Callable]
+    return_midi_messages: bool
+    first_message : bool
 
-
-
-
-
-class MidiInputProcess(multiprocessing.Process):
     def __init__(
         self,
-        port,
-        pipe,
-        init_time=None,
-        pipeline=None,
-        return_midi_messages=False,
-        output_fn=None,
-        mediator=None,
-    ):
-        multiprocessing.Process.__init__(self)
-
-        self.init_time = init_time
-        self.listen = False
-        self.pipe = pipe
-        self.pipeline = pipeline
-        self.first_msg = False
-        if pipeline is None:
-            self.pipeline = dummy_pipeline
-        self.return_midi_messages = return_midi_messages
-
-        self.lock = multiprocessing.RLock()
-        self.midi_in = port
-        # List to store MIDI messages
-        self.midi_messages = []
-        self.mediator = mediator  # TODO mediator currently not usable for processes
-
-        if output_fn is None:
-            self.output_fn = os.path.join(tempfile.gettempdir(), "input_midi.mid")
-            print(f"Output will be saved in {self.output_fn}")
-        else:
-            self.output_fn = output_fn
-
-    def run(self):
-        self.start_listening()
-
-        while self.listen:
-            print("midi input listening")
-            msg = self.midi_in.poll()
-            if msg is not None:
-                c_time = self.current_time
-                # Append MIDI Messages to the list to export the MIDI later
-                self.midi_messages.append((msg, c_time))
-                # To have the same output as other MidiThreads
-                # We should think of a less convoluted way to do
-                # this in general
-                output = self.pipeline([(msg, c_time)], c_time)
-                if self.return_midi_messages:
-                    self.pipe.send((msg, c_time), output)
-                else:
-                    self.pipe.send(output)
-
-    @property
-    def current_time(self):
-        """
-        Get current time since starting to listen
-        """
-        return time.time() - self.init_time
-
-    def start_listening(self):
-        """
-        Start listening to midi input
-        get starting time
-        """
-        self.listen = True
-        if self.init_time is None:
-            self.init_time = time.time()
-
-    def stop_listening(self):
-        """
-        Stop listening to MIDI input
-        """
-        # break while loop in self.run
-        with self.lock:
-            self.listen = False
-            # reset init time
-
-        # close port
-        # TODO!!!
-
-        # self.terminate()
-        # Join thread
-        # self.join()
-
-    def save_midi(self):
-        # sort MIDI messages
-        self.midi_messages.sort(key=lambda x: x[1])
-        # save the MIDI file here
-        # mido.MidiFile(filename=self.output_fn)
-
-
-class MidiInputThread(threading.Thread):
-    def __init__(
-        self,
-        port,
-        queue,
-        init_time=None,
-        pipeline=None,
+        port: MidiInputPort,
+        queue: RECVQueue,
+        init_time: Optional[float]=None,
+        features=None,
         return_midi_messages=False,
         mediator=None,
     ):
+        if features is None:
+            features = DummySequentialOutputProcessor()
         threading.Thread.__init__(self)
-
+        Stream.__init__(features=features)
         self.midi_in = port
         self.init_time = init_time
         self.listen = False
         self.queue = queue
-        self.pipeline = pipeline
         self.first_msg = False
-        if pipeline is None:
-            self.pipeline = dummy_pipeline
         self.return_midi_messages = return_midi_messages
         self.mediator = mediator
 
@@ -233,12 +133,14 @@ class Buffer(object):
     start : float
         The starting time of the buffer
 
-    
-    
+
+
     """
+
     polling_period: float
     frame: List[Tuple[mido.Message, float]]
     start: Optional[float]
+
     def __init__(self, polling_period: float) -> None:
         self.polling_period = polling_period
         self.frame = []
@@ -273,61 +175,6 @@ class Buffer(object):
 
     def __str__(self):
         return str(self.frame)
-
-
-class FramedMidiInputProcess(MidiInputProcess):
-    def __init__(
-        self,
-        port,
-        pipe,
-        polling_period=POLLING_PERIOD,
-        init_time=None,
-        pipeline=None,
-        return_midi_messages=False,
-        mediator=None,
-    ):
-        super().__init__(
-            port=port,
-            pipe=pipe,
-            init_time=init_time,
-            pipeline=pipeline,
-            return_midi_messages=return_midi_messages,
-            mediator=mediator,
-        )
-        self.polling_period = polling_period
-
-    def run(self):
-        """
-        TODO
-        ----
-        * Fix Error with c_time when stopping the thread
-        * Adapt sleep time from midi_online
-        """
-
-        # sttime = time.time()
-        self.start_listening()
-        frame = Buffer(self.polling_period)
-        frame.start = self.current_time
-        # TODO: Adapt from midi_online to allow for variable polling
-        # TODO mediator currently not usable for processes
-        # periods?
-        while self.listen:
-            # added if to check once again after sleep
-            # TODO verify if still correct
-            c_time = self.current_time
-            msg = self.midi_in.poll()
-            if msg is not None:
-                frame.append(msg, c_time)
-                if not self.first_msg:
-                    self.first_msg = True
-            if c_time >= frame.end and self.first_msg:
-                output = self.pipeline((frame.frame, c_time))
-                # self.pipe.send(output)
-                if self.return_midi_messages:
-                    self.pipe.send((frame.frame, output))
-                else:
-                    self.pipe.send(output)
-                frame.reset(c_time)
 
 
 class FramedMidiInputThread(MidiInputThread):

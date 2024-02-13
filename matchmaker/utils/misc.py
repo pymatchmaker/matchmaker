@@ -49,7 +49,7 @@ def ensure_rng(
     seed: Union[numbers.Integral, np.random.RandomState]
 ) -> np.random.RandomState:
     """
-    Ensure random seed generator
+    Ensure random number generator is a np.random.RandomState instance
 
     Parameters
     ----------
@@ -79,15 +79,15 @@ def ensure_rng(
 class RECVQueue(Queue):
     """
     Queue with a recv method (like Pipe)
-    
+
     This class uses python's Queue.get with a timeout makes it interruptable via KeyboardInterrupt
     and even for the future where that is possibly out-dated, the interrupt can happen after each timeout
     so periodically query the queue with a timeout of 1s each attempt, finding a middleground
     between busy-waiting and uninterruptable blocked waiting
     """
+
     def __init__(self) -> None:
         Queue.__init__(self)
-
 
     def recv(self) -> Any:
         """

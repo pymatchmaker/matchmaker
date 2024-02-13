@@ -8,6 +8,21 @@ This module contains all processor related functionality.
 from typing import Any, Callable, Dict, List, Tuple, Union
 
 
+class Stream(object):
+    """
+    Abstract class for a stream
+    """
+
+    def __init__(self, features: List[Callable]) -> None:
+        self.features = features
+
+    def _process_feature(self, *args, **kwargs) -> None:
+        raise NotImplementedError
+
+    def _process_frame(self, data: Any, *args, **kwargs) -> Any:
+        raise NotImplementedError
+
+
 class Processor(object):
     """
     Abstract class for a processor.
@@ -97,6 +112,18 @@ class SequentialOutputProcessor(object):
         for proc in self.processors:
             if hasattr(proc, "reset"):
                 proc.reset()
+
+
+class DummySequentialOutputProcessor(SequentialOutputProcessor):
+    """
+    Dummy sequential output processor, which always returns
+    the inputs unmodified inputs
+    """
+
+    def __init__(self) -> None:
+
+        dummy_processors = [ProcessorWrapper(lambda x: x)]
+        SequentialOutputProcessor.__init__(processors=dummy_processors)
 
 
 if __name__ == "__main__":
