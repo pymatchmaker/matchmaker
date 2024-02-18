@@ -27,19 +27,20 @@ class MidiStream(threading.Thread, Stream):
     """
     Input MIDI stream
     """
-    midi_in = MidiInputPort
+
+    midi_in: MidiInputPort
     init_time: float
     listen: bool
     queue: RECVQueue
     features: List[Callable]
     return_midi_messages: bool
-    first_message : bool
+    first_message: bool
 
     def __init__(
         self,
         port: MidiInputPort,
         queue: RECVQueue,
-        init_time: Optional[float]=None,
+        init_time: Optional[float] = None,
         features=None,
         return_midi_messages=False,
         mediator=None,
@@ -177,7 +178,7 @@ class Buffer(object):
         return str(self.frame)
 
 
-class FramedMidiInputThread(MidiInputThread):
+class FramedMidiInputThread:
     def __init__(
         self,
         port,
