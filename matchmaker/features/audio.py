@@ -11,6 +11,7 @@ from matchmaker.utils.processor import Processor
 
 SAMPLE_RATE = 22050
 HOP_LENGTH = 256
+N_CHROMA = 12
 N_FFT = 512
 N_MELS = 128
 N_MFCC = 13
@@ -30,12 +31,14 @@ class ChromagramProcessor(Processor):
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
         n_fft: int = N_FFT,
+        n_chroma: int = N_CHROMA,
         norm: Optional[float] = NORM,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.n_fft = n_fft
+        self.n_chroma = n_chroma
         self.norm = norm
 
     def __call__(
@@ -49,6 +52,7 @@ class ChromagramProcessor(Processor):
             sr=self.sample_rate,
             hop_length=self.hop_length,
             n_fft=self.n_fft,
+            n_chroma=self.n_chroma,
             norm=self.norm,
             center=False,
         )
@@ -56,7 +60,6 @@ class ChromagramProcessor(Processor):
 
 
 class MFCCProcessor(Processor):
-
     def __init__(
         self,
         sample_rate: int = SAMPLE_RATE,
