@@ -91,10 +91,17 @@ class MFCCProcessor(Processor):
 
 
 class MelSpectrogramProcessor(Processor):
-    def __init__(self, sample_rate: int, hop_length: int, n_mels: int):
+    def __init__(
+        self,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+        n_fft: int = N_FFT,
+        n_mels: int = N_MELS,
+    ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
+        self.n_fft = n_fft
         self.n_mels = n_mels
 
     def __call__(
@@ -107,6 +114,7 @@ class MelSpectrogramProcessor(Processor):
             y=y,
             sr=self.sample_rate,
             hop_length=self.hop_length,
+            n_fft=self.n_fft,
             n_mels=self.n_mels,
             center=False,
         )

@@ -81,11 +81,7 @@ class AudioStream(threading.Thread, Stream):
         """
         Get current time since starting to listen
         """
-        return time.time() - self.init_time
-
-    @property
-    def is_active(self):
-        return self.listen
+        return time.time() - self.init_time if self.init_time else None
 
     def start_listening(self):
         self.audio_stream.start_stream()
@@ -99,7 +95,6 @@ class AudioStream(threading.Thread, Stream):
         self.audio_stream.close()
         self.audio_interface.terminate()
         self.listen = False
-        self.init_time = None
 
     def run(self):
         self.audio_stream = self.audio_interface.open(
@@ -149,12 +144,9 @@ class MockAudioStream(AudioStream):
         self.init_time = time.time()
 
     def stop_listening(self):
-        print("* Stop listening to audio stream....")
         self.listen = False
-        self.init_time = None
 
     def mock_stream(self):
-        self.start_listening()
         duration = int(librosa.get_duration(path=self.file_path))
         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
@@ -163,7 +155,8 @@ class MockAudioStream(AudioStream):
         trimmed_audio = padded_audio[  # trim to multiple of chunk_size
             : len(padded_audio) - (len(padded_audio) % self.chunk_size)
         ]
-        while trimmed_audio.any():
+        self.start_listening()
+        while self.listen and trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
             f_time = time.time() - self.init_time
             self._process_feature((target_audio, f_time), f_time)
@@ -171,7 +164,7 @@ class MockAudioStream(AudioStream):
 
         # fill empty values with zeros after stream is finished
         additional_padding_size = duration * 2 * self.sample_rate
-        while additional_padding_size > 0:
+        while self.listen and additional_padding_size > 0:
             f_time = time.time() - self.init_time
             self._process_feature((target_audio, f_time), f_time)
             additional_padding_size -= self.chunk_size
