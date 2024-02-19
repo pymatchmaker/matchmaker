@@ -123,7 +123,7 @@ class DummySequentialOutputProcessor(SequentialOutputProcessor):
     def __init__(self) -> None:
 
         dummy_processors = [ProcessorWrapper(lambda x: x)]
-        SequentialOutputProcessor.__init__(processors=dummy_processors)
+        super().__init__(processors=dummy_processors)
 
 
 if __name__ == "__main__":
