@@ -65,6 +65,13 @@ class AudioStream(threading.Thread, Stream):
         return (data, pyaudio.paContinue)
 
     def _process_feature(self, target_audio, f_time):
+        if self.last_chunk is None:  # add zero padding at the first block
+            target_audio = np.concatenate((np.zeros(self.hop_length), target_audio))
+        else:
+            # add last chunk at the beginning of the block
+            # making 5 block, 1 block overlap -> 4 frames each time
+            target_audio = np.concatenate((self.last_chunk, target_audio))
+
         stacked_features = None
         for feature in self.features:
             feature_output, _ = feature((target_audio, f_time), f_time)
@@ -75,6 +82,7 @@ class AudioStream(threading.Thread, Stream):
             )
 
         self.queue.put(stacked_features)
+        self.last_chunk = target_audio[-self.hop_length :]
 
     @property
     def current_time(self):
@@ -159,14 +167,14 @@ class MockAudioStream(AudioStream):
         while self.listen and trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
             f_time = time.time() - self.init_time
-            self._process_feature((target_audio, f_time), f_time)
+            self._process_feature(target_audio, f_time)
             trimmed_audio = trimmed_audio[self.chunk_size :]
 
         # fill empty values with zeros after stream is finished
         additional_padding_size = duration * 2 * self.sample_rate
         while self.listen and additional_padding_size > 0:
             f_time = time.time() - self.init_time
-            self._process_feature((target_audio, f_time), f_time)
+            self._process_feature(target_audio, f_time)
             additional_padding_size -= self.chunk_size
 
     def run(self):

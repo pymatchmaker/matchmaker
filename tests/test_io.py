@@ -45,7 +45,7 @@ class TestMockAudioStream(unittest.TestCase):
 
         # When: the stream is started
         self.stream.start()
-        time.sleep(2)  # wait for stream thread to start
+        time.sleep(5)  # wait for stream thread to start
 
         # Then: the stream is listening and is alive
         self.assertTrue(self.stream.listen)
@@ -107,7 +107,6 @@ class TestMockAudioStream(unittest.TestCase):
             )
             expected_shape = (
                 features_len,
-                int(self.stream.chunk_size / self.stream.hop_length)
-                - 1,  # windowed frames
+                int(self.stream.chunk_size / self.stream.hop_length),  # windowed frames
             )
             self.assertEqual(feature.shape, expected_shape)

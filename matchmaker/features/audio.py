@@ -21,7 +21,7 @@ NORM = np.inf
 # Type hint for Input Audio frame.
 InputAudioFrame = Tuple[
     List[Tuple[np.ndarray, int]], float
-]  # data, frame_count, time_info
+]  # (data, time_info), time_info
 
 
 class ChromagramProcessor(Processor):
@@ -46,7 +46,7 @@ class ChromagramProcessor(Processor):
         frame: InputAudioFrame,
         kwargs: Dict = {},
     ) -> Tuple[Optional[np.ndarray], Dict]:
-        (y, f_time), f_time = frame
+        y, f_time = frame
         chroma = librosa.feature.chroma_stft(
             y=y,
             sr=self.sample_rate,
@@ -80,7 +80,7 @@ class MFCCProcessor(Processor):
         frame: InputAudioFrame,
         kwargs: Dict = {},
     ) -> Tuple[Optional[np.ndarray], Dict]:
-        (y, f_time), f_time = frame
+        y, f_time = frame
         mfcc = librosa.feature.mfcc(
             y=y,
             sr=self.sample_rate,
@@ -112,7 +112,7 @@ class MelSpectrogramProcessor(Processor):
         frame: InputAudioFrame,
         kwargs: Dict = {},
     ) -> Tuple[Optional[np.ndarray], Dict]:
-        (y, f_time), f_time = frame
+        y, f_time = frame
         mel_spectrogram = librosa.feature.melspectrogram(
             y=y,
             sr=self.sample_rate,
