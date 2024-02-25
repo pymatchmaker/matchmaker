@@ -8,6 +8,7 @@ import os
 import tempfile
 import threading
 import time
+import numpy as np
 
 
 from typing import Any, Tuple, List, Union, Optional, Callable
@@ -25,7 +26,31 @@ POLLING_PERIOD = 0.01
 
 class MidiStream(threading.Thread, Stream):
     """
-    Input MIDI stream
+    A class to process input MIDI stream in real time
+
+    Parameters
+    ----------
+    port : mido.ports.BaseInput
+        Input MIDI port
+
+    queue : RECVQueue
+        Queue to store processed MIDI input
+
+    init_time : Optional[float]
+        The initial time. If none given, the
+        initial time will be set to the starting time
+        of the thread.
+
+    return_midi_messages: bool
+        Return MIDI messages in addition to the
+        processed features.
+
+    mediator : Mediator or None
+        A Mediator instance to filter input MIDI.
+        This is useful for certain older instruments,
+        like the Bösendorfer CEUS, which do not distinguish
+        between notes played by a human, and notes sent 
+        from a different process  (e.g., an accompaniment system)
     """
 
     midi_in: MidiInputPort
@@ -46,7 +71,7 @@ class MidiStream(threading.Thread, Stream):
         mediator=None,
     ):
         if features is None:
-            features = DummySequentialOutputProcessor()
+            features = [DummySequentialOutputProcessor()]
         threading.Thread.__init__(self)
         Stream.__init__(features=features)
         self.midi_in = port
@@ -56,6 +81,26 @@ class MidiStream(threading.Thread, Stream):
         self.first_msg = False
         self.return_midi_messages = return_midi_messages
         self.mediator = mediator
+
+    def _process_frame(self, data, *args, **kwargs) -> Tuple[np.ndarray, int]:
+        """
+        Parameters
+        ----------
+        data : MIDIFrame
+        """
+        self._process_feature(self, data)
+
+
+        return (data, int(self.listen))
+    
+
+    def _process_feature(self, msg) -> None:
+        c_time = self.current_time
+        stacked_features = None
+        for feature in self.features:
+            feature_output, _ = feature(())
+
+
 
     def run(self):
         self.start_listening()
@@ -133,11 +178,7 @@ class Buffer(object):
 
     start : float
         The starting time of the buffer
-
-
-
     """
-
     polling_period: float
     frame: List[Tuple[mido.Message, float]]
     start: Optional[float]
@@ -178,26 +219,26 @@ class Buffer(object):
         return str(self.frame)
 
 
-class FramedMidiInputThread:
+class FramedMidiStream(MidiStream):
     def __init__(
         self,
         port,
         queue,
         polling_period=POLLING_PERIOD,
         init_time=None,
-        pipeline=None,
+        features=None,
         return_midi_messages=False,
         mediator=None,
     ):
-        super().__init__(
+        MidiStream.__init__(
             port=port,
             queue=queue,
             init_time=init_time,
-            pipeline=pipeline,
+            features=features,
             return_midi_messages=return_midi_messages,
             mediator=mediator,
         )
-        self.polling_period = polling_period
+        self.polling_period=polling_period
 
     def run(self):
         """
@@ -209,8 +250,7 @@ class FramedMidiInputThread:
         self.start_listening()
         frame = Buffer(self.polling_period)
         frame.start = self.current_time
-        # TODO: Adapt from midi_online to allow for variable polling
-        # periods?
+
         st = self.polling_period * 0.5
         while self.listen:
             time.sleep(st)
@@ -242,39 +282,16 @@ class FramedMidiInputThread:
                     frame.reset(c_time)
 
 
-def create_midi_stream(
-    port,
-    polling_period,
-    pipeline,
-    return_midi_messages=False,
-    thread=False,
-    mediator=None,
-):
+
+
+class MockingMidiStream(MidiStream):
     """
-    Helper to create a FramedMidiInputProcess and its respective pipe.
     """
+    pass
 
-    if thread:
-        p_output = None
-        p_input = RECVQueue()
-        mt = FramedMidiInputThread(
-            port=port,
-            queue=p_input,
-            polling_period=polling_period,
-            pipeline=pipeline,
-            return_midi_messages=return_midi_messages,
-            mediator=mediator,
-        )
-    else:
 
-        p_output, p_input = Pipe()
-        mt = FramedMidiInputProcess(
-            port=port,
-            pipe=p_output,
-            polling_period=polling_period,
-            pipeline=pipeline,
-            return_midi_messages=return_midi_messages,
-            mediator=mediator,
-        )
+class MockingFramedMidiStream(MidiStream):
+    """
+    """
+    pass
 
-    return p_output, p_input, mt
