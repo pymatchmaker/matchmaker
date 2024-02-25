@@ -23,7 +23,7 @@ EXAMPLE_MATCH = pkg_resources.resource_filename(
     "assets/mozart_k265_var1.match",
 )
 
-EXAMPLE_MATCH = pkg_resources.resource_filename(
+EXAMPLE_AUDIO = pkg_resources.resource_filename(
     "matchmaker",
     "assets/mozart_k265_var1.mp3",
 )
