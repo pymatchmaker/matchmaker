@@ -45,7 +45,6 @@ SCIPY_DISTANCES = [
 
 
 class TestOnlineTimeWarpingArzt(unittest.TestCase):
-
     def test_local_cost_fun(self):
         """
         Test initialization of the class
@@ -61,7 +60,11 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             # alignments
             noise_scale=0.00,
             random_state=RNG,
+            dtype=np.float32,
         )
+
+        self.assertTrue(X.dtype == np.float32)
+        self.assertTrue(Y.dtype == np.float32)
 
         # Test raising error if local_cost_fun is invalid type
         self.assertRaises(
@@ -147,7 +150,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
 
             for i, obs in enumerate(Y):
                 current_position = oltw(obs)
-                # with some of the scipy metrics, we cannot 
+                # with some of the scipy metrics, we cannot
                 # ensure that the results will always
                 # be correct, so we only
                 # check if the output types are correct

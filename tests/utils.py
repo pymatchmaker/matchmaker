@@ -20,6 +20,7 @@ def make_blobs(
     cluster_std=1.0,
     center_box=(-10.0, 10.0),
     random_state: np.random.RandomState = RNG,
+    dtype=np.float32,
 ):
     """
     Generate isotropic Gaussian blobs for clustering.
@@ -137,7 +138,10 @@ def make_blobs(
             n_samples_per_center[i] += 1
 
     cum_sum_n_samples = np.cumsum(n_samples_per_center)
-    X = np.empty(shape=(sum(n_samples_per_center), n_features), dtype=np.float64)
+    X = np.empty(
+        shape=(sum(n_samples_per_center), n_features),
+        dtype=dtype,
+    )
     y = np.empty(shape=(sum(n_samples_per_center),), dtype=int)
 
     for i, (n, std) in enumerate(zip(n_samples_per_center, cluster_std)):
@@ -167,6 +171,7 @@ def generate_example_sequences(
     minreps: int = 1,
     noise_scale: float = 0.01,
     random_state: np.random.RandomState = RNG,
+    dtype=np.float32,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Generates example pairs of related sequences. Sequence X are samples of
@@ -204,7 +209,12 @@ def generate_example_sequences(
         in X and the second column represents the corresponding index in Y.
     """
 
-    X, _ = make_blobs(n_samples=lenX, centers=centers, n_features=n_features)
+    X, _ = make_blobs(
+        n_samples=lenX,
+        centers=centers,
+        n_features=n_features,
+        dtype=dtype,
+    )
     # Time stretching X! each element in sequence X is
     # repeated a random number of times
     # and then we add some noise to spice things up :)
@@ -220,6 +230,9 @@ def generate_example_sequences(
     # add some noise
     Y += noise_scale * random_state.randn(*Y.shape)
     ground_truth_path = np.column_stack((y_idxs, np.arange(len(Y))))
+
+    X = X.astype(dtype)
+    Y = Y.astype(dtype)
     return X, Y, ground_truth_path
 
 

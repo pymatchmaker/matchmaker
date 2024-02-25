@@ -16,7 +16,10 @@ from matchmaker.utils import (
     distances,
 )
 from matchmaker.utils.distances import Metric, vdist
-from matchmaker.utils.misc import MatchmakerInvalidOptionError, MatchmakerInvalidParameterTypeError
+from matchmaker.utils.misc import (
+    MatchmakerInvalidOptionError,
+    MatchmakerInvalidParameterTypeError,
+)
 
 DEFAULT_LOCAL_COST: str = "Manhattan"
 WINDOW_SIZE: int = 100
@@ -72,12 +75,12 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         List of the positions for each input.
     """
 
-    local_cost_fun: Callable[[NDArray[np.float64]], NDArray[np.float64]]
-    vdist: Callable[[NDArray[np.float64]], NDArray[np.float64]]
+    local_cost_fun: Callable[[NDArray[np.float32]], NDArray[np.float32]]
+    vdist: Callable[[NDArray[np.float32]], NDArray[np.float32]]
 
     def __init__(
         self,
-        reference_features: NDArray[np.float64],
+        reference_features: NDArray[np.float32],
         window_size: int = WINDOW_SIZE,
         step_size: int = STEP_SIZE,
         local_cost_fun: Union[
@@ -90,13 +93,13 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
     ) -> None:
         super().__init__(reference_features=reference_features)
 
-        self.input_features: List[NDArray[np.float64]] = []
+        self.input_features: List[NDArray[np.float32]] = []
 
         if not (isinstance(local_cost_fun, (str, tuple)) or callable(local_cost_fun)):
             raise MatchmakerInvalidParameterTypeError(
                 parameter_name="local_cost_fun",
                 required_parameter_type=(str, tuple, Callable),
-                actual_parameter_type=type(local_cost_fun)
+                actual_parameter_type=type(local_cost_fun),
             )
 
         # Set local cost function
@@ -134,7 +137,9 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             self.vdist = vdist
         else:
             # TODO: Speed this up somehow instead of list comprehension
-            self.vdist = lambda X, y, lcf: np.array([lcf(x, y) for x in X])
+            self.vdist = lambda X, y, lcf: np.array([lcf(x, y) for x in X]).astype(
+                np.float32
+            )
 
         self.N_ref: int = self.reference_features.shape[0]
         self.window_size: int = window_size
@@ -143,15 +148,15 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.current_position: int = current_position
         self.positions: List[int] = []
         self.warping_path: List = []
-        self.global_cost_matrix: NDArray[np.float64] = (
+        self.global_cost_matrix: NDArray[np.float32] = (
             np.ones((reference_features.shape[0] + 1, 2)) * np.infty
-        )
+        ).astype(np.float32)
         self.input_index: int = 0
         self.go_backwards: bool = False
         self.update_window_index: bool = False
         self.restart: bool = False
 
-    def __call__(self, input: NDArray[np.float64]) -> int:
+    def __call__(self, input: NDArray[np.float32]) -> int:
         self.step(input)
         return self.current_position
 
@@ -167,7 +172,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
     def window_index(self) -> int:
         return self.current_position
 
-    def step(self, input_features: NDArray[np.float64]) -> None:
+    def step(self, input_features: NDArray[np.float32]) -> None:
         """
         Update the current position and the warping path.
         """

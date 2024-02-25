@@ -17,12 +17,12 @@ from libc.math cimport INFINITY
 @cython.wraparound(False)
 @cython.cdivision(True)
 def oltw_arzt_loop(
-    double[:,:] global_cost_matrix, 
-    double[:] window_cost, 
+    float[:,:] global_cost_matrix, 
+    float[:] window_cost, 
     int window_start,
     int window_end, 
     int input_index, 
-    double min_costs, 
+    float min_costs, 
     int min_index
 ):
     """
@@ -42,7 +42,7 @@ def oltw_arzt_loop(
         End index of window.
     input_index: int
         Current input index.
-    min_costs: double
+    min_costs: float
         Minimum costs of current window.
     min_index: int
         Index of minimum costs of current window.
@@ -53,10 +53,10 @@ def oltw_arzt_loop(
         Updated Global cost matrix.
     min_index: int
         Updated index of minimum costs of current window.
-    min_costs: double
+    min_costs: float
         Minimum costs of current window.
     """
-    cdef double dist1, dist2, dist3, local_dist, norm_cost
+    cdef float dist1, dist2, dist3, local_dist, norm_cost
     cdef int idx = 0, score_index = window_start
     cdef Py_ssize_t k, wk = window_cost.shape[0]
     cdef Py_ssize_t N = global_cost_matrix.shape[0]
@@ -100,7 +100,7 @@ def oltw_arzt_loop(
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef update_cost_matrix(double[:, :] global_cost_matrix, Py_ssize_t N):
+cdef update_cost_matrix(float[:, :] global_cost_matrix, Py_ssize_t N):
     """
     Update the cost matrix by shifting the first column and set the second column to infinity.
     
@@ -118,7 +118,7 @@ cdef update_cost_matrix(double[:, :] global_cost_matrix, Py_ssize_t N):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef sum_in_place(double[:] x, double out):
+cdef sum_in_place(float[:] x, float out):
     """
     Sum of array elements without return.
     """
@@ -129,11 +129,11 @@ cdef sum_in_place(double[:] x, double out):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cdef double cy_sum(double[:] x):
+cdef float cy_sum(float[:] x):
     """
     Sum of array elements.
     """
-    cdef double out = 0
+    cdef float out = 0
     cdef Py_ssize_t i, n = x.shape[0]
     for i in range(n):
         out = out + x[i]
@@ -142,9 +142,9 @@ cdef double cy_sum(double[:] x):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-cpdef double[:,:] reset_cost_matrix(
-        double[:, :] global_cost_matrix,
-        double[:] window_cost,
+cpdef float[:,:] reset_cost_matrix(
+        float[:, :] global_cost_matrix,
+        float[:] window_cost,
         int score_index,
         int N
 ):

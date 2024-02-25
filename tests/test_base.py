@@ -14,7 +14,6 @@ RNG = np.random.RandomState(1984)
 
 
 class TestOnlineAlignment(unittest.TestCase):
-
     def test_raise_not_implemented(self):
 
         X, Y, path = generate_example_sequences(

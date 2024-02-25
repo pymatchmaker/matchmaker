@@ -15,24 +15,24 @@ cdef class Metric:
     """
     Base class for defining a metric in Cython
     """
-    def __call__(self, double[:] X, double[:] Y):
+    def __call__(self, float[:] X, float[:] Y):
         return self.distance(X, Y)
-    cdef double distance(self, double[:] X, double[:] Y) except? 0.0:
+    cdef float distance(self, float[:] X, float[:] Y) except? 0.0:
         raise NotImplementedError()
 
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def cdist(double[:, :]  X, double[:, :] Y, Metric local_distance):
+def cdist(float[:, :]  X, float[:, :] Y, Metric local_distance):
     """
     Pairwise distance between the elements of two arrays
     
     Parameters
     ----------
-    X : double np.ndarray
+    X : float np.ndarray
         2D array with shape (M, L), where M is the number of
         L-dimensional elements in X.
-    Y : double np.ndarray
+    Y : float np.ndarray
         2D array with shapes (N, L), where N is the number of
         L-dimensional elements in Y.
     local_distance : callable
@@ -50,7 +50,7 @@ def cdist(double[:, :]  X, double[:, :] Y, Metric local_distance):
     # Initialize variables
     cdef Py_ssize_t M = X.shape[0]
     cdef Py_ssize_t N = Y.shape[0]
-    cdef double[:, :] D = np.empty((M, N), dtype=float)
+    cdef float[:, :] D = np.empty((M, N), dtype=np.float32)
     cdef Py_ssize_t i, j
 
     # Loop for computing the distance between each element
@@ -63,10 +63,10 @@ def cdist(double[:, :]  X, double[:, :] Y, Metric local_distance):
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
-def vdist(double[:, :]  X, double[:] Y, Metric local_distance):
+def vdist(float[:, :]  X, float[:] Y, Metric local_distance):
     # Initialize variables
     cdef Py_ssize_t M = X.shape[0]
-    cdef double[:] D = np.empty(M, dtype=float)
+    cdef float[:] D = np.empty(M, dtype=np.float32)
     cdef Py_ssize_t i
 
     # Loop for computing the distance between each element
@@ -78,24 +78,24 @@ def vdist(double[:, :]  X, double[:] Y, Metric local_distance):
 @cython.boundscheck(False)
 @cython.boundscheck(False)
 cdef class Euclidean(Metric):
-    cdef double distance(self, double[:] X, double[:] Y) except? 0.0:
+    cdef float distance(self, float[:] X, float[:] Y) except? 0.0:
         """
         Euclidean Distance between vectors
 
         Parameters
         ----------
-        X : double np.ndarray
+        X : float np.ndarray
             An M dimensional vector
-        Y : double np.ndarray
+        Y : float np.ndarray
             An M dimensional vector
 
         Returns
         -------
-        dist : double
+        dist : float
             The distance between X and Y
         """
         cdef Py_ssize_t M = X.shape[0]
-        cdef double diff, dist
+        cdef float diff, dist
         cdef Py_ssize_t i
 
         dist = 0.0
@@ -109,26 +109,26 @@ cdef class Euclidean(Metric):
 @cython.wraparound(False)
 @cython.cdivision(True)
 cdef class Cosine(Metric):
-    cdef double distance(self, double[:] X, double[:] Y) except? 0.0:
+    cdef float distance(self, float[:] X, float[:] Y) except? 0.0:
         """
         Cosine Distance between vectors
 
         Parameters
         ----------
-        X : double np.ndarray
+        X : float np.ndarray
             An M dimensional vector
-        Y : double np.ndarray
+        Y : float np.ndarray
             An M dimensional vector
 
         Returns
         -------
-        dist : double
+        dist : float
             The distance between X and Y
         """
         cdef Py_ssize_t M = X.shape[0]
-        cdef double dot = 0, norm_x = 0, norm_y = 0
-        cdef double cos, dist
-        cdef double eps = 1e-10
+        cdef float dot = 0, norm_x = 0, norm_y = 0
+        cdef float cos, dist
+        cdef float eps = 1e-10
         cdef Py_ssize_t i
 
         for i in range(M):
@@ -146,25 +146,25 @@ cdef class Cosine(Metric):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cdef class L1(Metric):
-    cdef double distance(self, double[:] X, double[:] Y) except? 0.0:
+    cdef float distance(self, float[:] X, float[:] Y) except? 0.0:
         """
         L1- norm between vectors
 
         Parameters
         ----------
-        X : double np.ndarray
+        X : float np.ndarray
             An M dimensional vector
-        Y : double np.ndarray
+        Y : float np.ndarray
             An M dimensional vector
 
         Returns
         -------
-        dist : double
+        dist : float
             The distance between X and Y
         """
         cdef Py_ssize_t M = X.shape[0]
-        cdef double diff
-        cdef double dist = 0
+        cdef float diff
+        cdef float dist = 0
         cdef Py_ssize_t i
 
         for i in range(M):
@@ -179,19 +179,19 @@ Manhattan = L1
 @cython.wraparound(False)
 @cython.cdivision(True)
 cdef class Lp(Metric):
-    cdef double p
-    cdef double pinv
-    def __init__(self, double p):
+    cdef float p
+    cdef float pinv
+    def __init__(self, float p):
         self.p = p
         self.pinv = 1. / (p + 1e-10)
 
-    cdef double distance(self, double[:] X, double[:] Y) except? 0.0:
+    cdef float distance(self, float[:] X, float[:] Y) except? 0.0:
         """
         Lp - metric
         """
         cdef Py_ssize_t M = X.shape[0]
-        cdef double dist = 0.0
-        cdef double diff
+        cdef float dist = 0.0
+        cdef float diff
         cdef Py_ssize_t i
 
         for i in range(M):
@@ -203,24 +203,24 @@ cdef class Lp(Metric):
 @cython.boundscheck(False)
 @cython.wraparound(False)
 cdef class Linf(Metric):
-    cdef double distance(self, double[:] X, double[:] Y) except? 0.0:
+    cdef float distance(self, float[:] X, float[:] Y) except? 0.0:
         """
         L_inf- norm between vectors
 
         Parameters
         ----------
-        X : double np.ndarray
+        X : float np.ndarray
             An M dimensional vector
-        Y : double np.ndarray
+        Y : float np.ndarray
             An M dimensional vector
 
         Returns
         -------
-        dist : double
+        dist : float
             The distance between X and Y
         """
         cdef Py_ssize_t M = X.shape[0]
-        cdef double[:] diff = np.zeros(M, dtype=float)
+        cdef float[:] diff = np.zeros(M, dtype=np.float32)
         cdef Py_ssize_t i
 
         for i in range(M):
