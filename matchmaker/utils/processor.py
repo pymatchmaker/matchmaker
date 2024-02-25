@@ -73,7 +73,7 @@ class ProcessorWrapper(Processor):
 
     def __init__(self, func: Callable[[Any], Any]) -> None:
         super().__init__()
-        self.callable = func
+        self.func = func
 
     def __call__(self, data: Any, **kwargs: Any) -> Tuple[Any, Dict[str, Any]]:
         output = self.func(data, **kwargs)

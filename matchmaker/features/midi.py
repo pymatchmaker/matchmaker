@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from mido import Message
-from utils.processor import Processor
+from matchmaker.utils.processor import Processor
 
 # Type hint for Input MIDI frame. A frame is a tuple
 # consisting of a list with the MIDI messages corresponding

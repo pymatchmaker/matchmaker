@@ -3,11 +3,13 @@
 """
 Utilities for tests
 """
-
+import threading
 import numbers
-from typing import Iterable, Optional, Tuple
+from typing import Iterable, Optional, Tuple, List
 
+import mido
 import numpy as np
+import time
 
 # Random number generator
 RNG = np.random.RandomState(1984)
@@ -254,3 +256,65 @@ if __name__ == "__main__":
         noise_scale=noise_scale,
         random_state=RNG,
     )
+
+
+class DummyMidiPlayer(threading.Thread):
+    def __init__(self, port: mido.ports.BaseOutput, filename: str) -> None:
+        threading.Thread.__init__(self)
+        self.port = port
+        self.mf = mido.MidiFile(filename)
+        self.is_playing = False
+        
+
+    def run(self) -> None:
+        self.is_playing = True
+        for msg in self.mf.play():
+            self.port.send(msg)
+
+        # close port
+        self.is_playing = False
+        self.port.close()
+
+
+
+# class DummyMidiPlayer(threading.Thread):
+#     """
+#     A dummy MIDI player
+#     """
+#     def __init__(
+#         self,
+#         port: mido.ports.BaseOutput,
+#         messages: List[Tuple[mido.Message, float]],
+#     ) -> None:
+
+#         threading.Thread.__init__(self)
+#         self.port = port
+#         self.messages = messages
+#         # sort messages by time
+#         self.messages.sort(key=lambda x: x[1])
+
+#     def run(self):
+
+#         start_time = time.time()
+
+#         n_messages = len(self.messages)
+
+#         counter = 0
+
+#         while counter < n_messages:
+
+#             c_time = time.time() - start_time
+#             if c_time >= self.messages[counter][1]:
+#                 self.port.send(self.messages[counter][0])
+#                 # print(self.messages[counter])
+#                 counter += 1
+
+#         # The while loop is finished, all messages have been sent
+#         self.cleanup_after_run()
+
+#     def cleanup_after_run(self):
+#         print("Finished")
+#         # self.port.close()
+
+        
+

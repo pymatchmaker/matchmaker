@@ -3,3 +3,6 @@
 """
 Top of the features module
 """
+
+from . import midi
+from . import audio

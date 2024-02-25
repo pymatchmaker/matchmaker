@@ -18,7 +18,7 @@ import mido
 from mido.ports import BaseInput as MidiInputPort
 
 from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.processor import Stream, DummySequentialOutputProcessor
+from matchmaker.utils.processor import Stream, ProcessorWrapper
 
 # Default polling period (in seconds)
 POLLING_PERIOD = 0.01
@@ -71,9 +71,9 @@ class MidiStream(threading.Thread, Stream):
         mediator=None,
     ):
         if features is None:
-            features = [DummySequentialOutputProcessor()]
+            features = [ProcessorWrapper(lambda x: x)]
         threading.Thread.__init__(self)
-        Stream.__init__(features=features)
+        Stream.__init__(self, features=features)
         self.midi_in = port
         self.init_time = init_time
         self.listen = False
@@ -88,24 +88,24 @@ class MidiStream(threading.Thread, Stream):
         ----------
         data : MIDIFrame
         """
-        self._process_feature(self, data)
-
+        self._process_feature(data)
 
         return (data, int(self.listen))
     
 
-    def _process_feature(self, msg) -> None:
+    def _process_feature(self, msg: mido.Message, *args, **kwargs) -> None:
         c_time = self.current_time
-        stacked_features = None
-        for feature in self.features:
-            feature_output, _ = feature(())
 
-
+        # TODO: Make use an OutputProcessor
+        output = [proc(([(msg, c_time)], c_time))[0] for proc in self.features]
+        if self.return_midi_messages:
+            self.queue.put(((msg, c_time), output))
+        else:
+            self.queue.put(output)
 
     def run(self):
         self.start_listening()
         while self.listen:
-
             msg = self.midi_in.poll()
             if msg is not None:
                 if (
@@ -114,14 +114,7 @@ class MidiStream(threading.Thread, Stream):
                     and self.mediator.filter_check(msg.note)
                 ):
                     continue
-
-                c_time = self.current_time
-                # To have the same output as other MidiThreads
-                output = self.pipeline([(msg, c_time)], c_time)
-                if self.return_midi_messages:
-                    self.queue.put(((msg, c_time), output))
-                else:
-                    self.queue.put(output)
+                self._process_frame(data=msg)
 
     @property
     def current_time(self):
@@ -135,7 +128,7 @@ class MidiStream(threading.Thread, Stream):
         Start listening to midi input (open input port and
         get starting time)
         """
-
+        print("* Start listening to MIDI stream....")
         self.listen = True
         if self.init_time is None:
             self.init_time = time.time()
@@ -144,15 +137,11 @@ class MidiStream(threading.Thread, Stream):
         """
         Stop listening to MIDI input
         """
+        print("* Stop listening to MIDI stream....")
         # break while loop in self.run
         self.listen = False
         # reset init time
         self.init_time = None
-
-        # self.terminate()
-
-        # Join thread
-        # self.join()
 
 
 class Buffer(object):
@@ -255,18 +244,14 @@ class FramedMidiStream(MidiStream):
         while self.listen:
             time.sleep(st)
             if self.listen:
-                # added if to check once again after sleep
-                # TODO verify if still correct
                 c_time = self.current_time
                 msg = self.midi_in.poll()
                 if msg is not None:
-                    # print("Received msg:", msg)
                     if (
                         self.mediator is not None
                         and (msg.type == "note_on" and msg.velocity > 0)
                         and self.mediator.filter_check(msg.note)
                     ):
-                        # print('filtered', msg)
                         continue
                     if msg.type in ["note_on", "note_off"]:
                         frame.append(msg, self.current_time)
