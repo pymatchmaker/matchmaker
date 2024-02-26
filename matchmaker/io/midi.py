@@ -49,7 +49,7 @@ class MidiStream(threading.Thread, Stream):
         A Mediator instance to filter input MIDI.
         This is useful for certain older instruments,
         like the Bösendorfer CEUS, which do not distinguish
-        between notes played by a human, and notes sent 
+        between notes played by a human, and notes sent
         from a different process  (e.g., an accompaniment system)
     """
 
@@ -91,12 +91,11 @@ class MidiStream(threading.Thread, Stream):
         self._process_feature(data)
 
         return (data, int(self.listen))
-    
 
     def _process_feature(self, msg: mido.Message, *args, **kwargs) -> None:
         c_time = self.current_time
 
-        # TODO: Make use an OutputProcessor
+        # TODO: Use an OutputProcessor
         output = [proc(([(msg, c_time)], c_time))[0] for proc in self.features]
         if self.return_midi_messages:
             self.queue.put(((msg, c_time), output))
@@ -168,6 +167,7 @@ class Buffer(object):
     start : float
         The starting time of the buffer
     """
+
     polling_period: float
     frame: List[Tuple[mido.Message, float]]
     start: Optional[float]
@@ -227,7 +227,7 @@ class FramedMidiStream(MidiStream):
             return_midi_messages=return_midi_messages,
             mediator=mediator,
         )
-        self.polling_period=polling_period
+        self.polling_period = polling_period
 
     def run(self):
         """
@@ -267,16 +267,13 @@ class FramedMidiStream(MidiStream):
                     frame.reset(c_time)
 
 
-
-
 class MockingMidiStream(MidiStream):
-    """
-    """
+    """ """
+
     pass
 
 
 class MockingFramedMidiStream(MidiStream):
-    """
-    """
-    pass
+    """ """
 
+    pass

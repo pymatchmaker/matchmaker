@@ -274,47 +274,5 @@ class DummyMidiPlayer(threading.Thread):
         # close port
         self.is_playing = False
         self.port.close()
-
-
-
-# class DummyMidiPlayer(threading.Thread):
-#     """
-#     A dummy MIDI player
-#     """
-#     def __init__(
-#         self,
-#         port: mido.ports.BaseOutput,
-#         messages: List[Tuple[mido.Message, float]],
-#     ) -> None:
-
-#         threading.Thread.__init__(self)
-#         self.port = port
-#         self.messages = messages
-#         # sort messages by time
-#         self.messages.sort(key=lambda x: x[1])
-
-#     def run(self):
-
-#         start_time = time.time()
-
-#         n_messages = len(self.messages)
-
-#         counter = 0
-
-#         while counter < n_messages:
-
-#             c_time = time.time() - start_time
-#             if c_time >= self.messages[counter][1]:
-#                 self.port.send(self.messages[counter][0])
-#                 # print(self.messages[counter])
-#                 counter += 1
-
-#         # The while loop is finished, all messages have been sent
-#         self.cleanup_after_run()
-
-#     def cleanup_after_run(self):
-#         print("Finished")
-#         # self.port.close()
-
         
 
