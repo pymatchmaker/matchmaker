@@ -19,6 +19,7 @@ from mido.ports import BaseInput as MidiInputPort
 
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import Stream, ProcessorWrapper
+from matchmaker.io.mediator import ThreadMediator
 
 # Default polling period (in seconds)
 POLLING_PERIOD = 0.01
@@ -60,15 +61,16 @@ class MidiStream(threading.Thread, Stream):
     features: List[Callable]
     return_midi_messages: bool
     first_message: bool
+    mediator: ThreadMediator
 
     def __init__(
         self,
         port: MidiInputPort,
         queue: RECVQueue,
         init_time: Optional[float] = None,
-        features=None,
-        return_midi_messages=False,
-        mediator=None,
+        features: Optional[List[Callable]]=None,
+        return_midi_messages: bool=False,
+        mediator: Optional[ThreadMediator]=None,
     ):
         if features is None:
             features = [ProcessorWrapper(lambda x: x)]
