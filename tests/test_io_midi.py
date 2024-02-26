@@ -11,7 +11,7 @@ import numpy as np
 import time
 
 
-from matchmaker.io.midi import MidiStream
+from matchmaker.io.midi import MidiStream, FramedMidiStream
 
 from matchmaker.utils.misc import RECVQueue
 
@@ -20,8 +20,6 @@ from matchmaker.features.midi import (
     PianoRollProcessor,
     CumSumPianoRollProcessor,
 )
-
-from typing import Optional
 
 RNG = np.random.RandomState(1984)
 
@@ -70,13 +68,13 @@ def setup_midi_player():
     )
     # close and delete tmp midi file
     tmp_file.close()
-    return port, queue, midi_player
+    return port, queue, midi_player, note_array
 
 
 class TestMidiStream(unittest.TestCase):
 
     def test_stream(self):
-        port, queue, midi_player = setup_midi_player()
+        port, queue, midi_player, _ = setup_midi_player()
         features = [
             PitchIOIProcessor(),
             PianoRollProcessor(),
@@ -95,10 +93,11 @@ class TestMidiStream(unittest.TestCase):
             output = queue.recv()
             self.assertTrue(len(output) == len(features))
         midi_stream.stop_listening()
+        midi_player.join()
         port.close()
 
     def test_stream_with_midi_messages(self):
-        port, queue, midi_player = setup_midi_player()
+        port, queue, midi_player, _ = setup_midi_player()
         features = [PitchIOIProcessor()]
         midi_stream = MidiStream(
             port=port,
@@ -119,4 +118,45 @@ class TestMidiStream(unittest.TestCase):
                 self.assertTrue(msg.note == int(output[0][0][0]))
             self.assertTrue(len(output) == len(features))
         midi_stream.stop_listening()
+        midi_stream.join()
+        midi_player.join()
+        port.close()
+
+
+class TestFramedMidiStream(unittest.TestCase):
+
+    def test_stream(self):
+        port, queue, midi_player, note_array = setup_midi_player()
+        features = [
+            PitchIOIProcessor(),
+            PianoRollProcessor(),
+            CumSumPianoRollProcessor(),
+        ]
+        polling_period = 0.05
+        midi_stream = FramedMidiStream(
+            port=port,
+            queue=queue,
+            features=features,
+            polling_period=polling_period,
+        )
+        midi_stream.start()
+
+        midi_player.start()
+
+        perf_length = (note_array["onset_sec"] + note_array["duration_sec"]).max() - note_array["onset_sec"].min()
+
+        expected_frames = np.ceil(perf_length / polling_period)
+        n_outputs = 0
+        while midi_player.is_playing:
+            output = queue.recv()
+            self.assertTrue(len(output) == len(features))
+            n_outputs += 1
+
+        # Test whether the number of expected frames is within
+        # 2 frames of the number of expected frames (due to rounding)
+        # errors).
+        self.assertTrue(abs(n_outputs - expected_frames) <= 2)
+        midi_stream.stop_listening()
+        midi_stream.join()
+        midi_player.join()
         port.close()

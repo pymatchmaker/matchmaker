@@ -68,9 +68,9 @@ class MidiStream(threading.Thread, Stream):
         port: MidiInputPort,
         queue: RECVQueue,
         init_time: Optional[float] = None,
-        features: Optional[List[Callable]]=None,
-        return_midi_messages: bool=False,
-        mediator: Optional[ThreadMediator]=None,
+        features: Optional[List[Callable]] = None,
+        return_midi_messages: bool = False,
+        mediator: Optional[ThreadMediator] = None,
     ):
         if features is None:
             features = [ProcessorWrapper(lambda x: x)]
@@ -213,15 +213,16 @@ class Buffer(object):
 class FramedMidiStream(MidiStream):
     def __init__(
         self,
-        port,
-        queue,
-        polling_period=POLLING_PERIOD,
-        init_time=None,
-        features=None,
-        return_midi_messages=False,
-        mediator=None,
+        port: MidiInputPort,
+        queue: RECVQueue,
+        polling_period: float = POLLING_PERIOD,
+        init_time: Optional[float] = None,
+        features: Optional[List[Callable]] = None,
+        return_midi_messages: bool = False,
+        mediator: Optional[ThreadMediator] = None,
     ):
         MidiStream.__init__(
+            self,
             port=port,
             queue=queue,
             init_time=init_time,
@@ -231,20 +232,31 @@ class FramedMidiStream(MidiStream):
         )
         self.polling_period = polling_period
 
+    def _process_feature(
+        self,
+        data: Buffer,
+        *args,
+        **kwargs,
+    ) -> None:
+        # the data is the Buffer instance
+        output = [proc((data.frame[:], data.time))[0] for proc in self.features]
+        # output = self.pipeline((frame.frame[:], frame.time))
+        if self.return_midi_messages:
+            self.queue.put((data.frame, output))
+        else:
+            self.queue.put(output)
+
     def run(self):
         """
-        TODO
-        ----
-        * Fix Error with c_time when stopping the thread
-        * Adapt sleep time from midi_online
         """
         self.start_listening()
         frame = Buffer(self.polling_period)
         frame.start = self.current_time
-
-        st = self.polling_period * 0.5
+        
+        # TODO: check the effect of smaller st
+        st = self.polling_period * 0.01
         while self.listen:
-            time.sleep(st)
+            # time.sleep(st)
             if self.listen:
                 c_time = self.current_time
                 msg = self.midi_in.poll()
@@ -260,12 +272,8 @@ class FramedMidiStream(MidiStream):
                         if not self.first_msg:
                             self.first_msg = True
                 if c_time >= frame.end and self.first_msg:
-                    output = self.pipeline((frame.frame[:], frame.time))
-                    if self.return_midi_messages:
-                        self.queue.put((frame.frame, output))
-                    else:
-                        self.queue.put(output)
-                    # self.queue.put(output)
+
+                    self._process_feature(data=frame)
                     frame.reset(c_time)
 
 
