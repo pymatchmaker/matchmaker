@@ -254,7 +254,7 @@ class FramedMidiStream(MidiStream):
         frame.start = self.current_time
         
         # TODO: check the effect of smaller st
-        st = self.polling_period * 0.01
+        # st = self.polling_period * 0.01
         while self.listen:
             # time.sleep(st)
             if self.listen:

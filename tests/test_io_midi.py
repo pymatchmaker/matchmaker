@@ -32,6 +32,23 @@ from tempfile import NamedTemporaryFile
 
 
 def setup_midi_player():
+    """
+    Setup dummy MIDI player for testing
+
+    Returns
+    -------
+    port : mido.ports.BaseInput
+        Virtual port for testing
+
+    queue: RECVQueue
+        Queue for getting the processed data
+    
+    midi_player : DummyMidiPlayer
+        Midi player thread for testing
+    
+    note_array : np.ndarray
+        Note array with performance information.
+    """
     # Open virtual MIDI port
     # the input uses the "created" virtual
     # port
@@ -57,11 +74,13 @@ def setup_midi_player():
     note_array["duration_sec"] = 2 * RNG.rand(n_notes)
     note_array["velocity"] = RNG.randint(low=0, high=127, size=n_notes)
 
+    # Generate temporary midi file
     tmp_file = NamedTemporaryFile(delete=True)
     save_performance_midi(
         performance_data=PerformedPart.from_note_array(note_array),
         out=tmp_file.name,
     )
+    # Create DummyMidiPlayer instance
     midi_player = DummyMidiPlayer(
         port=outport,
         filename=tmp_file.name,
@@ -72,8 +91,18 @@ def setup_midi_player():
 
 
 class TestMidiStream(unittest.TestCase):
+    """
+    This class tests the MidiStream class
 
+    TODO
+    ----
+    * Test mediator
+    """
     def test_stream(self):
+        """
+        Test running an instance of a MidiStream class
+        (i.e., getting features from a live input)
+        """
         port, queue, midi_player, _ = setup_midi_player()
         features = [
             PitchIOIProcessor(),
@@ -97,6 +126,12 @@ class TestMidiStream(unittest.TestCase):
         port.close()
 
     def test_stream_with_midi_messages(self):
+        """
+        Test running an instance of a MidiStream class
+        (i.e., getting features from a live input). This
+        tests gets both computed features and input midi
+        messages.
+        """
         port, queue, midi_player, _ = setup_midi_player()
         features = [PitchIOIProcessor()]
         midi_stream = MidiStream(
@@ -124,7 +159,14 @@ class TestMidiStream(unittest.TestCase):
 
 
 class TestFramedMidiStream(unittest.TestCase):
+    """
+    This class tests the FramedMidiStream class
 
+    TODO
+    ----
+    * Test getting midi messages
+    * Test mediator
+    """
     def test_stream(self):
         port, queue, midi_player, note_array = setup_midi_player()
         features = [
