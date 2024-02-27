@@ -13,7 +13,8 @@ from numpy.typing import NDArray
 
 def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
     """
-    This method creates MIDI messages
+    Get a list of MIDI messages and message times from
+    a MIDI file.
 
     The method ignores Meta messages, since they
     are not "streamed" live (see documentation for
@@ -28,7 +29,7 @@ def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
     -------
     message_array : np.ndarray of mido.Message
         An array containing MIDI messages
-    
+
     message_times : np.ndarray
         An array containing the times of the messages
         in seconds.
@@ -96,3 +97,86 @@ def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
     message_times_array = message_times_array[sort_idx]
 
     return message_array, message_times_array
+
+
+def midi_messages_to_framed_midi(
+    midi_msgs: NDArray,
+    msg_times: NDArray,
+    polling_period: float,
+    # features: List[Callable],
+) -> Tuple[NDArray, NDArray]:
+    """
+    Convert a list of MIDI messages to a framed MIDI representation
+    Parameters
+    ----------
+    midi_msgs: list of mido.Message
+        List of MIDI messages.
+
+    msg_times: list of float
+        List of times (in seconds) at which the MIDI messages were received.
+
+    polling_period:
+        Polling period (in seconds) used to convert the MIDI messages.
+
+    Returns
+    -------
+    frames_array: np.ndarray
+        An array of MIDI frames.
+    frame_times:
+    """
+    n_frames = int(np.ceil(msg_times.max() / polling_period))
+    frame_times = (np.arange(n_frames) + 0.5) * polling_period
+
+    frames = []
+
+    for cursor in range(n_frames):
+
+        if cursor == 0:
+            # do not leave messages starting at 0 behind!
+            idxs = np.where(msg_times <= polling_period)[0]
+        else:
+            idxs = np.where(
+                np.logical_and(
+                    msg_times > cursor * polling_period,
+                    msg_times <= (cursor + 1) * polling_period,
+                )
+            )[0]
+
+        frames.append(
+            list(
+                zip(
+                    midi_msgs[idxs],
+                    msg_times[idxs],
+                )
+            )
+        )
+
+    frames_array = np.array(
+        frames,
+        dtype=object,
+    )
+
+    return frames_array, frame_times
+
+
+def framed_midi_messages_from_midi(
+    filename: str, polling_period: float
+) -> Tuple[NDArray, NDArray]:
+    """
+    Get a list of framed MIDI messages and frame times from
+    a MIDI file.
+
+    This is a convenience method
+    """
+
+    midi_messages, message_times = midi_messages_from_midi(
+        filename=filename,
+    )
+
+    frames_array, frame_times = midi_messages_to_framed_midi(
+        midi_msgs=midi_messages,
+        msg_times=message_times,
+        polling_period=polling_period,
+    )
+
+    return frames_array, frame_times

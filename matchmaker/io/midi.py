@@ -342,57 +342,12 @@ class MockingMidiStream(MidiStream):
         # load file. Using partitura is more stable than
         # MIDO for handling potential tempo/time signature changes.
         perf = pt.load_performance_midi(self.file_path)
-        
+
 
     
 
 
-def midi_messages_to_framed_midi(
-    midi_msgs: List[mido.Message],
-    msg_times: List[float],
-    polling_period: float,
-    features: List[Callable],
-):
-    """
-    Convert a list of MIDI messages to a framed MIDI representation
-    Parameters
-    ----------
-    midi_msgs: list of mido.Message
-        List of MIDI messages
-    msg_times: list of float
-        List of times (in seconds) at which the MIDI messages were received
-    polling_period:
-        Polling period (in seconds) used to convert the MIDI messages
-    pipeline: function
-        Function to be applied to the MIDI messages before converting them to a MIDI frame.
 
-    Returns
-    -------
-    frames: list
-        List of MIDI frames.
-    """
-    n_frames = int(np.ceil(msg_times.max() / polling_period))
-    frame_times = (np.arange(n_frames) + 0.5) * polling_period
-
-    frames = []
-    for cursor in range(n_frames):
-
-        if cursor == 0:
-            # do not leave messages starting at 0 behind!
-            idxs = np.where(msg_times <= polling_period)[0]
-        else:
-            idxs = np.where(
-                np.logical_and(
-                    msg_times > cursor * polling_period,
-                    msg_times <= (cursor + 1) * polling_period,
-                )
-            )[0]
-
-        output = pipeline(
-            (list(zip(midi_msgs[idxs], msg_times[idxs])), frame_times[cursor])
-        )
-        frames.append(output)
-    return frames
 
 
 class MockingFramedMidiStream(MidiStream):
