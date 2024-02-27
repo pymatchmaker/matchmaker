@@ -8,8 +8,8 @@ from .audio import AudioStream, MockAudioStream
 from .midi import (
     MidiStream,
     FramedMidiStream,
-    MockingMidiStream,
-    MockingFramedMidiStream,
+    MockMidiStream,
+    MockFramedMidiStream,
 )
 
 __all__ = [
@@ -17,6 +17,6 @@ __all__ = [
     "MockingAudioStream",
     "MidiStream",
     "FramedMidiStream",
-    "MockingMidiStream",
-    "MockingFramedMidiStream",
+    "MockMidiStream",
+    "MockFramedMidiStream",
 ]

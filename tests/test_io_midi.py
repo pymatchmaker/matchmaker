@@ -13,8 +13,14 @@ from matchmaker.features.midi import (
     PianoRollProcessor,
     PitchIOIProcessor,
 )
-from matchmaker.io.midi import FramedMidiStream, MidiStream
+from matchmaker.io.midi import (
+    FramedMidiStream,
+    MidiStream,
+    MockMidiStream,
+    MockFramedMidiStream,
+)
 from matchmaker.utils.misc import RECVQueue
+from matchmaker import EXAMPLE_PERFORMANCE
 
 RNG = np.random.RandomState(1984)
 
@@ -160,8 +166,9 @@ class TestFramedMidiStream(unittest.TestCase):
 
     TODO
     ----
-    * Test getting midi messages
+    * Test return_midi_messages=True
     * Test mediator
+    * Test length and string of Buffer
     """
 
     def test_stream(self):
@@ -201,3 +208,65 @@ class TestFramedMidiStream(unittest.TestCase):
         midi_stream.join()
         midi_player.join()
         port.close()
+
+
+class TestMockMidiStream(unittest.TestCase):
+    def test_stream(self):
+        """
+        Test running an instance of a MidiStream class
+        (i.e., getting features from a live input)
+        """
+
+        queue = RECVQueue()
+        features = [
+            PitchIOIProcessor(),
+            PianoRollProcessor(),
+            CumSumPianoRollProcessor(),
+        ]
+        midi_stream = MockMidiStream(
+            file_path=EXAMPLE_PERFORMANCE,
+            queue=queue,
+            features=features,
+        )
+
+        mf = mido.MidiFile(EXAMPLE_PERFORMANCE)
+
+        valid_messages = [msg for msg in mf if not isinstance(msg, mido.MetaMessage)]
+
+        midi_stream.start()
+        midi_stream.join()
+        # get all outputs of the queue at once
+        outputs = list(queue.queue)
+        self.assertTrue(len(outputs) == len(valid_messages))
+
+        for output in outputs:
+            self.assertTrue(len(output) == len(features))
+
+
+class TestMockFramedMidiStream(unittest.TestCase):
+    def test_stream(self):
+        """
+        Test running an instance of a MidiStream class
+        (i.e., getting features from a live input)
+        """
+
+        queue = RECVQueue()
+        features = [
+            PitchIOIProcessor(),
+            PianoRollProcessor(),
+            CumSumPianoRollProcessor(),
+        ]
+        midi_stream = MockFramedMidiStream(
+            file_path=EXAMPLE_PERFORMANCE,
+            queue=queue,
+            features=features,
+        )
+
+        midi_stream.start()
+        midi_stream.join()
+        # get all outputs of the queue at once
+        outputs = list(queue.queue)
+        self.assertTrue(len(outputs) >= 0)
+
+        for output in outputs:
+            self.assertTrue(len(output) == len(features))

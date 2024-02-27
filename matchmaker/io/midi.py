@@ -21,6 +21,11 @@ from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import Stream, ProcessorWrapper
 from matchmaker.io.mediator import CeusMediator
 
+from matchmaker.utils.symbolic import (
+    midi_messages_from_midi,
+    framed_midi_messages_from_midi,
+)
+
 # Default polling period (in seconds)
 POLLING_PERIOD = 0.01
 
@@ -84,18 +89,22 @@ class MidiStream(threading.Thread, Stream):
         self.return_midi_messages = return_midi_messages
         self.mediator = mediator
 
-    def _process_frame(self, data, *args, **kwargs) -> Tuple[np.ndarray, int]:
+    def _process_frame(
+        self, data: mido.Message, c_time: float, *args, **kwargs
+    ) -> Tuple[Any, int]:
         """
         Parameters
         ----------
-        data : MIDIFrame
+        data : mido.Message
+            Input data to the frame
         """
-        self._process_feature(data)
+        self._process_feature(msg=data, c_time=c_time, *args, **kwargs)
 
         return (data, int(self.listen))
 
-    def _process_feature(self, msg: mido.Message, *args, **kwargs) -> None:
-        c_time = self.current_time
+    def _process_feature(
+        self, msg: mido.Message, *args, c_time: float, **kwargs
+    ) -> None:
 
         # TODO: Use an OutputProcessor
         output = [proc(([(msg, c_time)], c_time))[0] for proc in self.features]
@@ -115,7 +124,10 @@ class MidiStream(threading.Thread, Stream):
                     and self.mediator.filter_check(msg.note)
                 ):
                     continue
-                self._process_frame(data=msg)
+                self._process_frame(
+                    data=msg,
+                    c_time=self.current_time,
+                )
 
     @property
     def current_time(self):
@@ -312,7 +324,7 @@ class FramedMidiStream(MidiStream):
                     frame.reset(c_time)
 
 
-class MockingMidiStream(MidiStream):
+class MockMidiStream(MidiStream):
     """
     A class to process a MIDI file offline,
     simulating the behavior of MidiStream.
@@ -328,29 +340,96 @@ class MockingMidiStream(MidiStream):
         mediator: Optional[CeusMediator] = None,
     ):
         MidiStream.__init__(
-            self, 
+            self,
             port=None,
             queue=queue,
             init_time=None,
             features=features,
             return_midi_messages=return_midi_messages,
             mediator=mediator,
-            )
+        )
         self.file_path = file_path
 
     def mock_stream(self):
-        # load file. Using partitura is more stable than
-        # MIDO for handling potential tempo/time signature changes.
-        perf = pt.load_performance_midi(self.file_path)
+        """
+        Simulate real-time stream as loop iterating
+        over MIDI messages
+        """
+        midi_messages, message_times = midi_messages_from_midi(
+            filename=self.file_path,
+        )
+        self.init_time = message_times.min()
+        self.start_listening()
+        for msg, c_time in zip(midi_messages, message_times):   
+            self._process_feature(
+                msg=msg,
+                c_time=c_time,
+            )
+        self.stop_listening()
+
+    def run(self):
+        print(f"* [Mocking] Loading existing MIDI file({self.file_path})....")
+        self.mock_stream()
+        
 
 
-    
+class MockFramedMidiStream(FramedMidiStream):
+    """"""
+
+    def __init__(
+        self,
+        file_path: str,
+        queue: RECVQueue,
+        polling_period: float = POLLING_PERIOD,
+        features: Optional[List[Callable]] = None,
+        return_midi_messages: bool = False,
+        mediator: Optional[CeusMediator] = None,
+    ):
+        FramedMidiStream.__init__(
+            self,
+            port=None,
+            queue=queue,
+            polling_period=polling_period,
+            init_time=None,
+            features=features,
+            return_midi_messages=return_midi_messages,
+            mediator=mediator,
+        )
+        self.file_path = file_path
+
+    def _process_feature(
+        self,
+        frame: List[Tuple[mido.Message, float]],
+        f_time: float,
+        *args,
+        **kwargs,
+    ) -> None:
+        # the data is the Buffer instance
+        output = [proc((frame, f_time))[0] for proc in self.features]
+        if self.return_midi_messages:
+            self.queue.put((frame, output))
+        else:
+            self.queue.put(output)
 
 
+    def mock_stream(self):
+        """
+        Simulate real-time stream as loop iterating
+        over MIDI messages
+        """
+        midi_frames, frame_times = framed_midi_messages_from_midi(
+            filename=self.file_path,
+            polling_period=self.polling_period,
+        )
+        self.init_time = frame_times.min()
+        for frame, f_time in zip(midi_frames, frame_times):
+            self._process_feature(
+                frame=frame,
+                f_time=f_time,
+            )
 
-
-
-class MockingFramedMidiStream(MidiStream):
-    """ """
-
-    pass
+    def run(self):
+        print(f"* [Mocking] Loading existing MIDI file({self.file_path})....")
+        self.start_listening()
+        self.mock_stream()
+        self.stop_listening()
