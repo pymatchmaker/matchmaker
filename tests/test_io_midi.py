@@ -3,32 +3,27 @@
 """
 Tests for the io/midi.py module
 """
+import time
 import unittest
 
 import mido
-
 import numpy as np
-import time
-
-
-from matchmaker.io.midi import MidiStream, FramedMidiStream
-
-from matchmaker.utils.misc import RECVQueue
-
 from matchmaker.features.midi import (
-    PitchIOIProcessor,
-    PianoRollProcessor,
     CumSumPianoRollProcessor,
+    PianoRollProcessor,
+    PitchIOIProcessor,
 )
+from matchmaker.io.midi import FramedMidiStream, MidiStream
+from matchmaker.utils.misc import RECVQueue
 
 RNG = np.random.RandomState(1984)
 
-from tests.utils import DummyMidiPlayer
+from tempfile import NamedTemporaryFile
 
 from partitura import save_performance_midi
 from partitura.performance import PerformedPart
 
-from tempfile import NamedTemporaryFile
+from tests.utils import DummyMidiPlayer
 
 
 def setup_midi_player():
@@ -42,10 +37,10 @@ def setup_midi_player():
 
     queue: RECVQueue
         Queue for getting the processed data
-    
+
     midi_player : DummyMidiPlayer
         Midi player thread for testing
-    
+
     note_array : np.ndarray
         Note array with performance information.
     """
@@ -98,6 +93,7 @@ class TestMidiStream(unittest.TestCase):
     ----
     * Test mediator
     """
+
     def test_stream(self):
         """
         Test running an instance of a MidiStream class
@@ -149,7 +145,7 @@ class TestMidiStream(unittest.TestCase):
             self.assertTrue(isinstance(msg, mido.Message))
             self.assertTrue(isinstance(msg_time, float))
 
-            if msg.type== "note_on" and output[0] is not None:
+            if msg.type == "note_on" and output[0] is not None:
                 self.assertTrue(msg.note == int(output[0][0][0]))
             self.assertTrue(len(output) == len(features))
         midi_stream.stop_listening()
@@ -167,6 +163,7 @@ class TestFramedMidiStream(unittest.TestCase):
     * Test getting midi messages
     * Test mediator
     """
+
     def test_stream(self):
         port, queue, midi_player, note_array = setup_midi_player()
         features = [
@@ -185,7 +182,9 @@ class TestFramedMidiStream(unittest.TestCase):
 
         midi_player.start()
 
-        perf_length = (note_array["onset_sec"] + note_array["duration_sec"]).max() - note_array["onset_sec"].min()
+        perf_length = (
+            note_array["onset_sec"] + note_array["duration_sec"]
+        ).max() - note_array["onset_sec"].min()
 
         expected_frames = np.ceil(perf_length / polling_period)
         n_outputs = 0

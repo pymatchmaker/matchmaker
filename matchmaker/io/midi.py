@@ -19,7 +19,7 @@ from mido.ports import BaseInput as MidiInputPort
 
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import Stream, ProcessorWrapper
-from matchmaker.io.mediator import ThreadMediator
+from matchmaker.io.mediator import CeusMediator
 
 # Default polling period (in seconds)
 POLLING_PERIOD = 0.01
@@ -46,7 +46,7 @@ class MidiStream(threading.Thread, Stream):
         Return MIDI messages in addition to the
         processed features.
 
-    mediator : Mediator or None
+    mediator : CeusMediator or None
         A Mediator instance to filter input MIDI.
         This is useful for certain older instruments,
         like the Bösendorfer CEUS, which do not distinguish
@@ -54,14 +54,14 @@ class MidiStream(threading.Thread, Stream):
         from a different process  (e.g., an accompaniment system)
     """
 
-    midi_in: MidiInputPort
+    midi_in: Optional[MidiInputPort]
     init_time: float
     listen: bool
     queue: RECVQueue
     features: List[Callable]
     return_midi_messages: bool
     first_message: bool
-    mediator: ThreadMediator
+    mediator: CeusMediator
 
     def __init__(
         self,
@@ -70,7 +70,7 @@ class MidiStream(threading.Thread, Stream):
         init_time: Optional[float] = None,
         features: Optional[List[Callable]] = None,
         return_midi_messages: bool = False,
-        mediator: Optional[ThreadMediator] = None,
+        mediator: Optional[CeusMediator] = None,
     ):
         if features is None:
             features = [ProcessorWrapper(lambda x: x)]
@@ -211,6 +211,42 @@ class Buffer(object):
 
 
 class FramedMidiStream(MidiStream):
+    """
+    A class to process input MIDI stream in real time into frames.
+    The main difference with MidiStream is that this class will
+    produce an output every frame, rather than every MIDI message.
+
+    This class is better for e.g., piano-roll like features.
+
+    Parameters
+    ----------
+    port : mido.ports.BaseInput
+        Input MIDI port
+
+    queue : RECVQueue
+        Queue to store processed MIDI input
+
+    polling_period : float
+        Size of the frame. This is equivalent to hop size for
+        audio processing.
+
+    init_time : Optional[float]
+        The initial time. If none given, the
+        initial time will be set to the starting time
+        of the thread.
+
+    return_midi_messages: bool
+        Return MIDI messages in addition to the
+        processed features.
+
+    mediator : CeusMediator or None
+        A Mediator instance to filter input MIDI.
+        This is useful for certain older instruments,
+        like the Bösendorfer CEUS, which do not distinguish
+        between notes played by a human, and notes sent
+        from a different process  (e.g., an accompaniment system)
+    """
+
     def __init__(
         self,
         port: MidiInputPort,
@@ -219,7 +255,7 @@ class FramedMidiStream(MidiStream):
         init_time: Optional[float] = None,
         features: Optional[List[Callable]] = None,
         return_midi_messages: bool = False,
-        mediator: Optional[ThreadMediator] = None,
+        mediator: Optional[CeusMediator] = None,
     ):
         MidiStream.__init__(
             self,
@@ -247,12 +283,11 @@ class FramedMidiStream(MidiStream):
             self.queue.put(output)
 
     def run(self):
-        """
-        """
+        """ """
         self.start_listening()
         frame = Buffer(self.polling_period)
         frame.start = self.current_time
-        
+
         # TODO: check the effect of smaller st
         # st = self.polling_period * 0.01
         while self.listen:
@@ -278,9 +313,86 @@ class FramedMidiStream(MidiStream):
 
 
 class MockingMidiStream(MidiStream):
-    """ """
+    """
+    A class to process a MIDI file offline,
+    simulating the behavior of MidiStream.
+    This class is useful for testing and evaluation.
+    """
 
-    pass
+    def __init__(
+        self,
+        file_path: str,
+        queue: RECVQueue,
+        features: Optional[List[Callable]] = None,
+        return_midi_messages: bool = False,
+        mediator: Optional[CeusMediator] = None,
+    ):
+        MidiStream.__init__(
+            self, 
+            port=None,
+            queue=queue,
+            init_time=None,
+            features=features,
+            return_midi_messages=return_midi_messages,
+            mediator=mediator,
+            )
+        self.file_path = file_path
+
+    def mock_stream(self):
+        # load file. Using partitura is more stable than
+        # MIDO for handling potential tempo/time signature changes.
+        perf = pt.load_performance_midi(self.file_path)
+        
+
+    
+
+
+def midi_messages_to_framed_midi(
+    midi_msgs: List[mido.Message],
+    msg_times: List[float],
+    polling_period: float,
+    features: List[Callable],
+):
+    """
+    Convert a list of MIDI messages to a framed MIDI representation
+    Parameters
+    ----------
+    midi_msgs: list of mido.Message
+        List of MIDI messages
+    msg_times: list of float
+        List of times (in seconds) at which the MIDI messages were received
+    polling_period:
+        Polling period (in seconds) used to convert the MIDI messages
+    pipeline: function
+        Function to be applied to the MIDI messages before converting them to a MIDI frame.
+
+    Returns
+    -------
+    frames: list
+        List of MIDI frames.
+    """
+    n_frames = int(np.ceil(msg_times.max() / polling_period))
+    frame_times = (np.arange(n_frames) + 0.5) * polling_period
+
+    frames = []
+    for cursor in range(n_frames):
+
+        if cursor == 0:
+            # do not leave messages starting at 0 behind!
+            idxs = np.where(msg_times <= polling_period)[0]
+        else:
+            idxs = np.where(
+                np.logical_and(
+                    msg_times > cursor * polling_period,
+                    msg_times <= (cursor + 1) * polling_period,
+                )
+            )[0]
+
+        output = pipeline(
+            (list(zip(midi_msgs[idxs], msg_times[idxs])), frame_times[cursor])
+        )
+        frames.append(output)
+    return frames
 
 
 class MockingFramedMidiStream(MidiStream):
