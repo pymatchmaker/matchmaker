@@ -24,7 +24,11 @@ class TestMockAudioStream(unittest.TestCase):
         sr = 22050
         hop_length = 256
         queue = RECVQueue()
-        features = [ChromagramProcessor(), MFCCProcessor(), MelSpectrogramProcessor()]
+        features = [
+            ChromagramProcessor(sample_rate=sr, hop_length=hop_length),
+            MFCCProcessor(sample_rate=sr, hop_length=hop_length),
+            MelSpectrogramProcessor(sample_rate=sr, hop_length=hop_length),
+        ]
         chunk_size = 1024
         self.stream = MockAudioStream(
             sample_rate=sr,

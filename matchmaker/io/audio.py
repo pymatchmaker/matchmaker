@@ -13,8 +13,10 @@ import pyaudio
 
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import DummySequentialOutputProcessor, Stream
+from matchmaker.features.audio import HOP_LENGTH, SAMPLE_RATE
 
 CHANNELS = 1
+CHUNK_SIZE = 4 * HOP_LENGTH
 
 
 class AudioStream(threading.Thread, Stream):
@@ -37,11 +39,11 @@ class AudioStream(threading.Thread, Stream):
 
     def __init__(
         self,
-        sample_rate: int,
-        hop_length: int,
         queue: RECVQueue,
         features: List[Callable],
-        chunk_size: int = None,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+        chunk_size: int = CHUNK_SIZE,
     ):
         if features is None:
             features = DummySequentialOutputProcessor()
@@ -69,18 +71,17 @@ class AudioStream(threading.Thread, Stream):
             target_audio = np.concatenate((np.zeros(self.hop_length), target_audio))
         else:
             # add last chunk at the beginning of the block
-            # making 5 block, 1 block overlap -> 4 frames each time
+            # ex) making 5 block, 1 block overlap -> 4 frames each time
             target_audio = np.concatenate((self.last_chunk, target_audio))
 
-        stacked_features = None
+        stacked_features = None  # shape: (n_features, n_frames)
         for feature in self.features:
-            feature_output, _ = feature((target_audio, f_time), f_time)
+            feature_output = feature(target_audio)
             stacked_features = (
                 feature_output
                 if stacked_features is None
                 else np.vstack((stacked_features, feature_output))
             )
-
         self.queue.put(stacked_features)
         self.last_chunk = target_audio[-self.hop_length :]
 
@@ -131,11 +132,11 @@ class MockAudioStream(AudioStream):
 
     def __init__(
         self,
-        sample_rate: int,
-        hop_length: int,
         queue: RECVQueue,
         features: List[Callable],
-        chunk_size: int = None,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+        chunk_size: int = CHUNK_SIZE,
         file_path: str = "",
     ):
         super().__init__(
