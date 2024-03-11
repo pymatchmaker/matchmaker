@@ -252,9 +252,9 @@ class TestMockFramedMidiStream(unittest.TestCase):
 
         queue = RECVQueue()
         features = [
-            PitchIOIProcessor(),
-            PianoRollProcessor(),
-            CumSumPianoRollProcessor(),
+            PitchIOIProcessor(piano_range=True),
+            PianoRollProcessor(piano_range=True),
+            CumSumPianoRollProcessor(piano_range=True),
         ]
         midi_stream = MockFramedMidiStream(
             file_path=EXAMPLE_PERFORMANCE,
