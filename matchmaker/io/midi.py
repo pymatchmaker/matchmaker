@@ -9,11 +9,13 @@ import tempfile
 import threading
 import time
 import numpy as np
-
+import partitura as pt
 
 from typing import Any, Tuple, List, Union, Optional, Callable
 
 import mido
+
+from partitura.performance import PerformanceLike, Performance, PerformedPart
 
 from mido.ports import BaseInput as MidiInputPort
 
@@ -22,8 +24,8 @@ from matchmaker.utils.processor import Stream, ProcessorWrapper
 from matchmaker.io.mediator import CeusMediator
 
 from matchmaker.utils.symbolic import (
-    midi_messages_from_midi,
-    framed_midi_messages_from_midi,
+    midi_messages_from_performance,
+    framed_midi_messages_from_performance,
 )
 
 # Default polling period (in seconds)
@@ -330,6 +332,8 @@ class MockMidiStream(MidiStream):
     simulating the behavior of MidiStream.
     This class is useful for testing and evaluation.
     """
+    file_path: Optional[str]
+    perf_data: PerformanceLike
 
     def __init__(
         self,
@@ -348,19 +352,30 @@ class MockMidiStream(MidiStream):
             return_midi_messages=return_midi_messages,
             mediator=mediator,
         )
-        self.file_path = file_path
+        if isinstance(file_path, (Performance, PerformedPart)):
+            self.perf_data = file_path
+            self.file_path = None
+        elif isinstance(file_path, str):
+            self.perf_data = pt.load_performance(file_path)
+            self.file_path = file_path
+        else:
+            raise ValueError(
+                "`file_path` is expected to be a string or a "
+                "`partitura.performance.PerformanceLike` object, "
+                f"but is {type(file_path)}"
+            )
 
     def mock_stream(self):
         """
         Simulate real-time stream as loop iterating
         over MIDI messages
         """
-        midi_messages, message_times = midi_messages_from_midi(
-            filename=self.file_path,
+        midi_messages, message_times = midi_messages_from_performance(
+            perf=self.perf_data,
         )
         self.init_time = message_times.min()
         self.start_listening()
-        for msg, c_time in zip(midi_messages, message_times):   
+        for msg, c_time in zip(midi_messages, message_times):
             self._process_feature(
                 msg=msg,
                 c_time=c_time,
@@ -370,15 +385,17 @@ class MockMidiStream(MidiStream):
     def run(self):
         print(f"* [Mocking] Loading existing MIDI file({self.file_path})....")
         self.mock_stream()
-        
 
 
 class MockFramedMidiStream(FramedMidiStream):
     """"""
 
+    file_path: Optional[str]
+    perf_data: PerformanceLike
+
     def __init__(
         self,
-        file_path: str,
+        file_path: Union[str, PerformanceLike],
         queue: RECVQueue,
         polling_period: float = POLLING_PERIOD,
         features: Optional[List[Callable]] = None,
@@ -395,7 +412,19 @@ class MockFramedMidiStream(FramedMidiStream):
             return_midi_messages=return_midi_messages,
             mediator=mediator,
         )
-        self.file_path = file_path
+
+        if isinstance(file_path, (Performance, PerformedPart)):
+            self.perf_data = file_path
+            self.file_path = None
+        elif isinstance(file_path, str):
+            self.perf_data = pt.load_performance(file_path)
+            self.file_path = file_path
+        else:
+            raise ValueError(
+                "`file_path` is expected to be a string or a "
+                "`partitura.performance.PerformanceLike` object, "
+                f"but is {type(file_path)}"
+            )
 
     def _process_feature(
         self,
@@ -411,14 +440,13 @@ class MockFramedMidiStream(FramedMidiStream):
         else:
             self.queue.put(output)
 
-
     def mock_stream(self):
         """
         Simulate real-time stream as loop iterating
         over MIDI messages
         """
-        midi_frames, frame_times = framed_midi_messages_from_midi(
-            filename=self.file_path,
+        midi_frames, frame_times = framed_midi_messages_from_performance(
+            perf=self.perf_data,
             polling_period=self.polling_period,
         )
         self.init_time = frame_times.min()

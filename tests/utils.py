@@ -5,11 +5,18 @@ Utilities for tests
 """
 import threading
 import numbers
-from typing import Iterable, Optional, Tuple, List
+from typing import Iterable, Optional, Tuple, List, Union, Any, Callable
 
 import mido
 import numpy as np
 import time
+import partitura as pt
+
+from partitura.performance import PerformanceLike
+
+from matchmaker.io.midi import MockFramedMidiStream, MockMidiStream
+from matchmaker.utils.misc import RECVQueue
+
 
 # Random number generator
 RNG = np.random.RandomState(1984)
@@ -238,6 +245,43 @@ def generate_example_sequences(
     return X, Y, ground_truth_path
 
 
+def process_midi_offline(
+    perf_info: Union[PerformanceLike, str],
+    features: List[Callable],
+    polling_period: Optional[float] = 0.01,
+) -> List[Any]:
+    """
+    Helper method to process all MIDI
+    """
+
+    queue = RECVQueue()
+
+    if polling_period is not None:
+        input_stream = MockFramedMidiStream(
+            file_path=perf_info,
+            queue=queue,
+            polling_period=polling_period,
+            features=features,
+            return_midi_messages=False,
+            mediator=None,
+        )
+    else:
+        input_stream = MockMidiStream(
+            file_path=perf_info,
+            queue=queue,
+            features=features,
+            return_midi_messages=False,
+            mediator=None,
+        )
+
+    input_stream.start()
+    input_stream.join()
+
+    outputs = list(queue.queue)
+
+    return outputs
+
+
 if __name__ == "__main__":
 
     lenX = 5
@@ -264,7 +308,6 @@ class DummyMidiPlayer(threading.Thread):
         self.port = port
         self.mf = mido.MidiFile(filename)
         self.is_playing = False
-        
 
     def run(self) -> None:
         self.is_playing = True
@@ -274,5 +317,3 @@ class DummyMidiPlayer(threading.Thread):
         # close port
         self.is_playing = False
         self.port.close()
-        
-

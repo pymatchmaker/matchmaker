@@ -10,6 +10,8 @@ import numpy as np
 import partitura as pt
 from numpy.typing import NDArray
 
+from partitura.performance import Performance, PerformedPart, PerformanceLike
+
 
 def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
     """
@@ -34,12 +36,45 @@ def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
         An array containing the times of the messages
         in seconds.
     """
-
     perf = pt.load_performance(filename=filename)
+
+    message_array, message_times_array = midi_messages_from_performance(perf=perf)
+
+    return message_array, message_times_array
+
+
+def midi_messages_from_performance(perf: PerformanceLike) -> Tuple[NDArray, NDArray]:
+    """
+    Get a list of MIDI messages and message times from
+    a PerformedPart or a Performance object.
+
+    The method ignores Meta messages, since they
+    are not "streamed" live (see documentation for
+    mido.Midifile.play)
+
+    Parameters
+    ----------
+    perf : PerformanceLike
+        A partitura PerformedPart or Performance object.
+
+    Returns
+    -------
+    message_array : np.ndarray of mido.Message
+        An array containing MIDI messages
+
+    message_times : np.ndarray
+        An array containing the times of the messages
+        in seconds.
+    """
+
+    if isinstance(perf, Performance):
+        pparts = perf.performedparts
+    elif isinstance(perf, PerformedPart):
+        pparts = [perf]
 
     messages = []
     message_times = []
-    for ppart in perf:
+    for ppart in pparts:
 
         # Get note on and note off info
         for note in ppart.notes:
@@ -160,7 +195,8 @@ def midi_messages_to_framed_midi(
 
 
 def framed_midi_messages_from_midi(
-    filename: str, polling_period: float
+    filename: str,
+    polling_period: float,
 ) -> Tuple[NDArray, NDArray]:
     """
     Get a list of framed MIDI messages and frame times from
@@ -172,6 +208,27 @@ def framed_midi_messages_from_midi(
     midi_messages, message_times = midi_messages_from_midi(
         filename=filename,
     )
+
+    frames_array, frame_times = midi_messages_to_framed_midi(
+        midi_msgs=midi_messages,
+        msg_times=message_times,
+        polling_period=polling_period,
+    )
+
+    return frames_array, frame_times
+
+
+def framed_midi_messages_from_performance(
+    perf: PerformanceLike,
+    polling_period: float,
+) -> Tuple[NDArray, NDArray]:
+    """
+    Get a list of framed MIDI messages and frame times from
+    a partitura Performance or PerformedPart object.
+
+    This is a convenience method
+    """
+    midi_messages, message_times = midi_messages_from_performance(perf=perf)
 
     frames_array, frame_times = midi_messages_to_framed_midi(
         midi_msgs=midi_messages,

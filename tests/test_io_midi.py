@@ -32,6 +32,8 @@ from partitura.performance import PerformedPart
 from tests.utils import DummyMidiPlayer
 
 
+
+
 def setup_midi_player():
     """
     Setup dummy MIDI player for testing
@@ -135,7 +137,7 @@ class TestMidiStream(unittest.TestCase):
         messages.
         """
         port, queue, midi_player, _ = setup_midi_player()
-        features = [PitchIOIProcessor()]
+        features = [PitchIOIProcessor(return_pitch_list=True)]
         midi_stream = MidiStream(
             port=port,
             queue=queue,

@@ -171,3 +171,5 @@ matchmaker/dp/dtw_loop.c
 matchmaker/utils/distances.c
 tests/dev*.py
 tests/tmp/
+
+*~

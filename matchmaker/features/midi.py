@@ -6,14 +6,85 @@ This module contains methods to compute features from MIDI signals.
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from mido import Message
+
 from matchmaker.utils.processor import Processor
+from matchmaker.utils.typing import InputMIDIFrame, NDArrayFloat
+
 
 # Type hint for Input MIDI frame. A frame is a tuple
 # consisting of a list with the MIDI messages corresponding
 # to the frame (List[Tuple[Message, float]]) and the
 # time associated to the frame
-InputMIDIFrame = Tuple[List[Tuple[Message, float]], float]
+# InputMIDIFrame = Tuple[List[Tuple[Message, float]], float]
+
+
+class PitchProcessor(Processor):
+    """
+    A class to process pitch information from MIDI input.
+
+    Parameters
+    ----------
+    piano_range : bool
+        If True, the pitch range will be limited to the piano range (21-108).
+
+    return_pitch_list: bool
+        If True, it will return an array of MIDI pitch values, instead of
+        a "piano roll" slice.
+    """
+
+    prev_time: float
+    piano_range: bool
+
+    def __init__(
+        self,
+        piano_range: bool = False,
+        return_pitch_list: bool = False,
+    ) -> None:
+        super().__init__()
+        self.piano_range = piano_range
+        self.return_pitch_list = return_pitch_list
+        self.piano_shift = 21 if piano_range else 0
+
+    def __call__(
+        self,
+        frame: InputMIDIFrame,
+        kwargs: Dict = {},
+    ) -> Tuple[Optional[Tuple[NDArrayFloat, float]], Dict]:
+        data, f_time = frame
+        # pitch_obs = []
+        pitch_obs = np.zeros(
+            128,
+            dtype=np.float32,
+        )
+
+        # TODO: Replace the for loop with list comprehension
+        pitch_obs_list = []
+        for msg, _ in data:
+            if (
+                getattr(msg, "type", "other") == "note_on"
+                and getattr(msg, "velocity", 0) > 0
+            ):
+                pitch_obs[msg.note] = 1
+                pitch_obs_list.append(msg.note - self.piano_shift)
+
+        if pitch_obs.sum() > 0:
+            if self.piano_range:
+                pitch_obs = pitch_obs[21:109]
+
+            if self.return_pitch_list:
+                return (
+                    np.array(
+                        pitch_obs_list,
+                        dtype=np.float32,
+                    ),
+                    {},
+                )
+            return pitch_obs, {}
+        else:
+            return None, {}
+
+    def reset(self) -> None:
+        pass
 
 
 class PitchIOIProcessor(Processor):
@@ -24,35 +95,68 @@ class PitchIOIProcessor(Processor):
     ----------
     piano_range : bool
         If True, the pitch range will be limited to the piano range (21-108).
+
+    return_pitch_list: bool
+        If True, it will return an array of MIDI pitch values, instead of
+        a "piano roll" slice.
     """
 
-    def __init__(self, piano_range: bool = False):
-        super().__init__()
-        self.prev_time: float = 0
-        self.piano_range = piano_range
+    prev_time: Optional[float]
+    piano_range: bool
 
-        self.pitch_bias = 21 if piano_range else 0
+    def __init__(
+        self,
+        piano_range: bool = False,
+        return_pitch_list: bool = False,
+    ) -> None:
+        super().__init__()
+        self.prev_time = None
+        self.piano_range = piano_range
+        self.return_pitch_list = return_pitch_list
+        self.piano_shift = 21 if piano_range else 0
 
     def __call__(
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[Optional[np.ndarray], Dict]:
+    ) -> Tuple[Optional[Tuple[NDArrayFloat, float]], Dict]:
         data, f_time = frame
-        pitch_obs = []
+        # pitch_obs = []
+        pitch_obs = np.zeros(
+            128,
+            dtype=np.float32,
+        )
 
-        for msg, t in data:
+        # TODO: Replace the for loop with list comprehension
+        pitch_obs_list = []
+        for msg, _ in data:
             if (
                 getattr(msg, "type", "other") == "note_on"
                 and getattr(msg, "velocity", 0) > 0
             ):
-                pitch_obs.append(msg.note)
+                pitch_obs[msg.note] = 1
+                pitch_obs_list.append(msg.note - self.piano_shift)
 
-        if len(pitch_obs) > 0:
-            ioi_obs = f_time - self.prev_time
+        if pitch_obs.sum() > 0:
+
+            if self.prev_time is None:
+                # There is no IOI for the first observed note
+                ioi_obs = 0.0
+            else:
+                ioi_obs = f_time - self.prev_time
             self.prev_time = f_time
-            return (np.array(pitch_obs), ioi_obs), {}
+            if self.piano_range:
+                pitch_obs = pitch_obs[21:109]
 
+            if self.return_pitch_list:
+                return (
+                    np.array(
+                        pitch_obs_list,
+                        dtype=np.float32,
+                    ),
+                    ioi_obs,
+                ), {}
+            return (pitch_obs, ioi_obs), {}
         else:
             return None, {}
 
@@ -80,7 +184,7 @@ class PianoRollProcessor(object):
         self,
         use_velocity: bool = False,
         piano_range: bool = False,
-        dtype: type = float,
+        dtype: type = np.float32,
     ):
         self.active_notes: Dict = dict()
         self.piano_roll_slices: List[np.ndarray] = []

@@ -186,14 +186,6 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             input_features,
             self.local_cost_fun,
         )
-        # if self.restart:
-        #     self.global_cost_matrix = reset_cost_matrix(
-        #         global_cost_matrix=self.global_cost_matrix,
-        #         window_cost=window_cost,
-        #         score_index=window_start,
-        #         N=self.N_ref + 1,
-        #     )
-        #     self.restart = False
 
         self.global_cost_matrix, min_index, min_costs = oltw_arzt_loop(
             global_cost_matrix=self.global_cost_matrix,
