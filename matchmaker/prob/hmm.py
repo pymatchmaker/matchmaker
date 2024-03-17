@@ -2,10 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 This module implements Hidden Markov Models for score following
-
-TODO
-----
-* The definition of the HMMs need to be updated to work with audio
 """
 from typing import Optional, Union
 
@@ -17,15 +13,16 @@ from hiddenmarkov import (
     ObservationModel,
     TransitionModel,
 )
+from numpy.typing import NDArray
 from scipy.stats import gumbel_l
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.utils.tempo_models import TempoModel
-from numpy.typing import NDArray
 
 # Alias for typing arrays
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]
+
 
 class BaseHMM(HiddenMarkovModel, OnlineAlignment):
     """
@@ -45,7 +42,7 @@ class BaseHMM(HiddenMarkovModel, OnlineAlignment):
     tempo_model: Optional[TempoModel]
         A tempo model
 
-    
+
     """
 
     observation_model: ObservationModel
@@ -79,11 +76,16 @@ class BaseHMM(HiddenMarkovModel, OnlineAlignment):
         self.has_insertions = has_insertions
 
     def __call__(self, input: NDArrayFloat) -> float:
-        raise NotImplementedError
+        raise NotImplementedError(
+            "This method needs to be implemented in the subclasses"
+        )
 
 
 class PitchHMM(BaseHMM):
-    """ """
+    """
+    A simple HMM that uses pitch information (symbolic or spectrograms)
+    as input. This model does not include temporal information.
+    """
 
     def __init__(
         self,
@@ -147,6 +149,7 @@ class BernoulliPitchObservationModel(ObservationModel):
         in the MIDI range. Used in calculating the pitch observation
         probabilities.
     """
+
     def __init__(self, pitch_profiles: NDArrayFloat):
         """
         The initialization method.
@@ -168,11 +171,7 @@ class BernoulliPitchObservationModel(ObservationModel):
             pitch_prof_obs=observation,
             pitch_profiles=self.pitch_profiles,
         )
-    
+
 
 class BernoulliGaussianPitchIOIObservationModel(ObservationModel):
     pass
-
-
-
-

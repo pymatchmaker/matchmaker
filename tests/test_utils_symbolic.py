@@ -4,19 +4,18 @@
 Tests for matchmaker/utils/partitura.py
 """
 import unittest
+from tempfile import NamedTemporaryFile
 
-import matchmaker
 import mido
 import numpy as np
 import partitura as pt
-from matchmaker.utils.symbolic import (
-    midi_messages_from_midi,
-    framed_midi_messages_from_midi,
-)
-
 from partitura.utils.music import generate_random_performance_note_array
 
-from tempfile import NamedTemporaryFile
+import matchmaker
+from matchmaker.utils.symbolic import (
+    framed_midi_messages_from_midi,
+    midi_messages_from_midi,
+)
 
 
 class TestLoadingMethods(unittest.TestCase):

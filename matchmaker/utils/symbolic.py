@@ -9,8 +9,7 @@ import mido
 import numpy as np
 import partitura as pt
 from numpy.typing import NDArray
-
-from partitura.performance import Performance, PerformedPart, PerformanceLike
+from partitura.performance import Performance, PerformanceLike, PerformedPart
 
 
 def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:

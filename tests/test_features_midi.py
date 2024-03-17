@@ -4,16 +4,15 @@
 Tests for the features/midi.py module
 """
 import unittest
+
 import numpy as np
-
-from matchmaker import EXAMPLE_PERFORMANCE
-
 import partitura as pt
 from partitura.performance import PerformedPart
 
+from matchmaker import EXAMPLE_PERFORMANCE
 from matchmaker.features.midi import PitchIOIProcessor, PitchProcessor
-
 from tests.utils import process_midi_offline
+
 
 class TestPitchProcessor(unittest.TestCase):
     def test_processor(self):
@@ -100,8 +99,8 @@ class TestPitchProcessor(unittest.TestCase):
 
         self.assertTrue(non_none_outputs == len(note_array))
 
-class TestPitchIOIProcessor(unittest.TestCase):
 
+class TestPitchIOIProcessor(unittest.TestCase):
     def test_processor(self):
 
         note_array = np.empty(

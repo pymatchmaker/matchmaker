@@ -173,3 +173,4 @@ tests/dev*.py
 tests/tmp/
 
 *~
+tests/test_io_error_trace.txt

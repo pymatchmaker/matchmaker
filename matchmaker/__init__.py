@@ -6,12 +6,7 @@ Matchmaker is a library for real-time music alignment
 
 import pkg_resources
 
-from . import io
-from . import features
-from . import utils
-from . import dp
-from . import prob
-from . import rl
+from . import dp, features, io, prob, rl, utils
 
 # define a version variable
 __version__ = pkg_resources.get_distribution("matchmaker").version

@@ -3,20 +3,18 @@
 """
 Utilities for tests
 """
-import threading
 import numbers
-from typing import Iterable, Optional, Tuple, List, Union, Any, Callable
+import threading
+import time
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 import mido
 import numpy as np
-import time
 import partitura as pt
-
 from partitura.performance import PerformanceLike
 
 from matchmaker.io.midi import MockFramedMidiStream, MockMidiStream
 from matchmaker.utils.misc import RECVQueue
-
 
 # Random number generator
 RNG = np.random.RandomState(1984)

@@ -8,6 +8,8 @@ import unittest
 
 import mido
 import numpy as np
+
+from matchmaker import EXAMPLE_PERFORMANCE
 from matchmaker.features.midi import (
     CumSumPianoRollProcessor,
     PianoRollProcessor,
@@ -16,11 +18,10 @@ from matchmaker.features.midi import (
 from matchmaker.io.midi import (
     FramedMidiStream,
     MidiStream,
-    MockMidiStream,
     MockFramedMidiStream,
+    MockMidiStream,
 )
 from matchmaker.utils.misc import RECVQueue
-from matchmaker import EXAMPLE_PERFORMANCE
 
 RNG = np.random.RandomState(1984)
 
@@ -30,8 +31,6 @@ from partitura import save_performance_midi
 from partitura.performance import PerformedPart
 
 from tests.utils import DummyMidiPlayer
-
-
 
 
 def setup_midi_player():

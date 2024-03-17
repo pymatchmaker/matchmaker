@@ -11,13 +11,6 @@ from matchmaker.utils.processor import Processor
 from matchmaker.utils.typing import InputMIDIFrame, NDArrayFloat
 
 
-# Type hint for Input MIDI frame. A frame is a tuple
-# consisting of a list with the MIDI messages corresponding
-# to the frame (List[Tuple[Message, float]]) and the
-# time associated to the frame
-# InputMIDIFrame = Tuple[List[Tuple[Message, float]], float]
-
-
 class PitchProcessor(Processor):
     """
     A class to process pitch information from MIDI input.
@@ -164,7 +157,7 @@ class PitchIOIProcessor(Processor):
         pass
 
 
-class PianoRollProcessor(object):
+class PianoRollProcessor(Processor):
     """
     A class to convert a MIDI file time slice to a piano roll representation.
 
@@ -186,6 +179,7 @@ class PianoRollProcessor(object):
         piano_range: bool = False,
         dtype: type = np.float32,
     ):
+        Processor.__init__(self)
         self.active_notes: Dict = dict()
         self.piano_roll_slices: List[np.ndarray] = []
         self.use_velocity: bool = use_velocity
@@ -225,7 +219,7 @@ class PianoRollProcessor(object):
         self.active_notes = dict()
 
 
-class CumSumPianoRollProcessor(object):
+class CumSumPianoRollProcessor(Processor):
     """
     A class to convert a MIDI file time slice to a cumulative sum piano roll
     representation.
@@ -248,6 +242,7 @@ class CumSumPianoRollProcessor(object):
         piano_range: bool = False,
         dtype: type = float,
     ) -> None:
+        Processor.__init__(self)
         self.active_notes: Dict = dict()
         self.piano_roll_slices: List[np.ndarray] = []
         self.use_velocity: bool = use_velocity

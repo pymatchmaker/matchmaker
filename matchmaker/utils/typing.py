@@ -4,10 +4,10 @@
 This module contains aliases for typing
 """
 from typing import Dict, List, Optional, Tuple
-import numpy as np
-from numpy.typing import NDArray
-from mido import Message
 
+import numpy as np
+from mido import Message
+from numpy.typing import NDArray
 
 # Alias for typing arrays of a specific numerical dtype
 NDArrayFloat = NDArray[np.float32]

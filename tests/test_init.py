@@ -5,19 +5,16 @@ This module contains tests for the package initialization.
 """
 import unittest
 
+import librosa
 import numpy as np
+import partitura as pt
+from partitura.performance import Performance
+from partitura.score import Score
 
 import matchmaker
 
-import partitura as pt
-import librosa
-
-from partitura.score import Score
-from partitura.performance import Performance
-
 
 class TestPackageInit(unittest.TestCase):
-
     def test_version(self):
         """
         Test that the version variable is defined

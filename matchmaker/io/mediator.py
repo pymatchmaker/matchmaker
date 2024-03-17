@@ -15,7 +15,7 @@ import threading
 
 class ThreadMediator(object):
     """
-    Mediator class for communications between a main system 
+    Mediator class for communications between a main system
     (e.g., an accompaniment system) modules running in
     concurrent threads or processes. The class ensures thread safety.
 
@@ -23,7 +23,7 @@ class ThreadMediator(object):
     ----------
     _comms_buffer : deque
         A buffer to receive the output from the one process and send it to
-        another when prompted. Follows LIFO (Last In, First Out) logic. 
+        another when prompted. Follows LIFO (Last In, First Out) logic.
         For the buffer a deque object is used as this ensures thread safety.
     """
 
@@ -43,13 +43,13 @@ class ThreadMediator(object):
 
     def is_empty(self) -> bool:
         """
-        Returns True if the comms buffer is empty. 
+        Returns True if the comms buffer is empty.
         False if it has at least one element.
 
         Returns
         -------
         empty : Boolean
-            True if the comms buffer is empty. 
+            True if the comms buffer is empty.
             False if it has at least one element.
         """
         # Check if the buffer is empty:
@@ -60,7 +60,7 @@ class ThreadMediator(object):
 
     def get_message(self) -> collections.namedtuple:
         """
-        Get the first from the previously sent messages MIDI messages. 
+        Get the first from the previously sent messages MIDI messages.
         Returns IndexError if there is no element in the buffer.
         This should only be called by the main thread producing MIDI messages.
 
@@ -95,7 +95,7 @@ class ThreadMediator(object):
 class CeusMediator(ThreadMediator):
     """
     Encapsulates the trans-module communication in the context of a
-    Bösendorfer CEUS System. It also filters notes (MIDI pitches) 
+    Bösendorfer CEUS System. It also filters notes (MIDI pitches)
     that are played by the Ceus (i.e., sent from an internal MIDI port).
 
     Parameters
@@ -181,7 +181,7 @@ class CeusMediator(ThreadMediator):
 
     def filter_remove_pitch(self, midi_pitch: int) -> None:
         """
-        Remove a MIDI pitch from the Ceus filter. This should only be 
+        Remove a MIDI pitch from the Ceus filter. This should only be
         called by a score follower.
 
         Parameters

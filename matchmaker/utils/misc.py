@@ -4,8 +4,8 @@
 Miscellaneous utilities
 """
 import numbers
-from typing import Iterable, Union, Any
 from queue import Empty, Queue
+from typing import Any, Iterable, Union
 
 import numpy as np
 

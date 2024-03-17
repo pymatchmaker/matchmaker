@@ -5,12 +5,7 @@ Top of the module for input streams
 """
 
 from .audio import AudioStream, MockAudioStream
-from .midi import (
-    MidiStream,
-    FramedMidiStream,
-    MockMidiStream,
-    MockFramedMidiStream,
-)
+from .midi import FramedMidiStream, MidiStream, MockFramedMidiStream, MockMidiStream
 
 __all__ = [
     "AudioStream",

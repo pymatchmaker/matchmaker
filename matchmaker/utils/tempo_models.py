@@ -104,7 +104,8 @@ class TempoModel(object):
         Needs to be implemented for each variant of the model
         """
         raise NotImplementedError
-    
+
+
 class ReactiveTempoModel(TempoModel):
     """
     Reactive tempo model.
@@ -147,7 +148,6 @@ class ReactiveTempoModel(TempoModel):
 
         self.prev_score_onset = score_onset
         self.prev_perf_onset = performed_onset
-
 
 
 if __name__ == "__main__":

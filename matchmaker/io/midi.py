@@ -8,24 +8,20 @@ import os
 import tempfile
 import threading
 import time
-import numpy as np
-import partitura as pt
-
-from typing import Any, Tuple, List, Union, Optional, Callable
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import mido
-
-from partitura.performance import PerformanceLike, Performance, PerformedPart
-
+import numpy as np
+import partitura as pt
 from mido.ports import BaseInput as MidiInputPort
+from partitura.performance import Performance, PerformanceLike, PerformedPart
 
-from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.processor import Stream, ProcessorWrapper
 from matchmaker.io.mediator import CeusMediator
-
+from matchmaker.utils.misc import RECVQueue
+from matchmaker.utils.processor import ProcessorWrapper, Stream
 from matchmaker.utils.symbolic import (
-    midi_messages_from_performance,
     framed_midi_messages_from_performance,
+    midi_messages_from_performance,
 )
 
 # Default polling period (in seconds)
@@ -332,6 +328,7 @@ class MockMidiStream(MidiStream):
     simulating the behavior of MidiStream.
     This class is useful for testing and evaluation.
     """
+
     file_path: Optional[str]
     perf_data: PerformanceLike
 
