@@ -16,7 +16,10 @@ from matchmaker.utils import (
     distances,
 )
 from matchmaker.utils.distances import Metric, vdist
-from matchmaker.utils.misc import MatchmakerInvalidOptionError, MatchmakerInvalidParameterTypeError
+from matchmaker.utils.misc import (
+    MatchmakerInvalidOptionError,
+    MatchmakerInvalidParameterTypeError,
+)
 
 DEFAULT_LOCAL_COST: str = "Manhattan"
 WINDOW_SIZE: int = 100
@@ -96,7 +99,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             raise MatchmakerInvalidParameterTypeError(
                 parameter_name="local_cost_fun",
                 required_parameter_type=(str, tuple, Callable),
-                actual_parameter_type=type(local_cost_fun)
+                actual_parameter_type=type(local_cost_fun),
             )
 
         # Set local cost function
@@ -142,7 +145,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.start_window_size: int = start_window_size
         self.current_position: int = current_position
         self.positions: List[int] = []
-        self.warping_path: List = []
+        self._warping_path: List = []
         self.global_cost_matrix: NDArray[np.float64] = (
             np.ones((reference_features.shape[0] + 1, 2)) * np.infty
         )
@@ -150,6 +153,11 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.go_backwards: bool = False
         self.update_window_index: bool = False
         self.restart: bool = False
+
+    @property
+    def warping_path(self) -> NDArray[np.int32]:
+        wp = (np.array(self._warping_path).T).astype(np.int32)
+        return wp
 
     def __call__(self, input: NDArray[np.float64]) -> int:
         self.step(input)
@@ -216,6 +224,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
                 self.current_position + self.step_size,
             )
 
+        self.warping_path.append((self.current_position, self.input_index))
         # update input index
         self.input_index += 1
 
