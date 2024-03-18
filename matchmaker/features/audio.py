@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Tuple
 
 import librosa
 import numpy as np
+
 from matchmaker.utils.processor import Processor
 
 SAMPLE_RATE = 22050
@@ -25,7 +26,6 @@ InputAudioFrame = Tuple[
 
 
 class ChromagramProcessor(Processor):
-
     def __init__(
         self,
         sample_rate: int = SAMPLE_RATE,

@@ -385,8 +385,11 @@ class MockMidiStream(MidiStream):
 
 
 class MockFramedMidiStream(FramedMidiStream):
-    """"""
-
+    """
+    A class to process a MIDI file offline,
+    simulating the behavior of FramedMidiStream.
+    This class is useful for testing and evaluation.
+    """
     file_path: Optional[str]
     perf_data: PerformanceLike
 
