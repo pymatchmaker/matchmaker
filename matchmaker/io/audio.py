@@ -52,7 +52,7 @@ class AudioStream(threading.Thread, Stream):
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.queue = queue
-        self.chunk_size = chunk_size or hop_length * 4
+        self.chunk_size = chunk_size * self.hop_length
         self.format = pyaudio.paFloat32
         self.audio_interface = pyaudio.PyAudio()
         self.audio_stream: Optional[pyaudio.Stream] = None

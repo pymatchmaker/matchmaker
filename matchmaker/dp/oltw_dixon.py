@@ -26,11 +26,12 @@ class Direction(IntEnum):
 
 
 DEFAULT_LOCAL_COST: str = "euclidean"
+FRAME_RATE = 25
 MAX_RUN_COUNT: int = 30
-CHUNK_SIZE = 4 * HOP_LENGTH
-FRAME_RATE = SAMPLE_RATE / HOP_LENGTH
-FRAME_PER_SEG: int = int(CHUNK_SIZE / HOP_LENGTH)
-WINDOW_SIZE: int = 5 * int(FRAME_RATE)
+CHUNK_SIZE = 4
+WINDOW_SIZE = 5
+HOP_LENGTH = SAMPLE_RATE // FRAME_RATE
+FRAME_PER_SEG = CHUNK_SIZE
 
 
 class OnlineTimeWarpingDixon(OnlineAlignment):
@@ -55,10 +56,14 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
     frame_per_seg : int
         Number of frames per segment (audio chunk).
 
+    frame_rate : int
+        Frame rate of the audio stream.
+
     Attributes
     ----------
     warping_path : np.ndarray [shape=(2, T)]
         Warping path with pairs of indices of the reference and target features.
+        where warping_path[0] is the index of the reference feature and warping_path[1] is the index of the target(input) feature.
     """
 
     local_cost_fun: str
@@ -71,13 +76,14 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         local_cost_fun=DEFAULT_LOCAL_COST,
         max_run_count=MAX_RUN_COUNT,
         frame_per_seg=FRAME_PER_SEG,
+        frame_rate=FRAME_RATE,
     ):
         super().__init__(reference_features=reference_features)
         self.N_ref = self.reference_features.shape[1]
         self.input_features = np.zeros(
             (self.reference_features.shape[0], self.N_ref * 3)  # [F, 3N]
         )
-        self.w = window_size
+        self.w = window_size * frame_rate
         self.local_cost_fun = local_cost_fun
         self.max_run_count = max_run_count
         self.frame_per_seg = frame_per_seg
@@ -327,3 +333,5 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             self.input_index += 1
 
         pbar.close()
+
+        return self.wp

@@ -96,7 +96,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         super().__init__(reference_features=reference_features)
 
         self.input_features: List[NDArray[np.float64]] = []
-        self.queue = queue
+        self.queue = queue or RECVQueue()
 
         if not (isinstance(local_cost_fun, (str, tuple)) or callable(local_cost_fun)):
             raise MatchmakerInvalidParameterTypeError(
@@ -185,7 +185,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.positions = []
         self._warping_path: List = []
         self.global_cost_matrix = (
-            np.ones((reference_features.shape[0] + 1, 2)) * np.infty
+            np.ones((self.reference_features.shape[0] + 1, 2)) * np.infty
         )
         self.input_index = 0
         self.update_window_index = False
