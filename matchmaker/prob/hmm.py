@@ -78,7 +78,7 @@ class BaseHMM(OnlineAlignment, HiddenMarkovModel):
 
         self.tempo_model = tempo_model
         self.has_insertions = has_insertions
-        self.input_counter = 0
+        self.input_index = 0
         self._warping_path = []
         self.queue = queue
 
@@ -92,8 +92,8 @@ class BaseHMM(OnlineAlignment, HiddenMarkovModel):
             observation=input,
             log_probabilities=False,
         )
-        self._warping_path.append((self.input_counter, current_state))
-        self.input_counter += 1
+        self._warping_path.append((current_state, self.input_index))
+        self.input_index += 1
 
         return self.state_space[current_state]
     
