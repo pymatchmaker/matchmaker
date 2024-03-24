@@ -3,7 +3,7 @@
 """
 On-line Dynamic Time Warping
 """
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union, Optional
 
 import numpy as np
 from numpy.typing import NDArray
@@ -19,6 +19,7 @@ from matchmaker.utils.distances import Metric, vdist
 from matchmaker.utils.misc import (
     MatchmakerInvalidOptionError,
     MatchmakerInvalidParameterTypeError,
+    RECVQueue,
 )
 
 DEFAULT_LOCAL_COST: str = "Manhattan"
@@ -90,10 +91,12 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         ] = DEFAULT_LOCAL_COST,
         start_window_size: int = START_WINDOW_SIZE,
         current_position: int = 0,
+        queue: Optional[RECVQueue] = None,
     ) -> None:
         super().__init__(reference_features=reference_features)
 
         self.input_features: List[NDArray[np.float32]] = []
+        self.queue = queue or RECVQueue()
 
         if not (isinstance(local_cost_fun, (str, tuple)) or callable(local_cost_fun)):
             raise MatchmakerInvalidParameterTypeError(
@@ -145,9 +148,10 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.window_size: int = window_size
         self.step_size: int = step_size
         self.start_window_size: int = start_window_size
+        self.init_position: int = current_position
         self.current_position: int = current_position
         self.positions: List[int] = []
-        self.warping_path: List = []
+        self._warping_path: List = []
         self.global_cost_matrix: NDArray[np.float32] = (
             np.ones((reference_features.shape[0] + 1, 2)) * np.infty
         ).astype(np.float32)
@@ -155,10 +159,38 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.go_backwards: bool = False
         self.update_window_index: bool = False
         self.restart: bool = False
+        self.is_following: bool = False
+
+    @property
+    def warping_path(self) -> NDArray[np.int32]:
+        wp = (np.array(self._warping_path).T).astype(np.int32)
+        return wp
 
     def __call__(self, input: NDArray[np.float32]) -> int:
         self.step(input)
         return self.current_position
+
+    def run(self) -> None:
+        self.reset()
+        while self.is_still_following():
+            features = self.queue.get()
+            self.step(features)
+
+        return self.warping_path
+
+    def is_still_following(self):
+        # TODO: check stopping if the follower is stuck.
+        return self.current_position <= self.N_ref
+
+    def reset(self) -> None:
+        self.current_position = self.init_position
+        self.positions = []
+        self._warping_path: List = []
+        self.global_cost_matrix = (
+            np.ones((self.reference_features.shape[0] + 1, 2)) * np.infty
+        )
+        self.input_index = 0
+        self.update_window_index = False
 
     def get_window(self) -> Tuple[int, int]:
         w_size = self.window_size
@@ -213,6 +245,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
                 self.current_position + self.step_size,
             )
 
+        self.warping_path.append((self.current_position, self.input_index))
         # update input index
         self.input_index += 1
 
