@@ -3,7 +3,7 @@
 """
 On-line Dynamic Time Warping
 """
-from typing import Any, Callable, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union, Optional
 
 import numpy as np
 from numpy.typing import NDArray
@@ -167,7 +167,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
     def __call__(self, input: NDArray[np.float64]) -> int:
         self.step(input)
         return self.current_position
-    
+
     def run(self) -> None:
         self.reset()
         while self.is_still_following():
@@ -175,11 +175,10 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             self.step(features)
 
         return self.warping_path
-    
+
     def is_still_following(self):
         # TODO: check stopping if the follower is stuck.
         return self.current_position <= self.N_ref
-
 
     def reset(self) -> None:
         self.current_position = self.init_position

@@ -77,7 +77,6 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.input_features = np.zeros(
             (self.reference_features.shape[0], self.N_ref * 3)  # [F, 3N]
         )
-        self.window_size = window_size
         self.w = window_size
         self.local_cost_fun = local_cost_fun
         self.max_run_count = max_run_count
@@ -89,10 +88,6 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.target_pointer = 0
         self.input_index: int = 0
         self.previous_direction = None
-
-    # def __call__(self, input: NDArray[np.float32]) -> int:
-    #     self.step(input)
-    #     return self.current_position
 
     @property
     def warping_path(self) -> NDArray[np.float32]:  # [shape=(2, T)]
@@ -307,7 +302,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
 
         pbar = tqdm(total=self.N_ref)
         while self.is_still_following():
-            updated_position = self.wp[1][-1]
+            updated_position = self.wp[0][-1]
             pbar.update(updated_position - self.current_position)
             pbar.set_description(
                 f"[{self.ref_pointer}/{self.N_ref}] ref: {self.ref_pointer}, target: {self.target_pointer}"
