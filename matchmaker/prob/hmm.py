@@ -3,7 +3,7 @@
 """
 This module implements Hidden Markov Models for score following
 """
-from typing import Optional, Union, Tuple, Dict, Any, Callable
+from typing import Optional, Union, Tuple, Dict, Any, Callable, List
 
 import numpy as np
 import scipy.spatial.distance as sp_dist
@@ -18,13 +18,14 @@ from scipy.stats import gumbel_l
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.utils.tempo_models import TempoModel
+from matchmaker.utils.misc import RECVQueue
 
 # Alias for typing arrays
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]
 
 
-class BaseHMM(HiddenMarkovModel, OnlineAlignment):
+class BaseHMM(OnlineAlignment, HiddenMarkovModel):
     """
     Base class for Hidden Markov Model alignment methods.
 
@@ -51,6 +52,8 @@ class BaseHMM(HiddenMarkovModel, OnlineAlignment):
     state_space: Union[NDArrayFloat, NDArrayInt]
     tempo_model: Optional[TempoModel]
     has_insertions: bool
+    _warping_path: List[Tuple[int, int]]
+    queue: Optional[RECVQueue]
 
     def __init__(
         self,
@@ -59,6 +62,7 @@ class BaseHMM(HiddenMarkovModel, OnlineAlignment):
         state_space: Optional[Union[NDArrayFloat, NDArrayInt]] = None,
         tempo_model: Optional[TempoModel] = None,
         has_insertions: bool = False,
+        queue: Optional[RECVQueue] = None,
     ) -> None:
 
         HiddenMarkovModel.__init__(
@@ -67,7 +71,6 @@ class BaseHMM(HiddenMarkovModel, OnlineAlignment):
             transition_model=transition_model,
             state_space=state_space,
         )
-
         OnlineAlignment.__init__(
             self,
             reference_features=observation_model,
@@ -75,11 +78,31 @@ class BaseHMM(HiddenMarkovModel, OnlineAlignment):
 
         self.tempo_model = tempo_model
         self.has_insertions = has_insertions
+        self.input_counter = 0
+        self._warping_path = []
+        self.queue = queue
+
+    @property
+    def warping_path(self) -> NDArrayInt:
+        return (np.array(self._warping_path).T).astype(np.int32)
 
     def __call__(self, input: NDArrayFloat) -> float:
-        raise NotImplementedError(
-            "This method needs to be implemented in the subclasses"
+
+        current_state = self.forward_algorithm_step(
+            observation=input,
+            log_probabilities=False,
         )
+        self._warping_path.append((self.input_counter, current_state))
+        self.input_counter += 1
+
+        return self.state_space[current_state]
+    
+
+    def run(self):
+        if self.queue is not None:
+            inputs = self.queue.get()
+            pass
+
 
 
 class PitchHMM(BaseHMM):
@@ -122,6 +145,199 @@ class PitchHMM(BaseHMM):
         )
 
         return self.state_space[current_state]
+
+
+def gumbel_transition_matrix(
+    n_states: int,
+    mp_trans_state: int = 1,
+    scale: float = 0.5,
+    inserted_states: bool = False,
+) -> NDArrayFloat:
+    """
+    Compute a transiton matrix, where each row follows a normalized Gumbel
+    distribution.
+
+    Parameters
+    ----------
+    n_states : int
+        The number of states in the Hidden Markov Model (HMM), which is required
+        for the size of the matrix.
+
+    mp_trans_state : int
+        Which state should have the largest probability to be transitioned into
+        from the current state the model is in.
+        Default = 1, which means that the model would prioritize transitioning
+        into the state that is next in line, e.g. from State 3 to State 4.
+
+    scale : float
+        The scale parameter of the distribution.
+        Default = 0.5
+
+    inserted_states : boolean
+        Indicates whether the HMM includes inserted states (intermediary states
+        between chords for errors and insertions in the score following).
+        Default = True
+
+    Returns
+    -------
+    transition_matrix : numpy array
+        The computed transition matrix for the HMM.
+    """
+    # Initialize transition matrix:
+    transition_matrix = np.zeros((n_states, n_states), dtype="f8")
+
+    # Compute transition matrix:
+    for i in range(n_states):
+        if inserted_states:
+            if np.mod(i, 2) == 0:
+                transition_matrix[i] = gumbel_l.pdf(
+                    np.arange(n_states), loc=i + mp_trans_state * 2, scale=scale
+                )
+            else:
+                transition_matrix[i] = gumbel_l.pdf(
+                    np.arange(n_states), loc=i + mp_trans_state * 2 - 1, scale=scale
+                )
+        else:
+            transition_matrix[i] = gumbel_l.pdf(
+                np.arange(n_states), loc=i + mp_trans_state * 2 - 1, scale=scale
+            )
+
+    # Normalize transition matrix (so that it is a proper stochastic matrix):
+    transition_matrix /= transition_matrix.sum(1, keepdims=True)
+
+    # Return the computed transition matrix:
+    return transition_matrix
+
+
+def gumbel_init_dist(
+    n_states: int,
+    loc: int = 0,
+    scale: float = 10,
+) -> NDArrayFloat:
+    """
+    Compute the initial probabilites for all states in the Hidden Markov Model
+    (HMM), which follow a Gumbel distribution.
+
+    Parameters
+    ----------
+    n_states : int
+        The number of states in the Hidden Markov Model (HMM), which is required
+        for the size of the initial probabilites vector.
+
+    Returns
+    -------
+    init_probs : numpy array
+        The computed initial probabilities in the form of a vector.
+    """
+
+    prob_scale: float = scale if scale < n_states else n_states / 10
+
+    init_probs: np.ndarray = gumbel_l.pdf(
+        np.arange(n_states),
+        loc=loc,
+        scale=prob_scale,
+    )
+
+    return init_probs
+
+
+def compute_discrete_pitch_profiles(
+    chord_pitches,
+    profile=np.array([0.02, 0.02, 1, 0.02, 0.02]),
+    eps=0.01,
+    piano_range=False,
+    normalize=True,
+    inserted_states=True,
+):
+    """
+    Pre-compute the pitch profiles used in calculating the pitch
+    observation probabilities.
+
+    Parameters
+    ----------
+    chord_pitches : array-like
+        The pitches of each chord in the piece.
+
+    profile : numpy array
+        The probability "gain" of how probable are the closest pitches to
+        the one in question.
+
+    eps : float
+        The epsilon value to be added to each pre-computed pitch profile.
+
+    piano_range : boolean
+        Indicates whether the possible MIDI pitches are to be restricted
+        within the range of a piano.
+
+    normalize : boolean
+        Indicates whether the pitch profiles are to be normalized.
+
+    inserted_states : boolean
+        Indicates whether the HMM uses inserted states between chord states.
+
+    Returns
+    -------
+    pitch_profiles : numpy array
+        The pre-computed pitch profiles.
+    """
+    # Compute the high and low contexts:
+    low_context = profile.argmax()
+    high_context = len(profile) - profile.argmax()
+
+    # Get the number of states, based on the presence of inserted states:
+    if inserted_states:
+        n_states = 2 * len(chord_pitches) - 1
+    else:
+        n_states = len(chord_pitches)
+    # Initialize the numpy array to store the pitch profiles:
+    pitch_profiles = np.zeros((n_states, 128))
+
+    # Compute the profiles:
+    for i in range(n_states):
+        # Work on chord states (even indices), not inserted (odd indices):
+
+        if not inserted_states or (inserted_states and np.mod(i, 2) == 0):
+
+            chord = chord_pitches[i // 2] if inserted_states else chord_pitches[i]
+
+            for pitch in chord:
+                lowest_pitch = pitch - low_context
+                highest_pitch = pitch + high_context
+                # Compute the indices which are to be updated:
+                idx = slice(np.maximum(lowest_pitch, 0), np.minimum(highest_pitch, 128))
+                # Add the values:
+                pitch_profiles[i, idx] += profile
+
+        # Add the extra value:
+        pitch_profiles[i] += eps
+
+    # Check whether to trim and normalize:
+    if piano_range:
+        pitch_profiles = pitch_profiles[:, 21:109]
+    if normalize:
+        pitch_profiles /= pitch_profiles.sum(1, keepdims=True)
+
+    # Return the profiles:
+    return pitch_profiles
+
+
+def compute_ioi_matrix(unique_onsets, inserted_states=False):
+
+    # Construct unique onsets with skips:
+    if inserted_states:
+        unique_onsets_s = np.insert(
+            unique_onsets,
+            np.arange(1, len(unique_onsets)),
+            (unique_onsets[:-1] + 0.5 * np.diff(unique_onsets)),
+        )
+        ioi_matrix = sp_dist.squareform(sp_dist.pdist(unique_onsets_s.reshape(-1, 1)))
+
+    # ... or without skips:
+    else:
+        unique_onsets_s = unique_onsets
+        ioi_matrix = sp_dist.squareform(sp_dist.pdist(unique_onsets.reshape(-1, 1)))
+
+    return ioi_matrix
 
 
 def compute_bernoulli_pitch_probabilities(
@@ -247,7 +463,7 @@ class PitchIOIObservationModel(ObservationModel):
         return obs_prob
 
 
-class BernoulliGaussianPitchIOIObservationModel(ObservationModel):
+class BernoulliGaussianPitchIOIObservationModel(PitchIOIObservationModel):
     def __init__(self, pitch_profiles, ioi_matrix, ioi_precision):
         """
         The initialization method.
@@ -267,32 +483,22 @@ class BernoulliGaussianPitchIOIObservationModel(ObservationModel):
             The precision parameter for computing the IOI observation
             probability.
         """
-        super().__init__(use_log_probabilities=False)
-        # Store the parameters of the object:
-        self.pitch_profiles = pitch_profiles
-        self.ioi_matrix = ioi_matrix
-        self.ioi_precision = ioi_precision
-        # Compute the IOI normalization term:
-        self.ioi_norm_term = np.sqrt(0.5 * self.ioi_precision / np.pi)
-        self.current_state = None
 
-    def __call__(self, observation: Tuple[NDArrayFloat, float, float]) -> NDArray:
-        pitch_obs, ioi_obs, tempo_est = observation
-        ioi_idx = self.current_state if self.current_state is not None else 0
-
-        ioi_score = self.ioi_matrix[ioi_idx]
-        observation_prob = compute_bernoulli_pitch_probabilities(
-            pitch_obs=pitch_obs,
-            pitch_profiles=self.pitch_profiles,
-        ) * compute_gaussian_ioi_observation_probability(
-            ioi_obs=ioi_obs,
-            ioi_score=ioi_score,
-            tempo_est=tempo_est,
-            ioi_precision=self.ioi_precision,
-            norm_term=self.ioi_norm_term,
+        pitch_prob_args = dict(
+            pitch_profiles=pitch_profiles,
         )
-
-        return observation_prob
+        ioi_prob_args = dict(
+            ioi_precision=ioi_precision,
+            norm_term=np.sqrt(0.5 * self.ioi_precision / np.pi),
+        )
+        PitchIOIObservationModel.__init__(
+            self,
+            pitch_obs_prob_func=compute_bernoulli_pitch_probabilities,
+            ioi_obs_prob_func=compute_gaussian_ioi_observation_probability,
+            ioi_matrix=ioi_matrix,
+            pitch_prob_args=pitch_prob_args,
+            ioi_prob_args=ioi_prob_args,
+        )
 
 
 class PitchIOIHMM(HiddenMarkovModel, OnlineAlignment):

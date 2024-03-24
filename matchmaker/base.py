@@ -13,7 +13,6 @@ class OnlineAlignment(object):
     """
 
     def __init__(self, reference_features: Any) -> None:
-        super().__init__()
         self.reference_features: Any = reference_features
 
     def __call__(self, input: Any) -> float:
