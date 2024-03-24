@@ -245,7 +245,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
                 self.current_position + self.step_size,
             )
 
-        self.warping_path.append((self.current_position, self.input_index))
+        self._warping_path.append((self.current_position, self.input_index))
         # update input index
         self.input_index += 1
 
