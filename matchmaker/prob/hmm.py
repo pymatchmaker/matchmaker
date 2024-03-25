@@ -18,7 +18,7 @@ from scipy.stats import gumbel_l
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.utils.tempo_models import TempoModel
-from matchmaker.utils.misc import RECVQueue
+from matchmaker.utils.misc import RECVQueue, get_window_indices
 
 # Alias for typing arrays
 NDArrayFloat = NDArray[np.float32]
@@ -63,6 +63,7 @@ class BaseHMM(OnlineAlignment, HiddenMarkovModel):
         tempo_model: Optional[TempoModel] = None,
         has_insertions: bool = False,
         queue: Optional[RECVQueue] = None,
+        patience: int = 10,
     ) -> None:
 
         HiddenMarkovModel.__init__(
@@ -81,6 +82,8 @@ class BaseHMM(OnlineAlignment, HiddenMarkovModel):
         self.input_index = 0
         self._warping_path = []
         self.queue = queue
+        self.patience = patience
+        self.current_state = None
 
     @property
     def warping_path(self) -> NDArrayInt:
@@ -94,15 +97,36 @@ class BaseHMM(OnlineAlignment, HiddenMarkovModel):
         )
         self._warping_path.append((current_state, self.input_index))
         self.input_index += 1
+        self.current_state = current_state
 
         return self.state_space[current_state]
-    
 
-    def run(self):
+    def run(self) -> NDArrayInt:
         if self.queue is not None:
-            inputs = self.queue.get()
-            pass
 
+            prev_state = self.current_state
+            same_state_counter = 0
+            while self.is_still_following():
+                target_feature = self.queue.get()
+
+                current_state = self(target_feature)
+
+                if current_state == prev_state:
+                    if same_state_counter < self.patience:
+                        same_state_counter += 1
+                    else:
+                        break
+                else:
+                    same_state_counter = 0
+
+            return self.warping_path
+
+    def is_still_following(self) -> bool:
+        if self.current_state is not None:
+
+            return self.current_state <= self.n_states
+
+        return False
 
 
 class PitchHMM(BaseHMM):
@@ -136,15 +160,6 @@ class PitchHMM(BaseHMM):
             tempo_model=None,
             has_insertions=has_insertions,
         )
-
-    def __call__(self, input: NDArrayFloat) -> float:
-
-        current_state = self.forward_algorithm_step(
-            observation=input,
-            log_probabilities=False,
-        )
-
-        return self.state_space[current_state]
 
 
 def gumbel_transition_matrix(
@@ -241,14 +256,52 @@ def gumbel_init_dist(
     return init_probs
 
 
-def compute_discrete_pitch_profiles(
-    chord_pitches,
-    profile=np.array([0.02, 0.02, 1, 0.02, 0.02]),
-    eps=0.01,
-    piano_range=False,
+def compute_continous_pitch_profiles(
+    spectral_features: NDArrayFloat,
+    spectral_feature_times: NDArrayFloat,
+    onset_times: NDArrayFloat,
+    eps: float = 0.01,
+    context: int = 3,
     normalize=True,
     inserted_states=True,
-):
+) -> NDArrayFloat:
+
+    onset_idxs_in_features = np.searchsorted(
+        a=spectral_feature_times,
+        v=onset_times,
+        side="left",
+    )
+
+    window_indices = get_window_indices(
+        indices=onset_idxs_in_features,
+        context=context,
+    )
+
+    mask = (window_indices >= 0)[:, :, np.newaxis]
+
+    _pitch_profiles = (spectral_features[window_indices] * mask).sum(1)
+
+    if inserted_states:
+        pitch_profiles = np.ones(2 * len(onset_times)) * eps
+
+        pitch_profiles[np.arange(len(onset_times)) * 2] += _pitch_profiles
+    else:
+        pitch_profiles = _pitch_profiles
+
+    if normalize:
+        pitch_profiles /= pitch_profiles.sum(1, keepdims=True)
+
+    return pitch_profiles
+
+
+def compute_discrete_pitch_profiles(
+    chord_pitches: NDArrayFloat,
+    profile: NDArrayFloat = np.array([0.02, 0.02, 1, 0.02, 0.02], dtype=np.float32),
+    eps: float = 0.01,
+    piano_range: bool = False,
+    normalize: bool = True,
+    inserted_states: bool = True,
+) -> NDArrayFloat:
     """
     Pre-compute the pitch profiles used in calculating the pitch
     observation probabilities.
@@ -318,7 +371,7 @@ def compute_discrete_pitch_profiles(
         pitch_profiles /= pitch_profiles.sum(1, keepdims=True)
 
     # Return the profiles:
-    return pitch_profiles
+    return pitch_profiles.astype(np.float32)
 
 
 def compute_ioi_matrix(unique_onsets, inserted_states=False):

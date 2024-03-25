@@ -13,8 +13,11 @@ import numpy as np
 import partitura as pt
 from partitura.performance import PerformanceLike
 
-from matchmaker.io.midi import MockFramedMidiStream, MockMidiStream
+from matchmaker.io.midi import MockFramedMidiStream, MockMidiStream, POLLING_PERIOD
+from matchmaker.io.audio import MockAudioStream, SAMPLE_RATE, HOP_LENGTH, CHUNK_SIZE
 from matchmaker.utils.misc import RECVQueue
+from matchmaker.utils.symbolic import save_wav_fluidsynth
+import tempfile
 
 # Random number generator
 RNG = np.random.RandomState(1984)
@@ -246,7 +249,7 @@ def generate_example_sequences(
 def process_midi_offline(
     perf_info: Union[PerformanceLike, str],
     features: List[Callable],
-    polling_period: Optional[float] = 0.01,
+    polling_period: Optional[float] = POLLING_PERIOD,
 ) -> List[Any]:
     """
     Helper method to process all MIDI
@@ -279,6 +282,54 @@ def process_midi_offline(
 
     return outputs
 
+
+def process_audio_offline(
+        perf_info: Union[PerformanceLike, str],
+        features: List[Callable],
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+        chunk_size: int = CHUNK_SIZE,
+) -> List[Any]:
+    
+    queue = RECVQueue()
+
+    if isinstance(perf_info, str):
+        file_path = perf_info
+        temp_file = None
+    elif isinstance(perf_info, (pt.score.Score, pt.performance.Performance, pt.score.Part, pt.performance.PerformedPart,)):
+        # TODO modify mock audio stream to handle
+        # an input numpy array
+
+        # Create a temporary file and get its path
+        temp_file = tempfile.NamedTemporaryFile(delete=True, suffix=".wav") 
+        file_path = temp_file.name
+
+        save_wav_fluidsynth(
+            input_data=perf_info,
+            out=file_path,
+        )
+    
+    input_stream = MockAudioStream(
+        file_path=file_path,
+        queue=queue,
+        features=features,
+        sample_rate=sample_rate,
+        hop_length=hop_length,
+        chunk_size=chunk_size,
+    )
+
+    input_stream.start()
+    input_stream.join()
+
+    outputs = list(queue.queue)
+
+    if temp_file is not None:
+        temp_file.close()
+
+    return outputs
+# Create a temporary file and get its path
+temp_file = tempfile.NamedTemporaryFile(delete=False)
+temp_file_path = temp_file.name
 
 if __name__ == "__main__":
 

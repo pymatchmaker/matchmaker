@@ -101,3 +101,16 @@ class RECVQueue(Queue):
 
     def poll(self) -> bool:
         return self.empty()
+    
+
+def get_window_indices(indices: np.ndarray, context: int) -> np.ndarray:
+    # Create a range array from -context to context (inclusive)
+    range_array = np.arange(-context, context + 1)
+    
+    # Reshape indices to be a column vector (len(indices), 1)
+    indices = indices[:, np.newaxis]
+    
+    # Use broadcasting to add the range array to each index
+    out_array = indices + range_array
+
+    return out_array.astype(int)
