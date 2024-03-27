@@ -23,9 +23,10 @@ from matchmaker.utils.misc import (
 )
 
 DEFAULT_LOCAL_COST: str = "Manhattan"
-WINDOW_SIZE: int = 100
+WINDOW_SIZE: int = 5
 STEP_SIZE: int = 5
-START_WINDOW_SIZE: int = 60
+START_WINDOW_SIZE: int = 1
+FRAME_RATE: int = 50
 
 
 class OnlineTimeWarpingArzt(OnlineAlignment):
@@ -91,7 +92,9 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         ] = DEFAULT_LOCAL_COST,
         start_window_size: int = START_WINDOW_SIZE,
         current_position: int = 0,
+        frame_rate: int = FRAME_RATE,
         queue: Optional[RECVQueue] = None,
+        **kwargs,
     ) -> None:
         super().__init__(reference_features=reference_features)
 
@@ -145,15 +148,15 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             )
 
         self.N_ref: int = self.reference_features.shape[0]
-        self.window_size: int = window_size
+        self.window_size: int = window_size * frame_rate
         self.step_size: int = step_size
-        self.start_window_size: int = start_window_size
+        self.start_window_size: int = start_window_size * frame_rate
         self.init_position: int = current_position
         self.current_position: int = current_position
         self.positions: List[int] = []
         self._warping_path: List = []
         self.global_cost_matrix: NDArray[np.float32] = (
-            np.ones((reference_features.shape[0] + 1, 2)) * np.infty
+            np.ones((reference_features.shape[0] + 1, 2), dtype=np.float32) * np.infty
         ).astype(np.float32)
         self.input_index: int = 0
         self.go_backwards: bool = False
@@ -180,14 +183,15 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
 
     def is_still_following(self):
         # TODO: check stopping if the follower is stuck.
-        return self.current_position <= self.N_ref
+        return self.current_position <= self.N_ref - 2
 
     def reset(self) -> None:
         self.current_position = self.init_position
         self.positions = []
         self._warping_path: List = []
         self.global_cost_matrix = (
-            np.ones((self.reference_features.shape[0] + 1, 2)) * np.infty
+            np.ones((self.reference_features.shape[0] + 1, 2), dtype=np.float32)
+            * np.infty
         )
         self.input_index = 0
         self.update_window_index = False
@@ -215,7 +219,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         # compute local cost beforehand as it is much faster (~twice as fast)
         window_cost = self.vdist(
             self.reference_features[window_start:window_end],
-            input_features,
+            input_features.squeeze(),
             self.local_cost_fun,
         )
 
@@ -245,7 +249,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
                 self.current_position + self.step_size,
             )
 
-        self.warping_path.append((self.current_position, self.input_index))
+        self._warping_path.append((self.current_position, self.input_index))
         # update input index
         self.input_index += 1
 

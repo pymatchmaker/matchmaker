@@ -77,6 +77,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         max_run_count=MAX_RUN_COUNT,
         frame_per_seg=FRAME_PER_SEG,
         frame_rate=FRAME_RATE,
+        **kwargs,
     ):
         super().__init__(reference_features=reference_features)
         self.N_ref = self.reference_features.shape[1]
