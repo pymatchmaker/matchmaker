@@ -3,6 +3,7 @@
 """
 This module implements Hidden Markov Models for score following
 """
+import warnings
 from typing import Optional, Union, Tuple, Dict, Any, Callable, List
 
 import numpy as np
@@ -18,7 +19,11 @@ from scipy.stats import gumbel_l
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.utils.tempo_models import TempoModel
-from matchmaker.utils.misc import RECVQueue, get_window_indices
+from matchmaker.utils.misc import (
+    MatchmakerMissingParameterError,
+    RECVQueue,
+    get_window_indices,
+)
 
 # Alias for typing arrays
 NDArrayFloat = NDArray[np.float32]
@@ -554,7 +559,7 @@ class BernoulliGaussianPitchIOIObservationModel(PitchIOIObservationModel):
         )
 
 
-class PitchIOIHMM(HiddenMarkovModel, OnlineAlignment):
+class PitchIOIHMM(BaseHMM):
     """
     Implements the behavior of a HiddenMarkovModel, specifically designed for
     the task of score following.
@@ -585,14 +590,18 @@ class PitchIOIHMM(HiddenMarkovModel, OnlineAlignment):
 
     def __init__(
         self,
-        transition_matrix: np.ndarray,
-        pitch_profiles: np.ndarray,
-        ioi_matrix: np.ndarray,
         score_onsets: np.ndarray,
         tempo_model: TempoModel,
-        ioi_precision: float = 1,
+        transition_model: Optional[TransitionModel] = None,
+        observation_model: Optional[PitchIOIObservationModel] = None,
+        transition_matrix: Optional[NDArrayFloat] = None,
+        pitch_obs_prob_func: Optional[Callable[..., NDArrayFloat]] = None,
+        ioi_obs_prob_func: Optional[Callable[..., NDArrayFloat]] = None,
+        ioi_matrix: Optional[NDArrayFloat] = None,
+        pitch_prob_args: Optional[Dict[str, Any]] = None,
+        ioi_prob_args: Optional[Dict[str, Any]] = None,
         initial_probabilities: Optional[np.ndarray] = None,
-        has_insertions=True,
+        has_insertions: bool = True,
     ) -> None:
         """
         Initialize the object.
@@ -623,37 +632,88 @@ class PitchIOIHMM(HiddenMarkovModel, OnlineAlignment):
             be uniform.
             Default = None.
         """
-        # reference_features = (transition_matrix, pitch_profiles, ioi_matrix)
+        if transition_model is not None and transition_matrix is not None:
+            warnings.warn(
+                "Both `transition_model` and `transition_matrix` were "
+                "provided. Only `transition_model` will be used."
+            )
+        obs_model_params_given = [
+            pitch_obs_prob_func is not None,
+            ioi_obs_prob_func is not None,
+            ioi_matrix is not None,
+            pitch_prob_args is not None,
+            ioi_prob_args is not None,
+        ]
+        if observation_model is not None and any(obs_model_params_given):
+            warnings.warn(
+                "`observation_model` and params were provided. "
+                "Only `observation_model` will be used."
+            )
 
-        observation_model = PitchIOIObservationModel(
-            pitch_profiles=pitch_profiles,
-            ioi_matrix=ioi_matrix,
-            ioi_precision=ioi_precision,
-        )
+        if observation_model is None and not all(obs_model_params_given):
+            missing_params = [
+                pn
+                for pn, given in zip(
+                    [
+                        "pitch_obs_prob_func",
+                        "ioi_obs_prob_func",
+                        "ioi_matrix",
+                        "pitch_prob_args",
+                        "ioi_prob_args",
+                    ],
+                    obs_model_params_given,
+                )
+                if not given
+            ]
+            raise MatchmakerMissingParameterError(missing_params)
 
-        HiddenMarkovModel.__init__(
-            self,
-            observation_model=observation_model,
-            transition_model=ConstantTransitionModel(
+        if transition_model is None:
+            transition_model = ConstantTransitionModel(
                 transition_probabilities=transition_matrix,
                 init_probabilities=initial_probabilities,
-            ),
-            state_space=score_onsets,
-        )
+            )
 
-        OnlineAlignment.__init__(
+        if observation_model is None:
+            observation_model = PitchIOIObservationModel(
+                pitch_obs_prob_func=pitch_obs_prob_func,
+                ioi_obs_prob_func=ioi_obs_prob_func,
+                ioi_matrix=ioi_matrix,
+                pitch_prob_args=pitch_prob_args,
+                ioi_prob_args=ioi_prob_args,
+            )
+
+        BaseHMM.__init__(
             self,
-            reference_features=observation_model,
+            observation_model=observation_model,
+            transition_model=transition_model,
+            state_space=score_onsets,
+            tempo_model=tempo_model,
+            has_insertions=has_insertions,
         )
-
-        self.tempo_model = tempo_model
-        self.has_insertions = has_insertions
 
     def __call__(self, input):
         self.current_state = self.forward_algorithm_step(
             observation=input + (self.tempo_model.beat_period,),
             log_probabilities=False,
         )
+        self._warping_path.append((current_state, self.input_index))
+        self.input_index += 1
+
+        if current_state > self.current_state:
+            
+            if self.has_insertions and current_state % 2 == 0:
+
+                current_so = self.state_space[current_state]
+                # prev_so = self.state_space[self.current_state]
+
+                self.tempo_model.update_beat_period(
+                    performed_onset=None,
+                    score_onset=current_so,
+                )
+
+        self.current_state = current_state
+
+
         return self.state_space[self.current_state]
 
     @property

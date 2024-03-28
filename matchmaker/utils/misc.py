@@ -5,7 +5,7 @@ Miscellaneous utilities
 """
 import numbers
 from queue import Empty, Queue
-from typing import Any, Iterable, Union
+from typing import Any, Iterable, Union, List
 
 import numpy as np
 
@@ -43,6 +43,21 @@ class MatchmakerInvalidOptionError(Exception):
         message = f"`{parameter_name}` was expected to be in {rqop}, but is {value}"
 
         super().__init__(message, *args)
+
+class MatchmakerMissingParameterError(Exception):
+    """
+    Error for flagging a missing parameter
+    """
+
+    def __init__(self, parameter_name: Union[str, List[str]], *args) -> None:
+
+        if isinstance(parameter_name, Iterable) and not isinstance(parameter_name, str):
+            message = ", ".join([f"`{pn}`" for pn in parameter_name])
+            message = f"{message} were not given"
+        else:
+            message = f"`{parameter_name}` was not given."
+        super().__init__(message, *args)
+
 
 
 def ensure_rng(

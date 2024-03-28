@@ -48,11 +48,13 @@ class TempoModel(object):
     asynchrony: float
     has_tempo_expectations: bool
     counter: int
+    score_onsets: np.ndarray
 
     def __init__(
         self,
         init_beat_period: float = 0.5,
         init_score_onset: float = 0,
+        score_onsets: Optional[np.ndarray] = None
     ) -> None:
         self.beat_period = init_beat_period
         self.prev_score_onset = init_score_onset
@@ -60,6 +62,7 @@ class TempoModel(object):
         self.est_onset = None
         self.asynchrony = 0.0
         self.has_tempo_expectations = False
+        self.score_onsets = score_onsets
         # Count how many times has the tempo model been
         # called
         self.counter = 0
@@ -126,11 +129,13 @@ class ReactiveTempoModel(TempoModel):
         self,
         init_beat_period: float = 0.5,
         init_score_onset: float = 0.0,
+        update_on_valid_onsets_only: bool = False,
     ) -> None:
         super().__init__(
             init_beat_period=init_beat_period,
             init_score_onset=init_score_onset,
         )
+        self.update_on_valid_onsets_only = update_on_valid_onsets_only
 
     def update_beat_period(
         self,
@@ -140,6 +145,8 @@ class ReactiveTempoModel(TempoModel):
         """
         See documentation in SyncModel above.
         """
+
+        
         self.est_onset = performed_onset
         if self.prev_perf_onset:
             s_ioi = abs(score_onset - self.prev_score_onset)
