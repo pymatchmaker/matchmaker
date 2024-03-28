@@ -68,7 +68,9 @@ class AudioStream(threading.Thread, Stream):
 
     def _process_feature(self, target_audio, f_time):
         if self.last_chunk is None:  # add zero padding at the first block
-            target_audio = np.concatenate((np.zeros(self.hop_length), target_audio))
+            target_audio = np.concatenate(
+                (np.zeros(self.hop_length, dtype=np.float32), target_audio)
+            )
         else:
             # add last chunk at the beginning of the block
             # ex) making 5 block, 1 block overlap -> 4 frames each time
@@ -80,7 +82,7 @@ class AudioStream(threading.Thread, Stream):
             stacked_features = (
                 feature_output
                 if stacked_features is None
-                else np.vstack((stacked_features, feature_output))
+                else np.concatenate((stacked_features, feature_output), axis=1)
             )
         self.queue.put(stacked_features)
         self.last_chunk = target_audio[-self.hop_length :]
@@ -159,7 +161,7 @@ class MockAudioStream(AudioStream):
         duration = int(librosa.get_duration(path=self.file_path))
         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
-            (audio_y, np.zeros(duration * 2 * self.sample_rate))
+            (audio_y, np.zeros(duration * 2 * self.sample_rate, dtype=np.float32))
         )
         trimmed_audio = padded_audio[  # trim to multiple of chunk_size
             : len(padded_audio) - (len(padded_audio) % self.chunk_size)

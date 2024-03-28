@@ -51,8 +51,9 @@ class ChromagramProcessor(Processor):
             n_chroma=self.n_chroma,
             norm=self.norm,
             center=False,
+            dtype=np.float32,
         )
-        return chroma
+        return chroma.T
 
 
 class MFCCProcessor(Processor):
@@ -84,7 +85,7 @@ class MFCCProcessor(Processor):
             dct_type=self.dct_type,
             center=False,
         )
-        return mfcc
+        return mfcc.T
 
 
 class MelSpectrogramProcessor(Processor):
@@ -113,7 +114,7 @@ class MelSpectrogramProcessor(Processor):
             n_mels=self.n_mels,
             center=False,
         )
-        return mel_spectrogram
+        return mel_spectrogram.T
 
 
 def compute_features_from_audio(
@@ -136,7 +137,7 @@ def compute_features_from_audio(
         stacked_features = (
             feature
             if stacked_features is None
-            else np.vstack((stacked_features, feature))
+            else np.concatenate((stacked_features, feature), axis=1)
         )
 
     return feature_processors, stacked_features
