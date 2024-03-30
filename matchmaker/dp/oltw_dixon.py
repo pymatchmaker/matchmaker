@@ -3,6 +3,7 @@
 """
 On-line Dynamic Time Warping
 """
+import time
 from enum import IntEnum
 from typing import Callable
 
@@ -12,9 +13,8 @@ from numpy.typing import NDArray
 from tqdm import tqdm
 
 from matchmaker.base import OnlineAlignment
+from matchmaker.features.audio import SAMPLE_RATE
 from matchmaker.utils.misc import RECVQueue
-from matchmaker.features.audio import SAMPLE_RATE, HOP_LENGTH
-from matchmaker.io.audio import CHUNK_SIZE
 
 
 class Direction(IntEnum):
@@ -28,10 +28,10 @@ class Direction(IntEnum):
 DEFAULT_LOCAL_COST: str = "euclidean"
 FRAME_RATE = 25
 MAX_RUN_COUNT: int = 30
-CHUNK_SIZE = 4
 WINDOW_SIZE = 5
 HOP_LENGTH = SAMPLE_RATE // FRAME_RATE
-FRAME_PER_SEG = CHUNK_SIZE
+FRAME_PER_SEG = 1
+QUEUE_TIMEOUT = 10
 
 
 class OnlineTimeWarpingDixon(OnlineAlignment):
@@ -95,6 +95,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.target_pointer = 0
         self.input_index: int = 0
         self.previous_direction = None
+        self.last_queue_update = time.time()
 
     @property
     def warping_path(self) -> NDArray[np.float32]:  # [shape=(2, T)]
@@ -105,13 +106,13 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         offset_y = max(self.target_pointer - self.w, 0)
         return np.array([offset_x, offset_y])
 
-    def init_dist_matrix(self):
-        ref_stft_seg = self.reference_features[:, : self.ref_pointer]  # [F, M]
-        target_stft_seg = self.input_features[:, : self.target_pointer]  # [F, N]
-        dist = scipy.spatial.distance.cdist(
-            ref_stft_seg.T, target_stft_seg.T, metric=self.local_cost_fun
-        )
-        self.dist_matrix[self.w - dist.shape[0] :, self.w - dist.shape[1] :] = dist
+    # def init_dist_matrix(self):
+    #     ref_stft_seg = self.reference_features[: self.ref_pointer]  # [F, M]
+    #     target_stft_seg = self.input_features[: self.target_pointer]  # [F, N]
+    #     dist = scipy.spatial.distance.cdist(
+    #         ref_stft_seg.T, target_stft_seg.T, metric=self.local_cost_fun
+    #     )
+    #     self.dist_matrix[self.w - dist.shape[0] :, self.w - dist.shape[1] :] = dist
 
     def init_matrix(self):
         x = self.ref_pointer
@@ -298,9 +299,11 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             target_feature
         )
         self.target_pointer += q_length
+        self.last_queue_update = time.time()
 
     def is_still_following(self):
-        return self.ref_pointer <= (self.N_ref - self.frame_per_seg)
+        no_update = time.time() - self.last_queue_update > QUEUE_TIMEOUT
+        return self.ref_pointer <= (self.N_ref - self.frame_per_seg) and not no_update
 
     def run(self):
         self.ref_pointer += self.w
