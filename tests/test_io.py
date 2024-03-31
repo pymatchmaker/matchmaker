@@ -24,7 +24,11 @@ class TestMockAudioStream(unittest.TestCase):
         sr = 22050
         hop_length = 256
         queue = RECVQueue()
-        features = [ChromagramProcessor(), MFCCProcessor(), MelSpectrogramProcessor()]
+        features = [
+            ChromagramProcessor(sample_rate=sr, hop_length=hop_length),
+            MFCCProcessor(sample_rate=sr, hop_length=hop_length),
+            MelSpectrogramProcessor(sample_rate=sr, hop_length=hop_length),
+        ]
         chunk_size = 1024
         self.stream = MockAudioStream(
             sample_rate=sr,
@@ -45,7 +49,7 @@ class TestMockAudioStream(unittest.TestCase):
 
         # When: the stream is started
         self.stream.start()
-        time.sleep(2)  # wait for stream thread to start
+        time.sleep(5)  # wait for stream thread to start
 
         # Then: the stream is listening and is alive
         self.assertTrue(self.stream.listen)
@@ -107,7 +111,6 @@ class TestMockAudioStream(unittest.TestCase):
             )
             expected_shape = (
                 features_len,
-                int(self.stream.chunk_size / self.stream.hop_length)
-                - 1,  # windowed frames
+                int(self.stream.chunk_size / self.stream.hop_length),  # windowed frames
             )
             self.assertEqual(feature.shape, expected_shape)

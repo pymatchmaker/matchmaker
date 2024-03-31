@@ -13,8 +13,10 @@ import pyaudio
 
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import DummySequentialOutputProcessor, Stream
+from matchmaker.features.audio import HOP_LENGTH, SAMPLE_RATE
 
 CHANNELS = 1
+CHUNK_SIZE = 4 * HOP_LENGTH
 
 
 class AudioStream(threading.Thread, Stream):
@@ -37,11 +39,11 @@ class AudioStream(threading.Thread, Stream):
 
     def __init__(
         self,
-        sample_rate: int,
-        hop_length: int,
         queue: RECVQueue,
         features: List[Callable],
-        chunk_size: int = None,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+        chunk_size: int = CHUNK_SIZE,
     ):
         if features is None:
             features = DummySequentialOutputProcessor()
@@ -50,7 +52,7 @@ class AudioStream(threading.Thread, Stream):
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.queue = queue
-        self.chunk_size = chunk_size or hop_length * 4
+        self.chunk_size = chunk_size * self.hop_length
         self.format = pyaudio.paFloat32
         self.audio_interface = pyaudio.PyAudio()
         self.audio_stream: Optional[pyaudio.Stream] = None
@@ -65,16 +67,25 @@ class AudioStream(threading.Thread, Stream):
         return (data, pyaudio.paContinue)
 
     def _process_feature(self, target_audio, f_time):
-        stacked_features = None
+        if self.last_chunk is None:  # add zero padding at the first block
+            target_audio = np.concatenate(
+                (np.zeros(self.hop_length, dtype=np.float32), target_audio)
+            )
+        else:
+            # add last chunk at the beginning of the block
+            # ex) making 5 block, 1 block overlap -> 4 frames each time
+            target_audio = np.concatenate((self.last_chunk, target_audio))
+
+        stacked_features = None  # shape: (n_features, n_frames)
         for feature in self.features:
-            feature_output, _ = feature((target_audio, f_time), f_time)
+            feature_output = feature(target_audio)
             stacked_features = (
                 feature_output
                 if stacked_features is None
-                else np.vstack((stacked_features, feature_output))
+                else np.concatenate((stacked_features, feature_output), axis=1)
             )
-
         self.queue.put(stacked_features)
+        self.last_chunk = target_audio[-self.hop_length :]
 
     @property
     def current_time(self):
@@ -123,11 +134,11 @@ class MockAudioStream(AudioStream):
 
     def __init__(
         self,
-        sample_rate: int,
-        hop_length: int,
         queue: RECVQueue,
         features: List[Callable],
-        chunk_size: int = None,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+        chunk_size: int = CHUNK_SIZE,
         file_path: str = "",
     ):
         super().__init__(
@@ -150,7 +161,7 @@ class MockAudioStream(AudioStream):
         duration = int(librosa.get_duration(path=self.file_path))
         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
-            (audio_y, np.zeros(duration * 2 * self.sample_rate))
+            (audio_y, np.zeros(duration * 2 * self.sample_rate, dtype=np.float32))
         )
         trimmed_audio = padded_audio[  # trim to multiple of chunk_size
             : len(padded_audio) - (len(padded_audio) % self.chunk_size)
@@ -159,14 +170,14 @@ class MockAudioStream(AudioStream):
         while self.listen and trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
             f_time = time.time() - self.init_time
-            self._process_feature((target_audio, f_time), f_time)
+            self._process_feature(target_audio, f_time)
             trimmed_audio = trimmed_audio[self.chunk_size :]
 
         # fill empty values with zeros after stream is finished
         additional_padding_size = duration * 2 * self.sample_rate
         while self.listen and additional_padding_size > 0:
             f_time = time.time() - self.init_time
-            self._process_feature((target_audio, f_time), f_time)
+            self._process_feature(target_audio, f_time)
             additional_padding_size -= self.chunk_size
 
     def run(self):

@@ -106,5 +106,49 @@ class TempoModel(object):
         raise NotImplementedError
 
 
+class ReactiveTempoModel(TempoModel):
+    """
+    Reactive tempo model.
+
+    This sync model computes the tempo as the direct (raw) value of the performed
+    ioi divided by the notated ioi. This method is mostly intended for as a baseline
+    and is generally a poor choice of a tempo model.
+
+    Parameters
+    ----------
+    init_beat_period: float
+        Initial tempo in seconds per beat
+    init_score_onset: float
+        Initial score onset time in beats.
+    """
+
+    def __init__(
+        self,
+        init_beat_period: float = 0.5,
+        init_score_onset: float = 0.0,
+    ) -> None:
+        super().__init__(
+            init_beat_period=init_beat_period,
+            init_score_onset=init_score_onset,
+        )
+
+    def update_beat_period(
+        self,
+        performed_onset: float,
+        score_onset: float,
+    ) -> None:
+        """
+        See documentation in SyncModel above.
+        """
+        self.est_onset = performed_onset
+        if self.prev_perf_onset:
+            s_ioi = abs(score_onset - self.prev_score_onset)
+            p_ioi = abs(performed_onset - self.prev_perf_onset)
+            self.beat_period = p_ioi / s_ioi
+
+        self.prev_score_onset = score_onset
+        self.prev_perf_onset = performed_onset
+
+
 if __name__ == "__main__":
     pass

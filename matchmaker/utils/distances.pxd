@@ -8,4 +8,4 @@ cimport cython
 
 
 cdef class Metric:
-    cdef double distance(self, double[:] X, double[:] Y) except? 0.0
+    cdef float distance(self, float[:] X, float[:] Y) except? 0.0

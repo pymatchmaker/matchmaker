@@ -3,4 +3,3 @@
 """
 Tests for matchmaker
 """
-

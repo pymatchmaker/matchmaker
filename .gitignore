@@ -164,5 +164,13 @@ cython_debug/
 
 # VSCode
 .vscode
+
+
+# Matchmaker
 matchmaker/dp/dtw_loop.c
 matchmaker/utils/distances.c
+tests/dev*.py
+tests/tmp/
+
+*~
+tests/test_io_error_trace.txt

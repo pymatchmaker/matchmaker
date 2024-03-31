@@ -3,11 +3,18 @@
 """
 Utilities for tests
 """
-
 import numbers
-from typing import Iterable, Optional, Tuple
+import threading
+import time
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
+import mido
 import numpy as np
+import partitura as pt
+from partitura.performance import PerformanceLike
+
+from matchmaker.io.midi import MockFramedMidiStream, MockMidiStream
+from matchmaker.utils.misc import RECVQueue
 
 # Random number generator
 RNG = np.random.RandomState(1984)
@@ -20,6 +27,7 @@ def make_blobs(
     cluster_std=1.0,
     center_box=(-10.0, 10.0),
     random_state: np.random.RandomState = RNG,
+    dtype=np.float32,
 ):
     """
     Generate isotropic Gaussian blobs for clustering.
@@ -137,7 +145,10 @@ def make_blobs(
             n_samples_per_center[i] += 1
 
     cum_sum_n_samples = np.cumsum(n_samples_per_center)
-    X = np.empty(shape=(sum(n_samples_per_center), n_features), dtype=np.float64)
+    X = np.empty(
+        shape=(sum(n_samples_per_center), n_features),
+        dtype=dtype,
+    )
     y = np.empty(shape=(sum(n_samples_per_center),), dtype=int)
 
     for i, (n, std) in enumerate(zip(n_samples_per_center, cluster_std)):
@@ -167,6 +178,7 @@ def generate_example_sequences(
     minreps: int = 1,
     noise_scale: float = 0.01,
     random_state: np.random.RandomState = RNG,
+    dtype=np.float32,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Generates example pairs of related sequences. Sequence X are samples of
@@ -204,7 +216,12 @@ def generate_example_sequences(
         in X and the second column represents the corresponding index in Y.
     """
 
-    X, _ = make_blobs(n_samples=lenX, centers=centers, n_features=n_features)
+    X, _ = make_blobs(
+        n_samples=lenX,
+        centers=centers,
+        n_features=n_features,
+        dtype=dtype,
+    )
     # Time stretching X! each element in sequence X is
     # repeated a random number of times
     # and then we add some noise to spice things up :)
@@ -220,7 +237,47 @@ def generate_example_sequences(
     # add some noise
     Y += noise_scale * random_state.randn(*Y.shape)
     ground_truth_path = np.column_stack((y_idxs, np.arange(len(Y))))
+
+    X = X.astype(dtype)
+    Y = Y.astype(dtype)
     return X, Y, ground_truth_path
+
+
+def process_midi_offline(
+    perf_info: Union[PerformanceLike, str],
+    features: List[Callable],
+    polling_period: Optional[float] = 0.01,
+) -> List[Any]:
+    """
+    Helper method to process all MIDI
+    """
+
+    queue = RECVQueue()
+
+    if polling_period is not None:
+        input_stream = MockFramedMidiStream(
+            file_path=perf_info,
+            queue=queue,
+            polling_period=polling_period,
+            features=features,
+            return_midi_messages=False,
+            mediator=None,
+        )
+    else:
+        input_stream = MockMidiStream(
+            file_path=perf_info,
+            queue=queue,
+            features=features,
+            return_midi_messages=False,
+            mediator=None,
+        )
+
+    input_stream.start()
+    input_stream.join()
+
+    outputs = list(queue.queue)
+
+    return outputs
 
 
 if __name__ == "__main__":
@@ -241,3 +298,20 @@ if __name__ == "__main__":
         noise_scale=noise_scale,
         random_state=RNG,
     )
+
+
+class DummyMidiPlayer(threading.Thread):
+    def __init__(self, port: mido.ports.BaseOutput, filename: str) -> None:
+        threading.Thread.__init__(self)
+        self.port = port
+        self.mf = mido.MidiFile(filename)
+        self.is_playing = False
+
+    def run(self) -> None:
+        self.is_playing = True
+        for msg in self.mf.play():
+            self.port.send(msg)
+
+        # close port
+        self.is_playing = False
+        self.port.close()
