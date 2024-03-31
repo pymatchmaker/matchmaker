@@ -98,7 +98,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
     ) -> None:
         super().__init__(reference_features=reference_features)
 
-        self.input_features: List[NDArray[np.float32]] = []
+        self.input_features: List[NDArray[np.float32]] = None
         self.queue = queue or RECVQueue()
 
         if not (isinstance(local_cost_fun, (str, tuple)) or callable(local_cost_fun)):
@@ -177,6 +177,11 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.reset()
         while self.is_still_following():
             features = self.queue.get()
+            self.input_features = (
+                np.concatenate((self.input_features, features))
+                if self.input_features is not None
+                else features
+            )
             self.step(features)
 
         return self.warping_path

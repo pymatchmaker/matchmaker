@@ -80,9 +80,9 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         **kwargs,
     ):
         super().__init__(reference_features=reference_features)
-        self.N_ref = self.reference_features.shape[1]
+        self.N_ref = self.reference_features.shape[0]
         self.input_features = np.zeros(
-            (self.reference_features.shape[0], self.N_ref * 3)  # [F, 3N]
+            (self.N_ref * 3, self.reference_features.shape[1])  # [3N, F]
         )
         self.w = window_size * frame_rate
         self.local_cost_fun = local_cost_fun
@@ -121,8 +121,8 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         wy = min(self.w, y)
         new_acc = np.zeros((wx, wy))
         new_len_acc = np.zeros((wx, wy))
-        x_seg = self.reference_features[:, x - wx : x].T  # [wx, 12]
-        y_seg = self.input_features[:, min(y - d, 0) : y].T  # [d, 12]
+        x_seg = self.reference_features[x - wx : x]  # [wx, 12]
+        y_seg = self.input_features[min(y - d, 0) : y]  # [d, 12]
         dist = scipy.spatial.distance.cdist(
             x_seg, y_seg, metric=self.local_cost_fun
         )  # [wx, d]
@@ -173,8 +173,8 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         if direction is Direction.REF:
             new_acc[:-d, :] = self.acc_dist_matrix[d:]
             new_len_acc[:-d, :] = self.acc_len_matrix[d:]
-            x_seg = self.reference_features[:, x - d : x].T  # [d, 12]
-            y_seg = self.input_features[:, y - wy : y].T  # [wy, 12]
+            x_seg = self.reference_features[x - d : x]  # [d, 12]
+            y_seg = self.input_features[y - wy : y]  # [wy, 12]
             dist = scipy.spatial.distance.cdist(
                 x_seg, y_seg, metric=self.local_cost_fun
             )  # [d, wy]
@@ -214,8 +214,8 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             overlap_y = wy - d
             new_acc[:, :-d] = self.acc_dist_matrix[:, -overlap_y:]
             new_len_acc[:, :-d] = self.acc_len_matrix[:, -overlap_y:]
-            x_seg = self.reference_features[:, x - wx : x].T  # [wx, 12]
-            y_seg = self.input_features[:, y - d : y].T  # [d, 12]
+            x_seg = self.reference_features[x - wx : x]  # [wx, 12]
+            y_seg = self.input_features[y - d : y]  # [d, 12]
             dist = scipy.spatial.distance.cdist(
                 x_seg, y_seg, metric=self.local_cost_fun
             )  # [wx, d]
@@ -294,7 +294,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
     def get_new_input(self):
         target_feature = self.queue.get()
         q_length = self.frame_per_seg
-        self.input_features[:, self.target_pointer : self.target_pointer + q_length] = (
+        self.input_features[self.target_pointer : self.target_pointer + q_length] = (
             target_feature
         )
         self.target_pointer += q_length
