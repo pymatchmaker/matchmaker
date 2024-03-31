@@ -9,8 +9,12 @@ import numpy as np
 import partitura as pt
 from partitura.performance import PerformedPart
 
-from matchmaker import EXAMPLE_PERFORMANCE
-from matchmaker.features.midi import PitchIOIProcessor, PitchProcessor
+from matchmaker import EXAMPLE_PERFORMANCE, EXAMPLE_MATCH, EXAMPLE_SCORE
+from matchmaker.features.midi import (
+    PitchIOIProcessor,
+    PitchProcessor,
+    compute_features_from_symbolic,
+)
 from tests.utils import process_midi_offline
 
 
@@ -205,3 +209,77 @@ class TestPitchIOIProcessor(unittest.TestCase):
                 non_none_outputs += 1
 
         self.assertTrue(non_none_outputs == len(note_array))
+
+
+class TestComputeFeaturesFromSymbolic(unittest.TestCase):
+
+    def test_framed_features(self):
+
+        score = pt.load_musicxml(EXAMPLE_SCORE)
+        perf = pt.load_performance_midi(EXAMPLE_PERFORMANCE)
+        input_types = [
+            score,  # A Score object
+            score[0],  # A Part object
+            perf,  # A Performance object
+            perf[0],  # A PerformedPart object
+            perf.note_array(),  # A Performance note array
+            EXAMPLE_MATCH,  # a path
+        ]
+
+        for ref_info in input_types:
+            features_list = [
+                "pitch",
+                "pitch_ioi",
+                "pianoroll",
+                "pitch_class_pianoroll",
+                "cumsum_pianoroll",
+            ]
+
+            feature_kwargs = [
+                dict(piano_range=True),  # PitchProcessor
+                dict(piano_range=True),  # PitchIOIProcessor
+                dict(piano_range=True),  # PianoRollProcessor
+                dict(use_velocity=False),  # PitchClassPianoRollProcessor
+                dict(piano_range=False),  # CumSumPianoRollProcessor
+            ]
+
+            features = compute_features_from_symbolic(
+                ref_info=ref_info,
+                features=features_list,
+                feature_kwargs=feature_kwargs,
+            )
+
+            for frame in features:
+                self.assertTrue(len(frame) == len(features_list))
+
+    def test_nonframed_features(self):
+
+        score = pt.load_musicxml(EXAMPLE_SCORE)
+        perf = pt.load_performance_midi(EXAMPLE_PERFORMANCE)
+        input_types = [
+            score,  # A Score object
+            score[0],  # A Part object
+            perf,  # A Performance object
+            perf[0],  # A PerformedPart object
+            perf.note_array(),  # A Performance note array
+            EXAMPLE_MATCH,  # a path
+        ]
+
+        for ref_info in input_types:
+            features_list = [
+                "pitch",
+                "pitch_ioi",
+                "pianoroll",
+                "pitch_class_pianoroll",
+                "cumsum_pianoroll",
+            ]
+
+            features = compute_features_from_symbolic(
+                ref_info=ref_info,
+                features=features_list,
+                feature_kwargs=None,
+                polling_period=None,
+            )
+
+            for frame in features:
+                self.assertTrue(len(frame) == len(features_list))

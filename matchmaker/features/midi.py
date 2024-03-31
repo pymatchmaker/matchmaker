@@ -3,12 +3,22 @@
 """
 This module contains methods to compute features from MIDI signals.
 """
-from typing import Dict, List, Optional, Tuple
-
+from typing import Dict, List, Optional, Tuple, Union
+import os
+from numpy.typing import NDArray
 import numpy as np
+import partitura as pt
 
 from matchmaker.utils.processor import Processor
 from matchmaker.utils.typing import InputMIDIFrame, NDArrayFloat
+from matchmaker.utils.symbolic import (
+    framed_midi_messages_from_performance,
+    midi_messages_from_performance,
+)
+
+from partitura.score import Score, ScoreLike, Part, merge_parts
+from partitura.performance import Performance, PerformanceLike, PerformedPart
+from partitura.utils.music import performance_from_part
 
 
 class PitchProcessor(Processor):
@@ -52,6 +62,7 @@ class PitchProcessor(Processor):
 
         # TODO: Replace the for loop with list comprehension
         pitch_obs_list = []
+
         for msg, _ in data:
             if (
                 getattr(msg, "type", "other") == "note_on"
@@ -187,7 +198,9 @@ class PianoRollProcessor(Processor):
         self.dtype: type = dtype
 
     def __call__(
-        self, frame: InputMIDIFrame, kwargs: Dict = {}
+        self,
+        frame: InputMIDIFrame,
+        kwargs: Dict = {},
     ) -> Tuple[np.ndarray, Dict]:
         # initialize piano roll
         piano_roll_slice: np.ndarray = np.zeros(128, dtype=self.dtype)
@@ -216,6 +229,66 @@ class PianoRollProcessor(Processor):
 
     def reset(self) -> None:
         self.piano_roll_slices = []
+        self.active_notes = dict()
+
+
+class PitchClassPianoRollProcessor(Processor):
+    """
+    A class to convert a MIDI file time slice to a piano roll representation.
+
+    Parameters
+    ----------
+    use_velocity : bool
+        If True, the velocity of the note is used as the value in the piano
+        roll. Otherwise, the value is 1.
+    piano_range : bool
+        If True, the piano roll will only contain the notes in the piano.
+        Otherwise, the piano roll will contain all 128 MIDI notes.
+    dtype : type
+        The data type of the piano roll. Default is float.
+    """
+
+    def __init__(
+        self,
+        use_velocity: bool = False,
+        dtype: type = np.float32,
+    ):
+        Processor.__init__(self)
+        self.active_notes: Dict = dict()
+        self.pitch_class_slices: List[np.ndarray] = []
+        self.use_velocity: bool = use_velocity
+        self.dtype: type = dtype
+
+    def __call__(
+        self,
+        frame: InputMIDIFrame,
+        kwargs: Dict = {},
+    ) -> Tuple[np.ndarray, Dict]:
+        # initialize pitch class
+        pitch_class_slice: np.ndarray = np.zeros(12, dtype=self.dtype)
+        data, f_time = frame
+        for msg, m_time in data:
+            if msg.type in ("note_on", "note_off"):
+                if msg.type == "note_on" and msg.velocity > 0:
+                    self.active_notes[msg.note] = (msg.velocity, m_time)
+                else:
+                    try:
+                        del self.active_notes[msg.note]
+                    except KeyError:
+                        pass
+
+        for note, (vel, m_time) in self.active_notes.items():
+            if self.use_velocity:
+                pitch_class_slice[note % 12] = max(vel, pitch_class_slice[note % 12])
+            else:
+                pitch_class_slice[note % 12] = 1
+
+        self.pitch_class_slices.append(pitch_class_slice)
+
+        return pitch_class_slice, {}
+
+    def reset(self) -> None:
+        self.pitch_class_slices = []
         self.active_notes = dict()
 
 
@@ -282,6 +355,70 @@ class CumSumPianoRollProcessor(Processor):
     def reset(self) -> None:
         self.piano_roll_slices = []
         self.active_notes = dict()
+
+
+def compute_features_from_symbolic(
+    ref_info: Union[ScoreLike, PerformanceLike, NDArray, str],
+    features: List[str],
+    feature_kwargs: Optional[List[dict]] = None,
+    polling_period: Optional[float] = 0.01,
+    bpm: Optional[float] = 120,
+):
+
+    processor_mapping = {
+        "pitch": PitchProcessor,
+        "pitch_ioi": PitchIOIProcessor,
+        "pianoroll": PianoRollProcessor,
+        "pitch_class_pianoroll": PitchClassPianoRollProcessor,
+        "cumsum_pianoroll": CumSumPianoRollProcessor,
+    }
+
+    if feature_kwargs is None:
+        feature_kwargs = [{}] * len(features)
+
+    feature_processors = [
+        processor_mapping[name](**kwargs)
+        for name, kwargs in zip(features, feature_kwargs)
+    ]
+
+    if isinstance(ref_info, Score):
+
+        ref_info = performance_from_part(
+            part=merge_parts(ref_info) if len(ref_info) > 1 else ref_info[0],
+            bpm=bpm,
+        )
+    elif isinstance(ref_info, Part):
+        ref_info = performance_from_part(
+            part=ref_info,
+            bpm=bpm,
+        )
+    elif isinstance(ref_info, str):
+        # This method assumes that all paths are to
+        # performance files.
+        ref_info = pt.load_performance(ref_info)
+
+    elif isinstance(ref_info, np.ndarray):
+
+        ref_info = PerformedPart.from_note_array(ref_info)
+
+    if polling_period is not None:
+        frames_array, frame_times = framed_midi_messages_from_performance(
+            perf=ref_info, polling_period=polling_period
+        )
+    else:
+        frames_array, frame_times = midi_messages_from_performance(
+            perf=ref_info,
+        )
+        # Get same format as expected by the input processors
+        frames_array = np.array([list(zip(frames_array, frame_times))])
+
+    outputs = []
+    for frame, f_time in zip(frames_array, frame_times):
+        features = [proc((frame, f_time))[0] for proc in feature_processors]
+
+        outputs.append(features)
+
+    return outputs
 
 
 if __name__ == "__main__":

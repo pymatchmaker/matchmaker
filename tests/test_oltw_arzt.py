@@ -76,6 +76,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             # Invalid type (not str, tuple or callable)
             local_cost_fun=RNG.rand(19),
             start_window_size=2,
+            frame_rate=1,
         )
 
         # Test local_cost_fun as string
@@ -87,6 +88,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
                 step_size=1,
                 local_cost_fun=local_cost_fun,
                 start_window_size=2,
+                frame_rate=1,
             )
 
             for i, obs in enumerate(Y):
@@ -118,6 +120,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
                         step_size=1,
                         local_cost_fun=(local_cost_fun, dict(p=p)),
                         start_window_size=2,
+                        frame_rate=1,
                     )
 
                     for i, obs in enumerate(Y):
@@ -136,6 +139,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             step_size=1,
             local_cost_fun=("wrong_local_cost_fun", {"param": "value"}),
             start_window_size=2,
+            frame_rate=1,
         )
 
         for spdist in SCIPY_DISTANCES:
@@ -146,6 +150,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
                 step_size=1,
                 local_cost_fun=getattr(sp_distance, spdist),
                 start_window_size=2,
+                frame_rate=1,
             )
 
             for i, obs in enumerate(Y):
