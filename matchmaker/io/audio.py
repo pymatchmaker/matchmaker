@@ -167,19 +167,21 @@ class MockAudioStream(AudioStream):
             : len(padded_audio) - (len(padded_audio) % self.chunk_size)
         ]
         self.start_listening()
+        run_counter = 0
         while self.listen and trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
-            f_time = time.time() - self.init_time
+            f_time = run_counter * self.chunk_size / self.sample_rate
             self._process_feature(target_audio, f_time)
             trimmed_audio = trimmed_audio[self.chunk_size :]
+            run_counter += 1
 
         # fill empty values with zeros after stream is finished
         additional_padding_size = duration * 2 * self.sample_rate
         while self.listen and additional_padding_size > 0:
-            f_time = time.time() - self.init_time
+            f_time = run_counter * self.chunk_size / self.sample_rate
             self._process_feature(target_audio, f_time)
             additional_padding_size -= self.chunk_size
-
+            run_counter += 1
     def run(self):
         print(f"* [Mocking] Loading existing audio file({self.file_path})....")
         self.mock_stream()
