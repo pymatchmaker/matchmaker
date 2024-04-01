@@ -284,31 +284,39 @@ def process_midi_offline(
 
 
 def process_audio_offline(
-        perf_info: Union[PerformanceLike, str],
-        features: List[Callable],
-        sample_rate: int = SAMPLE_RATE,
-        hop_length: int = HOP_LENGTH,
-        chunk_size: int = CHUNK_SIZE,
+    perf_info: Union[PerformanceLike, str],
+    features: List[Callable],
+    sample_rate: int = SAMPLE_RATE,
+    hop_length: int = HOP_LENGTH,
+    chunk_size: int = CHUNK_SIZE,
 ) -> List[Any]:
-    
+
     queue = RECVQueue()
 
     if isinstance(perf_info, str):
         file_path = perf_info
         temp_file = None
-    elif isinstance(perf_info, (pt.score.Score, pt.performance.Performance, pt.score.Part, pt.performance.PerformedPart,)):
+    elif isinstance(
+        perf_info,
+        (
+            pt.score.Score,
+            pt.performance.Performance,
+            pt.score.Part,
+            pt.performance.PerformedPart,
+        ),
+    ):
         # TODO modify mock audio stream to handle
         # an input numpy array
 
         # Create a temporary file and get its path
-        temp_file = tempfile.NamedTemporaryFile(delete=True, suffix=".wav") 
+        temp_file = tempfile.NamedTemporaryFile(delete=True, suffix=".wav")
         file_path = temp_file.name
 
         save_wav_fluidsynth(
             input_data=perf_info,
             out=file_path,
         )
-    
+
     input_stream = MockAudioStream(
         file_path=file_path,
         queue=queue,
@@ -327,9 +335,7 @@ def process_audio_offline(
         temp_file.close()
 
     return outputs
-# Create a temporary file and get its path
-temp_file = tempfile.NamedTemporaryFile(delete=False)
-temp_file_path = temp_file.name
+
 
 if __name__ == "__main__":
 
