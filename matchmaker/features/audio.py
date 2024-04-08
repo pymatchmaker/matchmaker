@@ -315,7 +315,9 @@ class LogSpectralEnergyProcessor(Processor):
 
         high_freq_bin = np.sum(magnitude[freqs > log_limit, :], axis=0, keepdims=True)
 
-        feature_vector = np.vstack((linear_bins, log_mapped_bins, high_freq_bin))
+        feature_vector = np.vstack(
+            (linear_bins, log_mapped_bins, high_freq_bin), dtype=np.float32
+        )
 
         diff_feature_vector = np.diff(
             feature_vector, axis=0, prepend=feature_vector[0:1, :]
