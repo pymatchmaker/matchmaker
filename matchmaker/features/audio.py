@@ -269,7 +269,7 @@ class EnCodecProcessor(Processor):
         return output
 
 
-class LogScaleEnergyProcessor(Processor):
+class LogSpectralEnergyProcessor(Processor):
     def __init__(
         self,
         sample_rate: int = SAMPLE_RATE,
@@ -337,7 +337,7 @@ def compute_features_from_audio(
         "mfcc": MFCCProcessor,
         "encodec": EnCodecProcessor,
         "deep_chroma": DeepChromaProcessor,
-        "log_energy": LogScaleEnergyProcessor,
+        "log_spectral": LogSpectralEnergyProcessor,
     }
     feature_processors = [
         processor_mapping[name](sample_rate=sample_rate, hop_length=hop_length)
