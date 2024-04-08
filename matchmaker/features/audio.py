@@ -10,9 +10,11 @@ import numpy as np
 import torch
 from matchmaker.utils.processor import Processor
 from transformers import AutoProcessor, EncodecModel
+from madmom.audio.chroma import DeepChromaProcessor
 
-SAMPLE_RATE = 16000
-HOP_LENGTH = 640
+SAMPLE_RATE = 44100
+FRAME_RATE = 30
+HOP_LENGTH = SAMPLE_RATE // FRAME_RATE
 N_CHROMA = 12
 N_MELS = 128
 N_MFCC = 13
@@ -63,14 +65,12 @@ class MFCCProcessor(Processor):
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
         n_mfcc: int = N_MFCC,
-        dct_type: int = DCT_TYPE,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.n_fft = 2 * self.hop_length
         self.n_mfcc = n_mfcc
-        self.dct_type = dct_type
 
     def __call__(
         self,
@@ -83,8 +83,8 @@ class MFCCProcessor(Processor):
             hop_length=self.hop_length,
             n_fft=self.n_fft,
             n_mfcc=self.n_mfcc,
-            dct_type=self.dct_type,
             center=False,
+            norm=np.inf,
         )
         return mfcc.T
 
@@ -113,8 +113,11 @@ class MelSpectrogramProcessor(Processor):
             hop_length=self.hop_length,
             n_fft=self.n_fft,
             n_mels=self.n_mels,
+            norm=np.inf,
             center=False,
         )
+        mel_spectrogram = np.log1p(mel_spectrogram * 5) / 4
+
         return mel_spectrogram.T
 
 
@@ -266,8 +269,64 @@ class EnCodecProcessor(Processor):
         return output
 
 
+class LogScaleEnergyProcessor(Processor):
+    def __init__(
+        self,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+    ):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.hop_length = hop_length
+        self.n_fft = 2 * self.hop_length
+
+    def __call__(
+        self,
+        y: InputAudioSeries,
+        kwargs: Dict = {},
+    ):
+        stft_result = librosa.stft(
+            y=y,
+            n_fft=self.n_fft,
+            win_length=self.n_fft,
+            hop_length=self.hop_length,
+            center=False,
+        )
+        magnitude = np.abs(stft_result)
+
+        freqs = librosa.fft_frequencies(sr=self.sample_rate, n_fft=self.n_fft)
+
+        linear_limit = 370
+        log_limit = 12500
+        linear_bins = magnitude[freqs <= linear_limit, :]
+        log_bins = magnitude[(freqs > linear_limit) & (freqs <= log_limit), :]
+
+        log_bin_edges = np.logspace(
+            np.log10(linear_limit), np.log10(log_limit), num=84 - 34 - 1
+        )
+        log_mapped_bins = np.zeros((len(log_bin_edges), linear_bins.shape[1]))
+
+        for i in range(log_mapped_bins.shape[1]):
+            log_bin_idx = np.digitize(
+                freqs[(freqs > linear_limit) & (freqs <= log_limit)], log_bin_edges
+            )
+            for j in range(1, len(log_bin_edges)):
+                log_mapped_bins[j - 1, i] = np.sum(log_bins[log_bin_idx == j, i])
+
+        high_freq_bin = np.sum(magnitude[freqs > log_limit, :], axis=0, keepdims=True)
+
+        feature_vector = np.vstack((linear_bins, log_mapped_bins, high_freq_bin))
+
+        diff_feature_vector = np.diff(
+            feature_vector, axis=0, prepend=feature_vector[0:1, :]
+        )
+        half_wave_rectified_vector = np.maximum(diff_feature_vector, 0)
+
+        return half_wave_rectified_vector.T
+
+
 def compute_features_from_audio(
-    score_audio: str,
+    audio_path: str,
     features=FEATURES,
     sample_rate=SAMPLE_RATE,
     hop_length=HOP_LENGTH,
@@ -277,12 +336,14 @@ def compute_features_from_audio(
         "mel": MelSpectrogramProcessor,
         "mfcc": MFCCProcessor,
         "encodec": EnCodecProcessor,
+        "deep_chroma": DeepChromaProcessor,
+        "log_energy": LogScaleEnergyProcessor,
     }
     feature_processors = [
         processor_mapping[name](sample_rate=sample_rate, hop_length=hop_length)
         for name in features
     ]
-    score_y, sr = librosa.load(score_audio, sr=sample_rate)
+    score_y, sr = librosa.load(audio_path, sr=sample_rate)
     score_y = np.pad(score_y, (hop_length, 0), "constant")
     stacked_features = None
     for feature_processor in feature_processors:
