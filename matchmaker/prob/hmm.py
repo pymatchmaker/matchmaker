@@ -283,7 +283,6 @@ def compute_continous_pitch_profiles(
     )
 
     mask = (window_indices >= 0)[:, :, np.newaxis]
-
     _pitch_profiles = (spectral_features[window_indices] * mask).sum(1)
 
     if inserted_states:
@@ -511,7 +510,7 @@ class PitchIOIObservationModel(ObservationModel):
         ioi_score = self.ioi_matrix[ioi_idx]
         obs_prob = self.pitch_obs_prob_func(
             pitch_obs=pitch_obs,
-            **self.pitch_obs_prob_args,
+            **self.pitch_prob_args,
         ) * self.ioi_obs_prob_func(
             ioi_obs=ioi_obs,
             ioi_score=ioi_score,
@@ -547,7 +546,7 @@ class BernoulliGaussianPitchIOIObservationModel(PitchIOIObservationModel):
         )
         ioi_prob_args = dict(
             ioi_precision=ioi_precision,
-            norm_term=np.sqrt(0.5 * self.ioi_precision / np.pi),
+            norm_term=np.sqrt(0.5 * ioi_precision / np.pi),
         )
         PitchIOIObservationModel.__init__(
             self,
@@ -682,6 +681,8 @@ class PitchIOIHMM(BaseHMM):
                 ioi_prob_args=ioi_prob_args,
             )
 
+        self.perf_onset = None
+
         BaseHMM.__init__(
             self,
             observation_model=observation_model,
@@ -692,12 +693,21 @@ class PitchIOIHMM(BaseHMM):
         )
 
     def __call__(self, input):
-        self.current_state = self.forward_algorithm_step(
-            observation=input + (self.tempo_model.beat_period,),
+
+        pitch_obs, ioi_obs = input
+        if self.perf_onset is None:
+            self.perf_onset = 0
+        else:
+            self.perf_onset += ioi_obs
+        current_state = self.forward_algorithm_step(
+            observation=(pitch_obs, ioi_obs, self.tempo_model.beat_period,),
             log_probabilities=False,
         )
         self._warping_path.append((current_state, self.input_index))
         self.input_index += 1
+
+        if self.current_state is None:
+            self.current_state = current_state
 
         if current_state > self.current_state:
             
@@ -707,9 +717,17 @@ class PitchIOIHMM(BaseHMM):
                 # prev_so = self.state_space[self.current_state]
 
                 self.tempo_model.update_beat_period(
-                    performed_onset=None,
+                    performed_onset=self.perf_onset,
                     score_onset=current_so,
                 )
+
+            elif not self.has_insertions:
+
+                current_so = self.state_space[current_state]
+                self.tempo_model.update_beat_period(
+                    performed_onset=self.perf_onset,
+                    score_onset=current_so,
+                ) 
 
         self.current_state = current_state
 

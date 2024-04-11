@@ -25,6 +25,8 @@ FEATURES = ["chroma"]
 # Type hint for Input Audio frame.
 InputAudioSeries = np.ndarray
 
+InputAudioFrame = Tuple[InputAudioSeries, float]
+
 
 class ChromagramProcessor(Processor):
     def __init__(
@@ -57,6 +59,49 @@ class ChromagramProcessor(Processor):
             dtype=np.float32,
         )
         return chroma.T
+    
+
+class ChromagramIOIProcessor(Processor):
+    def __init__(
+        self,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+        n_chroma: int = N_CHROMA,
+        norm: Optional[float] = NORM,
+    ):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.hop_length = hop_length
+        self.n_fft = 2 * self.hop_length
+        self.n_chroma = n_chroma
+        self.norm = norm
+        self.prev_time = None
+
+    def __call__(
+        self,
+        data: InputAudioSeries,
+        kwargs: Dict = {},
+    ) -> Tuple[Optional[np.ndarray], Dict]:
+        
+        y, f_time = data
+
+        if self.prev_time is None:
+            ioi_obs = 0
+        else:
+            ioi_obs = f_time - self.prev_time
+
+        self.prev_time = f_time
+        chroma = librosa.feature.chroma_stft(
+            y=y,
+            sr=self.sample_rate,
+            hop_length=self.hop_length,
+            n_fft=self.n_fft,
+            n_chroma=self.n_chroma,
+            norm=self.norm,
+            center=False,
+            dtype=np.float32,
+        )
+        return chroma.T, ioi_obs
 
 
 class MFCCProcessor(Processor):

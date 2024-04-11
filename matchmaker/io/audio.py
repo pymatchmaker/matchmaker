@@ -44,6 +44,7 @@ class AudioStream(threading.Thread, Stream):
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
         chunk_size: int = CHUNK_SIZE,
+        include_ftime: bool = False,
     ):
         if features is None:
             features = DummySequentialOutputProcessor()
@@ -59,6 +60,7 @@ class AudioStream(threading.Thread, Stream):
         self.last_chunk = None
         self.init_time = None
         self.listen = False
+        self.include_ftime = include_ftime
 
     def _process_frame(self, data, frame_count, time_info, status_flag):
         target_audio = np.frombuffer(data, dtype=np.float32)  # initial y
@@ -67,6 +69,7 @@ class AudioStream(threading.Thread, Stream):
         return (data, pyaudio.paContinue)
 
     def _process_feature(self, target_audio, f_time):
+
         if self.last_chunk is None:  # add zero padding at the first block
             target_audio = np.concatenate(
                 (np.zeros(self.hop_length, dtype=np.float32), target_audio)
@@ -76,14 +79,31 @@ class AudioStream(threading.Thread, Stream):
             # ex) making 5 block, 1 block overlap -> 4 frames each time
             target_audio = np.concatenate((self.last_chunk, target_audio))
 
+        if self.include_ftime:
+            target_audio = (target_audio, f_time)
         stacked_features = None  # shape: (n_features, n_frames)
         for feature in self.features:
             feature_output = feature(target_audio)
-            stacked_features = (
-                feature_output
-                if stacked_features is None
-                else np.concatenate((stacked_features, feature_output), axis=1)
-            )
+            if self.include_ftime:
+                # TODO: optimize this part. So far this
+                # is an ugly way to do this.
+                stacked_features = (
+                    (
+                        feature_output[0]
+                        if stacked_features is None
+                        else np.concatenate(
+                            (stacked_features, feature_output[0]), axis=1
+                        )
+                    ),
+                    feature_output[1],
+                )
+            else:
+
+                stacked_features = (
+                    feature_output
+                    if stacked_features is None
+                    else np.concatenate((stacked_features, feature_output), axis=1)
+                )
         self.queue.put(stacked_features)
         self.last_chunk = target_audio[-self.hop_length :]
 
@@ -140,6 +160,7 @@ class MockAudioStream(AudioStream):
         hop_length: int = HOP_LENGTH,
         chunk_size: int = CHUNK_SIZE,
         file_path: str = "",
+        include_ftime: bool = False,
     ):
         super().__init__(
             sample_rate=sample_rate,
@@ -149,6 +170,7 @@ class MockAudioStream(AudioStream):
             chunk_size=chunk_size,
         )
         self.file_path = file_path
+        self.include_ftime = include_ftime
 
     def start_listening(self):
         self.listen = True
@@ -182,6 +204,7 @@ class MockAudioStream(AudioStream):
             self._process_feature(target_audio, f_time)
             additional_padding_size -= self.chunk_size
             run_counter += 1
+
     def run(self):
         print(f"* [Mocking] Loading existing audio file({self.file_path})....")
         self.mock_stream()

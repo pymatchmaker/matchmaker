@@ -289,6 +289,7 @@ def process_audio_offline(
     sample_rate: int = SAMPLE_RATE,
     hop_length: int = HOP_LENGTH,
     chunk_size: int = CHUNK_SIZE,
+    include_ftime: bool = False,
 ) -> List[Any]:
 
     queue = RECVQueue()
@@ -324,6 +325,7 @@ def process_audio_offline(
         sample_rate=sample_rate,
         hop_length=hop_length,
         chunk_size=chunk_size,
+        include_ftime=include_ftime,
     )
 
     input_stream.start()
