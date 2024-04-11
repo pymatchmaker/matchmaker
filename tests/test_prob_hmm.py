@@ -374,9 +374,10 @@ class TestPitchIOIHMM(unittest.TestCase):
             hop_length=HOP_LENGTH,
             sample_rate=SAMPLE_RATE,
             chunk_size=4,
+            include_ftime=True,
         )
-
-        score_features = np.vstack(score_features)
+        
+        score_features = np.vstack([sf[0] for sf in score_features])
         score_feature_times = np.arange(len(score_features)) * HOP_LENGTH / SAMPLE_RATE
 
         snote_array = score.note_array()
@@ -428,14 +429,16 @@ class TestPitchIOIHMM(unittest.TestCase):
             ],
             hop_length=HOP_LENGTH,
             sample_rate=SAMPLE_RATE,
-            chunk_size=4,
+            chunk_size=1,
+            include_ftime=True
         )
-        observations = np.vstack(observations)
+
+        # observations = np.vstack(observations)
         for obs in observations:
             cp = hmm(obs)
             self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
 
-        plt.plot(hmm.warping_path[0], hmm.warping_path[1])
-        plt.show()
+        # plt.plot(hmm.warping_path[0], hmm.warping_path[1])
+        # plt.show()

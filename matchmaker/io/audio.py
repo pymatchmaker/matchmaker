@@ -88,14 +88,9 @@ class AudioStream(threading.Thread, Stream):
                 # TODO: optimize this part. So far this
                 # is an ugly way to do this.
                 stacked_features = (
-                    (
-                        feature_output[0]
-                        if stacked_features is None
-                        else np.concatenate(
-                            (stacked_features, feature_output[0]), axis=1
-                        )
-                    ),
-                    feature_output[1],
+                    feature_output[0]
+                    if stacked_features is None
+                    else np.concatenate((stacked_features, feature_output[0]), axis=1)
                 )
             else:
 
@@ -104,8 +99,13 @@ class AudioStream(threading.Thread, Stream):
                     if stacked_features is None
                     else np.concatenate((stacked_features, feature_output), axis=1)
                 )
-        self.queue.put(stacked_features)
-        self.last_chunk = target_audio[-self.hop_length :]
+
+        if self.include_ftime:
+            self.queue.put((stacked_features, feature_output[1]))
+            self.last_chunk = target_audio[0][-self.hop_length :]
+        else:
+            self.queue.put(stacked_features)
+            self.last_chunk = target_audio[-self.hop_length :]
 
     @property
     def current_time(self):

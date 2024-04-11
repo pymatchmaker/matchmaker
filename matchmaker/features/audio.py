@@ -79,7 +79,7 @@ class ChromagramIOIProcessor(Processor):
 
     def __call__(
         self,
-        data: InputAudioSeries,
+        data: InputAudioFrame,
         kwargs: Dict = {},
     ) -> Tuple[Optional[np.ndarray], Dict]:
         
