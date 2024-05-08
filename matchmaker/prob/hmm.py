@@ -692,25 +692,30 @@ class PitchIOIHMM(BaseHMM):
             has_insertions=has_insertions,
         )
 
-    def __call__(self, input):
-
+    def __call__(self, input, *args, **kwargs):
+        frame_index = args[0]
         pitch_obs, ioi_obs = input
         if self.perf_onset is None:
             self.perf_onset = 0
         else:
             self.perf_onset += ioi_obs
         current_state = self.forward_algorithm_step(
-            observation=(pitch_obs, ioi_obs, self.tempo_model.beat_period,),
+            observation=(
+                pitch_obs,
+                ioi_obs,
+                self.tempo_model.beat_period,
+            ),
             log_probabilities=False,
         )
         self._warping_path.append((current_state, self.input_index))
-        self.input_index += 1
+        self.input_index = frame_index
 
         if self.current_state is None:
             self.current_state = current_state
 
-        if current_state > self.current_state:
-            
+        if (
+            current_state > self.current_state
+        ):  # TODO: check if it works for audio (current state moves?) -> transition matrix
             if self.has_insertions and current_state % 2 == 0:
 
                 current_so = self.state_space[current_state]
