@@ -10,7 +10,12 @@ import partitura as pt
 
 from partitura.musicanalysis.performance_codec import get_time_maps_from_alignment
 
-from matchmaker.features.audio import HOP_LENGTH, SAMPLE_RATE, ChromagramProcessor, ChromagramIOIProcessor
+from matchmaker.features.audio import (
+    HOP_LENGTH,
+    SAMPLE_RATE,
+    ChromagramProcessor,
+    ChromagramIOIProcessor,
+)
 from matchmaker.features.midi import PitchIOIProcessor, PitchProcessor
 from matchmaker import EXAMPLE_MATCH, EXAMPLE_AUDIO, EXAMPLE_SCORE
 from matchmaker.io.audio import CHUNK_SIZE
@@ -127,7 +132,6 @@ class TestPitchHMM(unittest.TestCase):
 
         perf, alignment, score = pt.load_match(EXAMPLE_MATCH, create_score=True)
 
-
         # Get score features
         score_features = process_audio_offline(
             perf_info=score,
@@ -139,7 +143,7 @@ class TestPitchHMM(unittest.TestCase):
             ],
             hop_length=HOP_LENGTH,
             sample_rate=SAMPLE_RATE,
-            chunk_size=4,
+            chunk_size=1,
         )
 
         score_features = np.vstack(score_features)
@@ -149,7 +153,7 @@ class TestPitchHMM(unittest.TestCase):
 
         unique_sonsets = np.unique(snote_array["onset_beat"])
 
-        pitch_profiles = compute_continous_pitch_profiles(
+        pitch_profiles = compute_continous_pitch_profiles(  # TODO check this (with simple chromatic scale MIDI/audio features)
             spectral_features=score_features,
             spectral_feature_times=score_feature_times,
             onset_times=unique_sonsets,
@@ -199,9 +203,8 @@ class TestPitchHMM(unittest.TestCase):
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
 
-        # plt.plot(hmm.warping_path[0], hmm.warping_path[1])
-        # plt.show()
-
+        plt.plot(hmm.warping_path[0], hmm.warping_path[1])
+        plt.show()
 
 
 class TestPitchIOIHMM(unittest.TestCase):
@@ -246,9 +249,7 @@ class TestPitchIOIHMM(unittest.TestCase):
             n_states=len(chord_pitches),
         )
 
-        tempo_model = ReactiveTempoModel(
-            init_score_onset=unique_sonsets.min()
-        )
+        tempo_model = ReactiveTempoModel(init_score_onset=unique_sonsets.min())
 
         hmm = PitchIOIHMM(
             observation_model=observation_model,
@@ -317,9 +318,7 @@ class TestPitchIOIHMM(unittest.TestCase):
             n_states=n_states,
         )
 
-        tempo_model = ReactiveTempoModel(
-            init_score_onset=unique_sonsets.min()
-        )
+        tempo_model = ReactiveTempoModel(init_score_onset=unique_sonsets.min())
 
         hmm = PitchIOIHMM(
             observation_model=observation_model,
@@ -341,6 +340,9 @@ class TestPitchIOIHMM(unittest.TestCase):
                 self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
+
+        # plt.plot(hmm.warping_path[0], hmm.warping_path[1])
+        # plt.show()
 
     def test_audio(self):
 
@@ -376,7 +378,7 @@ class TestPitchIOIHMM(unittest.TestCase):
             chunk_size=4,
             include_ftime=True,
         )
-        
+
         score_features = np.vstack([sf[0] for sf in score_features])
         score_feature_times = np.arange(len(score_features)) * HOP_LENGTH / SAMPLE_RATE
 
@@ -402,9 +404,7 @@ class TestPitchIOIHMM(unittest.TestCase):
             inserted_states=False,
         )
 
-        tempo_model = ReactiveTempoModel(
-            init_score_onset=unique_sonsets.min()
-        )
+        tempo_model = ReactiveTempoModel(init_score_onset=unique_sonsets.min())
 
         initial_probabilities = gumbel_init_dist(
             n_states=n_states,
@@ -430,7 +430,7 @@ class TestPitchIOIHMM(unittest.TestCase):
             hop_length=HOP_LENGTH,
             sample_rate=SAMPLE_RATE,
             chunk_size=1,
-            include_ftime=True
+            include_ftime=True,
         )
 
         # observations = np.vstack(observations)

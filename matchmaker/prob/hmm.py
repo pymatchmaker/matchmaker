@@ -4,7 +4,7 @@
 This module implements Hidden Markov Models for score following
 """
 import warnings
-from typing import Optional, Union, Tuple, Dict, Any, Callable, List
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import scipy.spatial.distance as sp_dist
@@ -15,15 +15,16 @@ from hiddenmarkov import (
     TransitionModel,
 )
 from numpy.typing import NDArray
-from scipy.stats import gumbel_l
+from scipy.sparse import lil_matrix
+from scipy.stats import gumbel_l, norm
 
 from matchmaker.base import OnlineAlignment
-from matchmaker.utils.tempo_models import TempoModel
 from matchmaker.utils.misc import (
     MatchmakerMissingParameterError,
     RECVQueue,
     get_window_indices,
 )
+from matchmaker.utils.tempo_models import TempoModel
 
 # Alias for typing arrays
 NDArrayFloat = NDArray[np.float32]
@@ -167,7 +168,108 @@ class PitchHMM(BaseHMM):
         )
 
 
-def gumbel_transition_matrix(
+def jiang_transition_matrix(
+    n_states: int, frame_rate, sigma, transition_variance: float
+) -> NDArrayFloat:
+    transition_matrix = np.zeros((n_states, n_states))
+    p1 = 1  # this should be computed according to the Eq. 12
+    for i in range(n_states):
+        for j in range(n_states):
+
+            if j <= i:
+                transition_matrix[i, j] = 0  # (1 - p1 if we want to go back)
+            elif j == i:
+                transition_matrix[i, j] = p1
+            else:
+                transition_matrix[i, j] = 1 - p1
+
+    return transition_matrix
+
+
+def jiang_transition_matrix_audio(
+    n_notes: int,
+    total_frames: int,
+    frame_rate: float,
+    sigma: float,
+    transition_variance: float,
+) -> lil_matrix:
+    """Compute the transition matrix with merging nodes for the Jiang HMM model.
+
+    Args:
+        n_notes (int): Number of note indices in the HMM
+        total_frames (int): Total number of frames
+        frame_rate (float): Frame rate in Hz
+        sigma (float): Standard deviation for note duration
+        transition_variance (float): Variance for the transition matrix
+
+    Returns:
+        lil_matrix: A sparse matrix representing the transition probabilities.
+    """
+    transition_matrix = lil_matrix((total_frames, total_frames))
+    delta = 1 / frame_rate
+
+    for frame in range(total_frames - 1):
+        note_index = frame // (total_frames // n_notes)
+        note_age = frame % (total_frames // n_notes)
+
+        # Calculate the mean duration based on the note index
+        mean_duration = (note_index + 1) * delta
+        stddev_duration = sigma
+
+        if stddev_duration == 0:
+            stddev_duration = 1e-6  # Prevent division by zero
+
+        # Calculate the Gaussian CDF terms for stay probability
+        phi_current = norm.cdf((note_age * delta - mean_duration) / stddev_duration)
+        phi_next = norm.cdf(((note_age + 1) * delta - mean_duration) / stddev_duration)
+
+        if (1 - phi_current) == 0:
+            p1 = 1  # Prevent division by zero
+        else:
+            p1 = (1 - phi_next) / (1 - phi_current)
+
+        # Ensure p1 is between 0 and 1
+        p1 = max(0, min(p1, 1))
+
+        # Transition within the same frame (staying in the same state)
+        transition_matrix[frame, frame] = p1
+
+        # Transition to the next frame (moving to the next state)
+        if frame + 1 < total_frames:
+            transition_matrix[frame, frame + 1] = 1 - p1
+
+        # Merging similar states by combining transitions with similar probabilities
+        if note_age == 0 and frame + (total_frames // n_notes) < total_frames:
+            for k in range(1, total_frames // n_notes):
+                next_frame = frame + k
+                next_note_index = next_frame // (total_frames // n_notes)
+                if next_note_index == note_index + 1:
+                    transition_matrix[frame, next_frame] += (1 - p1) / (
+                        total_frames // n_notes - 1
+                    )
+
+    # Ensure the last state transitions to itself
+    transition_matrix[total_frames - 1, total_frames - 1] = 1.0
+
+    return transition_matrix
+
+
+def kalman_transition_matrix(n_states: int, transition_variance: float) -> NDArrayFloat:
+    """
+    Create a transition matrix based on a Kalman filter model.
+    """
+    transition_matrix = np.zeros((n_states, n_states))
+
+    for i in range(n_states - 1):
+        transition_matrix[i, i] = 1 - transition_variance
+        transition_matrix[i, i + 1] = transition_variance
+
+    transition_matrix[-1, -1] = 1  # Last state is an absorbing state
+
+    return transition_matrix
+
+
+def gumbel_transition_matrix(  # TODO check works for audio (parameter)
     n_states: int,
     mp_trans_state: int = 1,
     scale: float = 0.5,
@@ -261,7 +363,7 @@ def gumbel_init_dist(
     return init_probs
 
 
-def compute_continous_pitch_profiles(
+def compute_continous_pitch_profiles(  # TODO check separately
     spectral_features: NDArrayFloat,
     spectral_feature_times: NDArrayFloat,
     onset_times: NDArrayFloat,
@@ -732,10 +834,9 @@ class PitchIOIHMM(BaseHMM):
                 self.tempo_model.update_beat_period(
                     performed_onset=self.perf_onset,
                     score_onset=current_so,
-                ) 
+                )
 
         self.current_state = current_state
-
 
         return self.state_space[self.current_state]
 
