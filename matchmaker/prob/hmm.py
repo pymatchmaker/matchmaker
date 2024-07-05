@@ -186,42 +186,48 @@ def jiang_transition_matrix(
     return transition_matrix
 
 
-def jiang_transition_matrix_audio(
-    n_notes: int,
-    total_frames: int,
-    frame_rate: float,
-    sigma: float,
-    transition_variance: float,
-) -> lil_matrix:
-    """Compute the transition matrix with merging nodes for the Jiang HMM model.
+def jiang_transition_matrix_from_sequence(sequence, frame_rate, sigma):
+    """Compute the transition matrix from a given sequence for the Jiang HMM model.
 
     Args:
-        n_notes (int): Number of note indices in the HMM
-        total_frames (int): Total number of frames
-        frame_rate (float): Frame rate in Hz
-        sigma (float): Standard deviation for note duration
-        transition_variance (float): Variance for the transition matrix
+        sequence (list): List of note indices representing the sequence from score.
+            ex. [0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 7, 8, 8, 9, 9, 9]
+        frame_rate (float): Frame rate in Hz.
+        sigma (float): Standard deviation for note duration.
 
     Returns:
         lil_matrix: A sparse matrix representing the transition probabilities.
     """
-    transition_matrix = lil_matrix((total_frames, total_frames))
+    total_frames = len(sequence)
+    notes = list(set(sequence))
+    n_notes = len(notes)
+
+    # Define state space (note, age)
+    state_space = []
+    for note in notes:
+        ages = [i for i, x in enumerate(sequence) if x == note]
+        state_space.extend([(note, age) for age in ages])
+
+    n_states = len(state_space)
+    transition_matrix = lil_matrix((n_states, n_states))
     delta = 1 / frame_rate
 
-    for frame in range(total_frames - 1):
-        note_index = frame // (total_frames // n_notes)
-        note_age = frame % (total_frames // n_notes)
+    for i in range(n_states - 1):
+        current_note, current_age = state_space[i]
+        next_note, next_age = state_space[i + 1]
 
         # Calculate the mean duration based on the note index
-        mean_duration = (note_index + 1) * delta
+        mean_duration = (current_note + 1) * delta
         stddev_duration = sigma
 
         if stddev_duration == 0:
             stddev_duration = 1e-6  # Prevent division by zero
 
-        # Calculate the Gaussian CDF terms for stay probability
-        phi_current = norm.cdf((note_age * delta - mean_duration) / stddev_duration)
-        phi_next = norm.cdf(((note_age + 1) * delta - mean_duration) / stddev_duration)
+        # Calculate the Gaussian CDF terms for transition probability
+        phi_current = norm.cdf((current_age * delta - mean_duration) / stddev_duration)
+        phi_next = norm.cdf(
+            ((current_age + 1) * delta - mean_duration) / stddev_duration
+        )
 
         if (1 - phi_current) == 0:
             p1 = 1  # Prevent division by zero
@@ -231,27 +237,17 @@ def jiang_transition_matrix_audio(
         # Ensure p1 is between 0 and 1
         p1 = max(0, min(p1, 1))
 
-        # Transition within the same frame (staying in the same state)
-        transition_matrix[frame, frame] = p1
-
-        # Transition to the next frame (moving to the next state)
-        if frame + 1 < total_frames:
-            transition_matrix[frame, frame + 1] = 1 - p1
-
-        # Merging similar states by combining transitions with similar probabilities
-        if note_age == 0 and frame + (total_frames // n_notes) < total_frames:
-            for k in range(1, total_frames // n_notes):
-                next_frame = frame + k
-                next_note_index = next_frame // (total_frames // n_notes)
-                if next_note_index == note_index + 1:
-                    transition_matrix[frame, next_frame] += (1 - p1) / (
-                        total_frames // n_notes - 1
-                    )
+        if current_note == next_note:
+            # Staying in the same note, increasing the age
+            transition_matrix[i, i + 1] = p1
+        else:
+            # Moving to the next note
+            transition_matrix[i, i + 1] = 1 - p1
 
     # Ensure the last state transitions to itself
-    transition_matrix[total_frames - 1, total_frames - 1] = 1.0
+    transition_matrix[n_states - 1, n_states - 1] = 1.0
 
-    return transition_matrix
+    return transition_matrix, state_space
 
 
 def kalman_transition_matrix(n_states: int, transition_variance: float) -> NDArrayFloat:
