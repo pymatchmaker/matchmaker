@@ -457,7 +457,7 @@ class JointAdaptationAnticipationModel(TempoModel):
                     self.asynchrony  # / self.score_iois[-2]
                 )
 
-                # ANTICIPATION MODULE
+                # ANTICIPATION MODULE  # could be any prediction model (NN, LSTM, etc.) - non-linear
 
                 # add timekeeper noise
                 self.an_onset = (

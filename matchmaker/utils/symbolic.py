@@ -4,9 +4,9 @@
 Utilities for symbolic music processing (e.g., MIDI)
 """
 from collections import defaultdict
+from pathlib import Path
 from typing import Callable, Optional, Tuple, Union
 
-import ffmpeg
 import mido
 import numpy as np
 import partitura as pt
@@ -16,12 +16,14 @@ from partitura.io.exportaudio import SAMPLE_RATE
 from partitura.performance import Performance, PerformanceLike, PerformedPart
 from partitura.score import ScoreLike
 from partitura.utils.misc import PathLike
-from partitura.utils.music import (ensure_notearray,
-                                   get_time_units_from_note_array,
-                                   performance_notearray_from_score_notearray)
+from partitura.utils.music import (
+    ensure_notearray,
+    get_time_units_from_note_array,
+    performance_notearray_from_score_notearray,
+)
 from scipy.io import wavfile
 
-DEFAULT_SOUNDFONT = "/Users/carlos/soundfonts/sf2/Estonia_Final.sf2"
+DEFAULT_SOUNDFONT = Path("~/soundfonts/sf2/MuseScore_General.sf2").expanduser()
 
 
 def synthesize_fluidsynth(
