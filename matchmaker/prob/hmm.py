@@ -196,7 +196,7 @@ def jiang_transition_matrix_from_sequence(sequence, frame_rate, sigma):
         sigma (float): Standard deviation for note duration.
 
     Returns:
-        lil_matrix: A sparse matrix representing the transition probabilities.
+        np.array: A dense matrix representing the transition probabilities.
     """
     total_frames = len(sequence)
     notes = list(set(sequence))
@@ -209,7 +209,7 @@ def jiang_transition_matrix_from_sequence(sequence, frame_rate, sigma):
         state_space.extend([(note, age) for age in ages])
 
     n_states = len(state_space)
-    transition_matrix = lil_matrix((n_states, n_states))
+    transition_matrix = np.zeros((n_states, n_states))
     delta = 1 / frame_rate
 
     for i in range(n_states - 1):

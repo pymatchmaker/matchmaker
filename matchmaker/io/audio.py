@@ -61,6 +61,7 @@ class AudioStream(threading.Thread, Stream):
         self.init_time = None
         self.listen = False
         self.include_ftime = include_ftime
+        self.f_time = 0
 
     def _process_frame(self, data, frame_count, time_info, status_flag):
         target_audio = np.frombuffer(data, dtype=np.float32)  # initial y
@@ -80,7 +81,7 @@ class AudioStream(threading.Thread, Stream):
             target_audio = np.concatenate((self.last_chunk, target_audio))
 
         if self.include_ftime:
-            target_audio = (target_audio, f_time)
+            target_audio = (target_audio.squeeze(), f_time)
         stacked_features = None  # shape: (n_features, n_frames)
         for feature in self.features:
             feature_output = feature(target_audio)
@@ -180,7 +181,7 @@ class MockAudioStream(AudioStream):
         self.listen = False
 
     def mock_stream(self):
-        duration = int(librosa.get_duration(path=self.file_path))
+        duration = int(librosa.get_duration(filename=self.file_path))
         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
             (audio_y, np.zeros(duration * 2 * self.sample_rate, dtype=np.float32))
@@ -193,17 +194,18 @@ class MockAudioStream(AudioStream):
         while self.listen and trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
             f_time = run_counter * self.chunk_size / self.sample_rate
-            self._process_feature(target_audio, f_time)
+            self._process_feature(target_audio, run_counter)
+            print(f"Mocking: {run_counter}")
             trimmed_audio = trimmed_audio[self.chunk_size :]
             run_counter += 1
 
         # fill empty values with zeros after stream is finished
-        additional_padding_size = duration * 2 * self.sample_rate
-        while self.listen and additional_padding_size > 0:
-            f_time = run_counter * self.chunk_size / self.sample_rate
-            self._process_feature(target_audio, f_time)
-            additional_padding_size -= self.chunk_size
-            run_counter += 1
+        # additional_padding_size = duration * 2 * self.sample_rate
+        # while self.listen and additional_padding_size > 0:
+        #     f_time = run_counter * self.chunk_size / self.sample_rate
+        #     self._process_feature(target_audio, f_time)
+        #     additional_padding_size -= self.chunk_size
+        #     run_counter += 1
 
     def run(self):
         print(f"* [Mocking] Loading existing audio file({self.file_path})....")
