@@ -45,9 +45,13 @@ class ChromagramProcessor(Processor):
 
     def __call__(
         self,
-        y: InputAudioSeries,
+        data: InputAudioFrame,
         kwargs: Dict = {},
     ) -> Tuple[Optional[np.ndarray], Dict]:
+        if isinstance(data, tuple):
+            y, f_time = data
+        else:
+            y = data
         chroma = librosa.feature.chroma_stft(
             y=y,
             sr=self.sample_rate,
@@ -59,7 +63,7 @@ class ChromagramProcessor(Processor):
             dtype=np.float32,
         )
         return chroma.T
-    
+
 
 class ChromagramIOIProcessor(Processor):
     def __init__(
@@ -82,7 +86,7 @@ class ChromagramIOIProcessor(Processor):
         data: InputAudioFrame,
         kwargs: Dict = {},
     ) -> Tuple[Optional[np.ndarray], Dict]:
-        
+
         y, f_time = data
 
         if self.prev_time is None:
@@ -394,7 +398,6 @@ def compute_features_from_audio(
     score_y = np.pad(score_y, (hop_length, 0), "constant")
     stacked_features = None
     for feature_processor in feature_processors:
-
         if hasattr(feature_processor, "process_offline"):
             feature_processor.process_offline = True
         feature = feature_processor(score_y)

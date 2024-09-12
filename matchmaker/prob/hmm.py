@@ -4,8 +4,10 @@
 This module implements Hidden Markov Models for score following
 """
 import warnings
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy.spatial.distance as sp_dist
 from hiddenmarkov import (
@@ -14,10 +16,6 @@ from hiddenmarkov import (
     ObservationModel,
     TransitionModel,
 )
-from numpy.typing import NDArray
-from scipy.sparse import lil_matrix
-from scipy.stats import gumbel_l, norm
-
 from matchmaker.base import OnlineAlignment
 from matchmaker.utils.misc import (
     MatchmakerMissingParameterError,
@@ -25,6 +23,9 @@ from matchmaker.utils.misc import (
     get_window_indices,
 )
 from matchmaker.utils.tempo_models import TempoModel
+from numpy.typing import NDArray
+from scipy.sparse import lil_matrix
+from scipy.stats import gumbel_l, norm
 
 # Alias for typing arrays
 NDArrayFloat = NDArray[np.float32]
@@ -182,6 +183,15 @@ def jiang_transition_matrix(
                 transition_matrix[i, j] = p1
             else:
                 transition_matrix[i, j] = 1 - p1
+
+    return transition_matrix
+
+
+def gaussian_transition_matrix(n_states: int) -> NDArrayFloat:
+    # Use broadcasting to compute the Gaussian PDF for each pair of states
+    # transition_matrix = norm.pdf(states[:, np.newaxis], loc=states, scale=1)
+    transition_matrix = np.eye(n_states)
+    transition_matrix = np.roll(transition_matrix, 1, axis=1)
 
     return transition_matrix
 
@@ -789,10 +799,16 @@ class PitchIOIHMM(BaseHMM):
             tempo_model=tempo_model,
             has_insertions=has_insertions,
         )
+        self.counter = 0
+        self.elapsed_times = []
 
     def __call__(self, input, *args, **kwargs):
+        before_time = time.time()
         frame_index = args[0]
+        if frame_index == 34:
+            print("here")
         pitch_obs, ioi_obs = input
+        ioi_obs = 1
         if self.perf_onset is None:
             self.perf_onset = 0
         else:
@@ -833,6 +849,16 @@ class PitchIOIHMM(BaseHMM):
                 )
 
         self.current_state = current_state
+
+        after_time = time.time()
+        elapsed_time = after_time - before_time
+        self.elapsed_times.append(elapsed_time)
+        self.counter += 1
+
+        if self.counter == 600:
+            print(
+                f"HMM Average time: {np.mean(self.elapsed_times)}, median time: {np.median(self.elapsed_times)}"
+            )
 
         return self.state_space[self.current_state]
 

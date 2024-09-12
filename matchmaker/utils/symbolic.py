@@ -272,7 +272,7 @@ def save_wav_fluidsynth(
 
     soundfont : PathLike
         Path to the soundfont in SF2 format for fluidsynth.
-        
+
     bpm : float, np.ndarray, callable
         The bpm to render the output (if the input is a score-like object).
         See `partitura.utils.music.performance_notearray_from_score_notearray`
@@ -404,15 +404,15 @@ def midi_messages_from_performance(perf: PerformanceLike) -> Tuple[NDArray, NDAr
             message_times.append(control["time"])
 
         # Get program changes
-        for program in ppart.programs:
-            channel = program.get("channel", 0)
-            msg = mido.Message(
-                type="program_change",
-                program=int(program["program"]),
-                channel=channel,
-            )
-            messages.append(msg)
-            message_times.append(program["time"])
+        # for program in ppart.programs:
+        #     channel = program.get("channel", 0)
+        #     msg = mido.Message(
+        #         type="program_change",
+        #         program=int(program["program"]),
+        #         channel=channel,
+        #     )
+        #     messages.append(msg)
+        #     message_times.append(program["time"])
 
     message_array = np.array(messages)
     message_times_array = np.array(message_times)

@@ -77,6 +77,8 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         max_run_count=MAX_RUN_COUNT,
         frame_per_seg=FRAME_PER_SEG,
         frame_rate=FRAME_RATE,
+        queue=None,
+        perf_stream=None,
         **kwargs,
     ):
         super().__init__(reference_features=reference_features)
@@ -90,12 +92,13 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.frame_per_seg = frame_per_seg
         self.current_position = 0
         self.wp = np.array([[0, 0]]).T  # [shape=(2, T)]
-        self.queue = RECVQueue()
+        self.queue = queue or RECVQueue()
         self.ref_pointer = 0
         self.target_pointer = 0
         self.input_index: int = 0
         self.previous_direction = None
         self.last_queue_update = time.time()
+        self.perf_stream = perf_stream
 
     @property
     def warping_path(self) -> NDArray[np.float32]:  # [shape=(2, T)]
@@ -105,14 +108,6 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         offset_x = max(self.ref_pointer - self.w, 0)
         offset_y = max(self.target_pointer - self.w, 0)
         return np.array([offset_x, offset_y])
-
-    # def init_dist_matrix(self):
-    #     ref_stft_seg = self.reference_features[: self.ref_pointer]  # [F, M]
-    #     target_stft_seg = self.input_features[: self.target_pointer]  # [F, N]
-    #     dist = scipy.spatial.distance.cdist(
-    #         ref_stft_seg.T, target_stft_seg.T, metric=self.local_cost_fun
-    #     )
-    #     self.dist_matrix[self.w - dist.shape[0] :, self.w - dist.shape[1] :] = dist
 
     def init_matrix(self):
         x = self.ref_pointer
@@ -293,7 +288,8 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         return next_direction
 
     def get_new_input(self):
-        target_feature = self.queue.get()
+        target_feature, f_time = self.queue.get()
+        self.before_algorithm = time.time()
         q_length = self.frame_per_seg
         self.input_features[self.target_pointer : self.target_pointer + q_length] = (
             target_feature
