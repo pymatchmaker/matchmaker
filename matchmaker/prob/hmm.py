@@ -799,16 +799,10 @@ class PitchIOIHMM(BaseHMM):
             tempo_model=tempo_model,
             has_insertions=has_insertions,
         )
-        self.counter = 0
-        self.elapsed_times = []
 
     def __call__(self, input, *args, **kwargs):
-        before_time = time.time()
         frame_index = args[0]
-        if frame_index == 34:
-            print("here")
         pitch_obs, ioi_obs = input
-        ioi_obs = 1
         if self.perf_onset is None:
             self.perf_onset = 0
         else:
@@ -849,16 +843,6 @@ class PitchIOIHMM(BaseHMM):
                 )
 
         self.current_state = current_state
-
-        after_time = time.time()
-        elapsed_time = after_time - before_time
-        self.elapsed_times.append(elapsed_time)
-        self.counter += 1
-
-        if self.counter == 600:
-            print(
-                f"HMM Average time: {np.mean(self.elapsed_times)}, median time: {np.median(self.elapsed_times)}"
-            )
 
         return self.state_space[self.current_state]
 

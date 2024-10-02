@@ -95,14 +95,12 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         current_position: int = 0,
         frame_rate: int = FRAME_RATE,
         queue: Optional[RECVQueue] = None,
-        perf_stream=None,
         **kwargs,
     ) -> None:
         super().__init__(reference_features=reference_features)
 
         self.input_features: List[NDArray[np.float32]] = None
         self.queue = queue or RECVQueue()
-        self.perf_stream = perf_stream
 
         if not (isinstance(local_cost_fun, (str, tuple)) or callable(local_cost_fun)):
             raise MatchmakerInvalidParameterTypeError(
@@ -178,25 +176,14 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
 
     def run(self) -> None:
         self.reset()
-        elapsed_times = []
         while self.is_still_following():
-            if self.input_index == 1300:
-                print(
-                    f"Median Elapsed time for for algorithm run: median({np.median(elapsed_times)}), mean({np.mean(elapsed_times)})"
-                )
             features, f_time = self.queue.get()
-            # self.before_algorithm = f_time
-            self.before_algorithm = time.time()
             self.input_features = (
                 np.concatenate((self.input_features, features))
                 if self.input_features is not None
                 else features
             )
             self.step(features)
-            # after_algorithm = self.perf_stream.audio_stream.get_time()
-            after_algorithm = time.time()
-            elapsed_time = after_algorithm - self.before_algorithm
-            elapsed_times.append(elapsed_time)
 
         return self.warping_path
 

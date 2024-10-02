@@ -426,8 +426,6 @@ class MockFramedMidiStream(FramedMidiStream):
                 "`partitura.performance.PerformanceLike` object, "
                 f"but is {type(file_path)}"
             )
-        self.counter = 0
-        self.elapsed_times = []
 
     def _process_feature(
         self,
@@ -437,23 +435,11 @@ class MockFramedMidiStream(FramedMidiStream):
         **kwargs,
     ) -> None:
         # the data is the Buffer instance
-        before_time = time.time()
         output = [proc((frame, f_time))[0] for proc in self.features]
         if self.return_midi_messages:
             self.queue.put((frame, output))
         else:
             self.queue.put(output)
-
-        after_time = time.time()
-        elapsed_time = after_time - before_time
-        self.elapsed_times.append(elapsed_time)
-
-        # self.counter += 1
-        # if self.counter == 3000:
-        #     print(f"Processed {self.counter} frames")
-        #     print(
-        #         f"Average MIDI feature processing time: {np.mean(self.elapsed_times)}, (median: {np.median(self.elapsed_times)})"
-        #     )
 
     def mock_stream(self):
         """

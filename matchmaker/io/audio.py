@@ -16,7 +16,7 @@ from matchmaker.utils.processor import DummySequentialOutputProcessor, Stream
 from matchmaker.features.audio import HOP_LENGTH, SAMPLE_RATE
 
 CHANNELS = 1
-CHUNK_SIZE = 4 * HOP_LENGTH
+CHUNK_SIZE = 1 * HOP_LENGTH
 
 
 class AudioStream(threading.Thread, Stream):
@@ -65,9 +65,6 @@ class AudioStream(threading.Thread, Stream):
         self.prev_time = None
 
     def _process_frame(self, data, frame_count, time_info, status_flag):
-        print(
-            f"frame_count: {frame_count}, time_info: {time_info['input_buffer_adc_time'] - self.prev_time}"
-        )
         self.prev_time = time_info["input_buffer_adc_time"]
         target_audio = np.frombuffer(data, dtype=np.float32)  # initial y
         self._process_feature(target_audio, time_info["input_buffer_adc_time"])
@@ -90,16 +87,6 @@ class AudioStream(threading.Thread, Stream):
         stacked_features = None  # shape: (n_features, n_frames)
         for feature in self.features:
             feature_output = feature(target_audio)
-            # if self.include_ftime:
-            #     # TODO: optimize this part. So far this
-            #     # is an ugly way to do this.
-            #     stacked_features = (
-            #         feature_output[0]
-            #         if stacked_features is None
-            #         else np.concatenate((stacked_features, feature_output[0]), axis=1)
-            #     )
-            # else:
-
             stacked_features = (
                 feature_output
                 if stacked_features is None
@@ -112,8 +99,6 @@ class AudioStream(threading.Thread, Stream):
         else:
             self.queue.put(stacked_features)
             self.last_chunk = target_audio[-self.hop_length :]
-
-        # print(f"queue size: {self.queue.qsize()}")
 
     @property
     def current_time(self):
@@ -199,20 +184,11 @@ class MockAudioStream(AudioStream):
         ]
         self.start_listening()
         run_counter = 0
-        elapsed_times = []
         while self.listen and trimmed_audio.any():
-            if run_counter == 1300:
-                print(
-                    f"Median Elapsed time for feature processing: median({np.median(elapsed_times)}), mean({np.mean(elapsed_times)})"
-                )
-            before_process_feature = time.time()
             target_audio = trimmed_audio[: self.chunk_size]
             f_time = run_counter * self.chunk_size / self.sample_rate
 
             self._process_feature(target_audio, run_counter)
-            after_process_feature = time.time()
-            elapsed = after_process_feature - before_process_feature
-            elapsed_times.append(elapsed)
             trimmed_audio = trimmed_audio[self.chunk_size :]
             run_counter += 1
 

@@ -78,7 +78,6 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         frame_per_seg=FRAME_PER_SEG,
         frame_rate=FRAME_RATE,
         queue=None,
-        perf_stream=None,
         **kwargs,
     ):
         super().__init__(reference_features=reference_features)
@@ -98,7 +97,6 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.input_index: int = 0
         self.previous_direction = None
         self.last_queue_update = time.time()
-        self.perf_stream = perf_stream
 
     @property
     def warping_path(self) -> NDArray[np.float32]:  # [shape=(2, T)]
@@ -289,7 +287,6 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
 
     def get_new_input(self):
         target_feature, f_time = self.queue.get()
-        self.before_algorithm = time.time()
         q_length = self.frame_per_seg
         self.input_features[self.target_pointer : self.target_pointer + q_length] = (
             target_feature
