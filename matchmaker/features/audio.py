@@ -3,7 +3,7 @@
 """
 Features from audio files
 """
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import librosa
 import numpy as np
@@ -32,7 +32,7 @@ class ChromagramProcessor(Processor):
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
         n_chroma: int = N_CHROMA,
-        norm: Optional[float] = NORM,
+        norm: Optional[Union[float, str]] = NORM,
     ):
         super().__init__()
         self.sample_rate = sample_rate
@@ -69,7 +69,7 @@ class ChromagramIOIProcessor(Processor):
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
         n_chroma: int = N_CHROMA,
-        norm: Optional[float] = NORM,
+        norm: Optional[Union[float, str]] = NORM,
     ):
         super().__init__()
         self.sample_rate = sample_rate
@@ -112,12 +112,14 @@ class MFCCProcessor(Processor):
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
         n_mfcc: int = N_MFCC,
+        norm: Optional[Union[float, str]] = "backward",
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.n_fft = 2 * self.hop_length
         self.n_mfcc = n_mfcc
+        self.norm = norm
 
     def __call__(
         self,
@@ -131,7 +133,7 @@ class MFCCProcessor(Processor):
             n_fft=self.n_fft,
             n_mfcc=self.n_mfcc,
             center=False,
-            norm=np.inf,
+            norm=self.norm,
         )
         return mfcc.T
 
@@ -142,12 +144,14 @@ class MelSpectrogramProcessor(Processor):
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
         n_mels: int = N_MELS,
+        norm: Optional[Union[float, str]] = NORM,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.n_fft = 2 * self.hop_length
         self.n_mels = n_mels
+        self.norm = norm
 
     def __call__(
         self,
@@ -160,7 +164,7 @@ class MelSpectrogramProcessor(Processor):
             hop_length=self.hop_length,
             n_fft=self.n_fft,
             n_mels=self.n_mels,
-            norm=np.inf,
+            norm=self.norm,
             center=False,
         )
         mel_spectrogram = np.log1p(mel_spectrogram * 5) / 4

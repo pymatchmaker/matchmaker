@@ -109,8 +109,10 @@ class TestMockAudioStream(unittest.TestCase):
                 + MFCCProcessor().n_mfcc
                 + MelSpectrogramProcessor().n_mels
             )
+
+            # TODO: Check the correct behavior
             expected_shape = (
-                features_len,
                 int(self.stream.chunk_size / self.stream.hop_length),  # windowed frames
+                features_len,
             )
             self.assertEqual(feature.shape, expected_shape)

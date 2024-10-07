@@ -801,7 +801,8 @@ class PitchIOIHMM(BaseHMM):
         )
 
     def __call__(self, input, *args, **kwargs):
-        frame_index = args[0]
+
+        frame_index = args[0] if args else None
         pitch_obs, ioi_obs = input
         if self.perf_onset is None:
             self.perf_onset = 0
@@ -816,7 +817,7 @@ class PitchIOIHMM(BaseHMM):
             log_probabilities=False,
         )
         self._warping_path.append((current_state, self.input_index))
-        self.input_index = frame_index
+        self.input_index = self.input_index + 1 if frame_index is None else frame_index
 
         if self.current_state is None:
             self.current_state = current_state

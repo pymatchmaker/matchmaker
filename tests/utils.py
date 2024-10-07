@@ -24,6 +24,27 @@ import tempfile
 RNG = np.random.RandomState(1984)
 
 
+class DummyMidiPlayer(threading.Thread):
+    def __init__(
+        self,
+        port: mido.ports.BaseOutput,
+        filename: str,
+    ) -> None:
+        threading.Thread.__init__(self)
+        self.port = port
+        self.mf = mido.MidiFile(filename)
+        self.is_playing = False
+
+    def run(self) -> None:
+        self.is_playing = True
+        for msg in self.mf.play():
+            self.port.send(msg)
+
+        # close port
+        self.is_playing = False
+        self.port.close()
+
+
 def make_blobs(
     n_samples: int = 100,
     n_features: int = 2,
