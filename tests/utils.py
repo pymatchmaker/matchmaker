@@ -16,7 +16,8 @@ from partitura.performance import PerformanceLike
 from matchmaker.io.midi import MockFramedMidiStream, MockMidiStream, POLLING_PERIOD
 from matchmaker.io.audio import MockAudioStream, SAMPLE_RATE, HOP_LENGTH, CHUNK_SIZE
 from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.symbolic import save_wav_fluidsynth
+from partitura.io.exportaudio import save_wav_fluidsynth
+
 import tempfile
 
 # Random number generator
@@ -35,7 +36,7 @@ def make_blobs(
     """
     Generate isotropic Gaussian blobs for clustering.
 
-    This code and its documentation were slightly adapted from
+    This code and its documentation were taken (and slightly adapted) from
 
     https://github.com/scikit-learn/scikit-learn/blob/main/sklearn/datasets/_samples_generator.py
 
@@ -337,40 +338,3 @@ def process_audio_offline(
         temp_file.close()
 
     return outputs
-
-
-if __name__ == "__main__":
-
-    lenX = 5
-    centers = 3
-    n_features = 5
-    maxreps = 4
-    minreps = 1
-    noise_scale = 0.01
-
-    X, Y, ground_truth_path = generate_example_sequences(
-        lenX=lenX,
-        centers=centers,
-        n_features=n_features,
-        maxreps=maxreps,
-        minreps=minreps,
-        noise_scale=noise_scale,
-        random_state=RNG,
-    )
-
-
-class DummyMidiPlayer(threading.Thread):
-    def __init__(self, port: mido.ports.BaseOutput, filename: str) -> None:
-        threading.Thread.__init__(self)
-        self.port = port
-        self.mf = mido.MidiFile(filename)
-        self.is_playing = False
-
-    def run(self) -> None:
-        self.is_playing = True
-        for msg in self.mf.play():
-            self.port.send(msg)
-
-        # close port
-        self.is_playing = False
-        self.port.close()
