@@ -27,134 +27,6 @@ from matchmaker.utils.symbolic import (
 # Default polling period (in seconds)
 POLLING_PERIOD = 0.01
 
-
-class MidiStream(threading.Thread, Stream):
-    """
-    A class to process input MIDI stream in real time
-
-    Parameters
-    ----------
-    port : mido.ports.BaseInput
-        Input MIDI port
-
-    queue : RECVQueue
-        Queue to store processed MIDI input
-
-    init_time : Optional[float]
-        The initial time. If none given, the
-        initial time will be set to the starting time
-        of the thread.
-
-    return_midi_messages: bool
-        Return MIDI messages in addition to the
-        processed features.
-
-    mediator : CeusMediator or None
-        A Mediator instance to filter input MIDI.
-        This is useful for certain older instruments,
-        like the Bösendorfer CEUS, which do not distinguish
-        between notes played by a human, and notes sent
-        from a different process  (e.g., an accompaniment system)
-    """
-
-    midi_in: Optional[MidiInputPort]
-    init_time: float
-    listen: bool
-    queue: RECVQueue
-    features: List[Callable]
-    return_midi_messages: bool
-    first_message: bool
-    mediator: CeusMediator
-
-    def __init__(
-        self,
-        port: MidiInputPort,
-        queue: RECVQueue = None,
-        init_time: Optional[float] = None,
-        features: Optional[List[Callable]] = None,
-        return_midi_messages: bool = False,
-        mediator: Optional[CeusMediator] = None,
-    ):
-        if features is None:
-            features = [ProcessorWrapper(lambda x: x)]
-        threading.Thread.__init__(self)
-        Stream.__init__(self, features=features)
-        self.midi_in = port
-        self.init_time = init_time
-        self.listen = False
-        self.queue = queue or RECVQueue()
-        self.first_msg = False
-        self.return_midi_messages = return_midi_messages
-        self.mediator = mediator
-
-    def _process_frame(
-        self, data: mido.Message, c_time: float, *args, **kwargs
-    ) -> Tuple[Any, int]:
-        """
-        Parameters
-        ----------
-        data : mido.Message
-            Input data to the frame
-        """
-        self._process_feature(msg=data, c_time=c_time, *args, **kwargs)
-
-        return (data, int(self.listen))
-
-    def _process_feature(
-        self, msg: mido.Message, *args, c_time: float, **kwargs
-    ) -> None:
-
-        # TODO: Use an OutputProcessor
-        output = [proc(([(msg, c_time)], c_time))[0] for proc in self.features]
-        if self.return_midi_messages:
-            self.queue.put(((msg, c_time), output))
-        else:
-            self.queue.put(output)
-
-    def run(self):
-        self.start_listening()
-        while self.listen:
-            msg = self.midi_in.poll()
-            if msg is not None:
-                if (
-                    self.mediator is not None
-                    and msg.type == "note_on"
-                    and self.mediator.filter_check(msg.note)
-                ):
-                    continue
-                self._process_frame(
-                    data=msg,
-                    c_time=self.current_time,
-                )
-
-    @property
-    def current_time(self):
-        """
-        Get current time since starting to listen
-        """
-        return time.time() - self.init_time
-
-    def start_listening(self):
-        """
-        Start listening to midi input (open input port and
-        get starting time)
-        """
-        print("* Start listening to MIDI stream....")
-        self.listen = True
-        if self.init_time is None:
-            self.init_time = time.time()
-
-    def stop_listening(self):
-        """
-        Stop listening to MIDI input
-        """
-        print("* Stop listening to MIDI stream....")
-        # break while loop in self.run
-        self.listen = False
-        # reset init time
-        self.init_time = None
-
-
 class Buffer(object):
     """
     A Buffer for MIDI input
@@ -218,6 +90,148 @@ class Buffer(object):
 
     def __str__(self):
         return str(self.frame)
+    
+class MidiStream(threading.Thread, Stream):
+    """
+    A class to process input MIDI stream in real time
+
+    Parameters
+    ----------
+    port : mido.ports.BaseInput
+        Input MIDI port
+
+    queue : RECVQueue
+        Queue to store processed MIDI input
+
+    init_time : Optional[float]
+        The initial time. If none given, the
+        initial time will be set to the starting time
+        of the thread.
+
+    return_midi_messages: bool
+        Return MIDI messages in addition to the
+        processed features.
+
+    mediator : CeusMediator or None
+        A Mediator instance to filter input MIDI.
+        This is useful for certain older instruments,
+        like the Bösendorfer CEUS, which do not distinguish
+        between notes played by a human, and notes sent
+        from a different process  (e.g., an accompaniment system)
+    """
+
+    midi_in: Optional[MidiInputPort]
+    init_time: float
+    listen: bool
+    queue: RECVQueue
+    features: List[Callable]
+    return_midi_messages: bool
+    first_message: bool
+    mediator: CeusMediator
+    is_framed: bool
+    mock_stream: bool
+    polling_period: Optional[float]
+
+    def __init__(
+        self,
+        port: MidiInputPort,
+        queue: RECVQueue = None,
+        init_time: Optional[float] = None,
+        features: Optional[List[Callable]] = None,
+        return_midi_messages: bool = False,
+        mediator: Optional[CeusMediator] = None,
+        polling_period: Optional[float] = POLLING_PERIOD
+    ):
+        if features is None:
+            features = [ProcessorWrapper(lambda x: x)]
+        threading.Thread.__init__(self)
+        Stream.__init__(self, features=features)
+
+        self.midi_in = port
+        self.init_time = init_time
+        self.listen = False
+        self.queue = queue or RECVQueue()
+        self.first_msg = False
+        self.return_midi_messages = return_midi_messages
+        self.mediator = mediator
+
+        self.polling_period = polling_period
+        if polling_period is None:
+            self.is_framed = False
+            self._process_feature = self._process_feature_single
+        else:
+            self.is_framed = True
+            self._process_feature = self._process_feature_framed
+
+    # def _process_frame(
+    #     self, data: mido.Message, c_time: float, *args, **kwargs
+    # ) -> Tuple[Any, int]:
+    #     """
+    #     Parameters
+    #     ----------
+    #     data : mido.Message
+    #         Input data to the frame
+    #     """
+    #     self._process_feature(msg=data, c_time=c_time, *args, **kwargs)
+
+    #     return (data, int(self.listen))
+
+    def _process_feature_single(
+        self, msg: mido.Message, *args, c_time: float, **kwargs
+    ) -> None:
+
+        # TODO: Use an OutputProcessor
+        output = [proc(([(msg, c_time)], c_time))[0] for proc in self.features]
+        if self.return_midi_messages:
+            self.queue.put(((msg, c_time), output))
+        else:
+            self.queue.put(output)
+
+    def run(self):
+        self.start_listening()
+        while self.listen:
+            msg = self.midi_in.poll()
+            if msg is not None:
+                if (
+                    self.mediator is not None
+                    and msg.type == "note_on"
+                    and self.mediator.filter_check(msg.note)
+                ):
+                    continue
+                self._process_frame(
+                    data=msg,
+                    c_time=self.current_time,
+                )
+
+    @property
+    def current_time(self):
+        """
+        Get current time since starting to listen
+        """
+        return time.time() - self.init_time
+
+    def start_listening(self):
+        """
+        Start listening to midi input (open input port and
+        get starting time)
+        """
+        print("* Start listening to MIDI stream....")
+        self.listen = True
+        if self.init_time is None:
+            self.init_time = time.time()
+
+    def stop_listening(self):
+        """
+        Stop listening to MIDI input
+        """
+        print("* Stop listening to MIDI stream....")
+        # break while loop in self.run
+        self.listen = False
+        # reset init time
+        self.init_time = None
+
+
+
 
 
 class FramedMidiStream(MidiStream):
