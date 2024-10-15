@@ -18,7 +18,8 @@ from partitura.performance import Performance, PerformanceLike, PerformedPart
 
 from matchmaker.io.mediator import CeusMediator
 from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.processor import ProcessorWrapper, Stream
+from matchmaker.utils.processor import ProcessorWrapper
+from matchmaker.utils.stream import Stream
 from matchmaker.utils.symbolic import (
     framed_midi_messages_from_performance,
     midi_messages_from_performance,
@@ -26,6 +27,7 @@ from matchmaker.utils.symbolic import (
 
 # Default polling period (in seconds)
 POLLING_PERIOD = 0.01
+
 
 class Buffer(object):
     """
@@ -90,7 +92,8 @@ class Buffer(object):
 
     def __str__(self):
         return str(self.frame)
-    
+
+
 class MidiStream(threading.Thread, Stream):
     """
     A class to process input MIDI stream in real time
@@ -140,7 +143,7 @@ class MidiStream(threading.Thread, Stream):
         features: Optional[List[Callable]] = None,
         return_midi_messages: bool = False,
         mediator: Optional[CeusMediator] = None,
-        polling_period: Optional[float] = POLLING_PERIOD
+        polling_period: Optional[float] = POLLING_PERIOD,
     ):
         if features is None:
             features = [ProcessorWrapper(lambda x: x)]
@@ -229,9 +232,6 @@ class MidiStream(threading.Thread, Stream):
         self.listen = False
         # reset init time
         self.init_time = None
-
-
-
 
 
 class FramedMidiStream(MidiStream):

@@ -12,7 +12,8 @@ import numpy as np
 import pyaudio
 
 from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.processor import DummySequentialOutputProcessor, Stream
+from matchmaker.utils.processor import DummyProcessor
+from matchmaker.utils.stream import Stream
 from matchmaker.features.audio import HOP_LENGTH, SAMPLE_RATE
 
 CHANNELS = 1
@@ -47,7 +48,7 @@ class AudioStream(threading.Thread, Stream):
         queue: RECVQueue = None,
     ):
         if features is None:
-            features = DummySequentialOutputProcessor()
+            features = DummyProcessor()
         threading.Thread.__init__(self)
         Stream.__init__(self, features=features)
         self.sample_rate = sample_rate
