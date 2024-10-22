@@ -111,7 +111,7 @@ class RECVQueue(Queue):
         while True:
             try:
                 return self.get(timeout=1)
-            except Empty:
+            except Empty: # pragma: no cover
                 pass
 
     def poll(self) -> bool:
