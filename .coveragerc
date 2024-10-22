@@ -1,0 +1,4 @@
+[run]
+source = matchmaker
+omit =
+    */tests/*        # Exclude all files in the tests folder
