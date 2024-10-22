@@ -4,6 +4,7 @@
 Utilities for tests
 """
 import numbers
+import tempfile
 import threading
 import time
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
@@ -11,14 +12,12 @@ from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 import mido
 import numpy as np
 import partitura as pt
+from partitura.io.exportaudio import save_wav_fluidsynth
 from partitura.performance import PerformanceLike
 
-from matchmaker.io.midi import MockFramedMidiStream, MockMidiStream, POLLING_PERIOD
-from matchmaker.io.audio import MockAudioStream, SAMPLE_RATE, HOP_LENGTH, CHUNK_SIZE
+from matchmaker.io.audio import CHUNK_SIZE, HOP_LENGTH, SAMPLE_RATE, AudioStream
+from matchmaker.io.midi import POLLING_PERIOD, MockFramedMidiStream, MockMidiStream
 from matchmaker.utils.misc import RECVQueue
-from partitura.io.exportaudio import save_wav_fluidsynth
-
-import tempfile
 
 # Random number generator
 RNG = np.random.RandomState(1984)
@@ -307,7 +306,7 @@ def process_midi_offline(
 
 def process_audio_offline(
     perf_info: Union[PerformanceLike, str],
-    features: List[Callable],
+    processor: Callable,
     sample_rate: int = SAMPLE_RATE,
     hop_length: int = HOP_LENGTH,
     chunk_size: int = CHUNK_SIZE,
@@ -340,10 +339,10 @@ def process_audio_offline(
             out=file_path,
         )
 
-    input_stream = MockAudioStream(
+    input_stream = AudioStream(
         file_path=file_path,
         queue=queue,
-        features=features,
+        processor=processor,
         sample_rate=sample_rate,
         hop_length=hop_length,
         chunk_size=chunk_size,

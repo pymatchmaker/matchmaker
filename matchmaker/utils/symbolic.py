@@ -12,7 +12,6 @@ from numpy.typing import NDArray
 from partitura.performance import Performance, PerformanceLike, PerformedPart
 
 
-
 def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
     """
     Get a list of MIDI messages and message times from

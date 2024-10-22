@@ -4,12 +4,11 @@
 Top of the module for input streams
 """
 
-from .audio import AudioStream, MockAudioStream
+from .audio import AudioStream
 from .midi import FramedMidiStream, MidiStream, MockFramedMidiStream, MockMidiStream
 
 __all__ = [
     "AudioStream",
-    "MockingAudioStream",
     "MidiStream",
     "FramedMidiStream",
     "MockMidiStream",

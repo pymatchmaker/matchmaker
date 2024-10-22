@@ -4,7 +4,7 @@
 On-line Dynamic Time Warping
 """
 import time
-from typing import Any, Callable, Dict, List, Tuple, Union, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 from numpy.typing import NDArray

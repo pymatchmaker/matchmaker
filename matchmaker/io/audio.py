@@ -5,69 +5,130 @@ Input audio stream
 """
 import threading
 import time
-from typing import Callable, List, Optional
+from types import TracebackType
+from typing import Any, Callable, List, Optional, Tuple, Type, Union
 
 import librosa
 import numpy as np
 import pyaudio
 
+from matchmaker.features.audio import HOP_LENGTH, SAMPLE_RATE
+from matchmaker.utils.audio import get_audio_devices, get_device_index_from_name
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import DummyProcessor
 from matchmaker.utils.stream import Stream
-from matchmaker.features.audio import HOP_LENGTH, SAMPLE_RATE
 
 CHANNELS = 1
 CHUNK_SIZE = 1 * HOP_LENGTH
 
 
-class AudioStream(threading.Thread, Stream):
+class AudioStream(Stream):
     """
-    A class to process audio stream in real-time
+    A class to process an audio stream in real-time
 
     Parameters
     ----------
+    processor: Optional[Callable]
+        The processor for the features
+    file_path: Optional[str]
+        If given, the audio stream will be simulated using the
+        given file as an input instead.
     sample_rate : int
         Sample rate of the audio stream
     hop_length : int
         Hop length of the audio stream
     queue : RECVQueue
         Queue to store the processed audio
-    features : List[Callable]
-        List of features to be processed (SequentialOutputProcessor)
     chunk_size : int
         Size of the audio chunk
+    device_name_or_index : Optional[Union[str, int]]
+        Name or index of the audio device to be used. Ignored
+        if `file_path` is given.
     """
 
     def __init__(
         self,
-        features: List[Callable],
+        processor: Optional[Callable] = None,
+        file_path: Optional[str] = None,
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
         chunk_size: int = CHUNK_SIZE,
         include_ftime: bool = False,
-        queue: RECVQueue = None,
+        queue: Optional[RECVQueue] = None,
+        device_name_or_index: Optional[Union[str, int]] = None,
     ):
-        if features is None:
-            features = DummyProcessor()
-        threading.Thread.__init__(self)
-        Stream.__init__(self, features=features)
+        if processor is None:
+            processor = DummyProcessor()
+
+        Stream.__init__(
+            self,
+            processor=processor,
+            mock=file_path is not None,
+        )
+
+        if file_path is not None:
+            # Do not activate audio device for running the
+            # stream offline
+            device_name_or_index = None
+
+        self.file_path = file_path
+        # Select device index, or raise an error if invalid device is selected.
+        self.input_device_index = None
+
+        # Name of the device is given
+        if isinstance(device_name_or_index, str):
+            self.input_device_index = get_device_index_from_name(
+                device_name=device_name_or_index
+            )
+
+        # Index of the device is given
+        elif isinstance(device_name_or_index, int):
+
+            self.input_device_index = device_name_or_index
+            audio_devices = get_audio_devices()
+
+            if device_name_or_index > len(audio_devices):
+
+                print(
+                    f"`{device_name_or_index}` is an invalid device index!\n"
+                    "The following audio devices are available:\n"
+                )
+
+                for ad in audio_devices:
+                    print(ad)
+
+                raise ValueError("Invalid index for audio device.")
+
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.queue = queue or RECVQueue()
+
+        # @Jiyun: Why do we select the chunk size like this?
         self.chunk_size = chunk_size * self.hop_length
+
         self.format = pyaudio.paFloat32
-        self.audio_interface = pyaudio.PyAudio()
+        self.audio_interface = None
         self.audio_stream: Optional[pyaudio.Stream] = None
         self.last_chunk = None
-        self.init_time = None
-        self.listen = False
         self.include_ftime = include_ftime
         self.f_time = 0
         self.prev_time = None
 
-    def _process_frame(self, data, frame_count, time_info, status_flag):
+        if self.mock:
+            self.run = self.run_offline
+        else:
+            self.run = self.run_online
+
+    def _process_frame(
+        self,
+        data,
+        frame_count,
+        time_info,
+        status_flag,
+    ) -> Tuple[np.ndarray, int]:
         self.prev_time = time_info["input_buffer_adc_time"]
-        target_audio = np.frombuffer(data, dtype=np.float32)  # initial y
+        # initial y
+        target_audio = np.frombuffer(data, dtype=np.float32)
         self._process_feature(target_audio, time_info["input_buffer_adc_time"])
 
         return (data, pyaudio.paContinue)
@@ -85,96 +146,60 @@ class AudioStream(threading.Thread, Stream):
 
         if self.include_ftime:
             target_audio = (target_audio.squeeze(), f_time)
-        stacked_features = None  # shape: (n_features, n_frames)
-        for feature in self.features:
-            feature_output = feature(target_audio)
-            stacked_features = (
-                feature_output
-                if stacked_features is None
-                else np.concatenate((stacked_features, feature_output), axis=1)
-            )
+
+        features = self.processor(target_audio)
 
         if self.include_ftime:
-            self.queue.put((stacked_features, f_time))
+            self.queue.put((features, f_time))
             self.last_chunk = target_audio[0][-self.hop_length :]
         else:
-            self.queue.put(stacked_features)
+            self.queue.put(features)
             self.last_chunk = target_audio[-self.hop_length :]
 
     @property
-    def current_time(self):
+    def current_time(self) -> Optional[float]:
         """
-        Get current time since starting to listen
-        """
-        return time.time() - self.init_time if self.init_time else None
+        Get current time since starting to listen.
 
-    def start_listening(self):
+        This property only makes sense in the context of live
+        inputs.
+        """
+        # return time.time() - self.init_time if self.init_time else None
+
+        return self.audio_stream.get_time() - self.init_time if self.init_time else None
+
+    def start_listening(self) -> None:
         self.audio_stream.start_stream()
         print("* Start listening to audio stream....")
         self.listen = True
-        self.init_time = self.audio_stream.get_time()
 
-    def stop_listening(self):
+    def stop_listening(self) -> None:
         print("* Stop listening to audio stream....")
         self.audio_stream.stop_stream()
         self.audio_stream.close()
         self.audio_interface.terminate()
         self.listen = False
 
-    def run(self):
-        self.audio_stream = self.audio_interface.open(
-            format=self.format,
-            channels=CHANNELS,
-            rate=self.sample_rate,
-            input=True,
-            frames_per_buffer=self.chunk_size,
-            stream_callback=self._process_frame,
-        )
-        self.prev_time = self.audio_stream.get_time()
-        self.start_listening()
+    def __enter__(self) -> None:
+        self.start()
+        return self
 
-    def stop(self):
-        self.stop_listening()
-
-
-class MockAudioStream(AudioStream):
-    """
-    A class to process audio stream from a file
-
-    Parameters
-    ----------
-    file_path : str
-        Path to the audio file
-    """
-
-    def __init__(
+    def __exit__(
         self,
-        features: List[Callable],
-        sample_rate: int = SAMPLE_RATE,
-        hop_length: int = HOP_LENGTH,
-        chunk_size: int = CHUNK_SIZE,
-        file_path: str = "",
-        include_ftime: bool = False,
-        queue: RECVQueue = None,
-    ):
-        super().__init__(
-            sample_rate=sample_rate,
-            hop_length=hop_length,
-            queue=queue,
-            features=features,
-            chunk_size=chunk_size,
-        )
-        self.file_path = file_path
-        self.include_ftime = include_ftime
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> Optional[bool]:
+        self.stop()
+        if exc_type is not None: # pragma: no cover
+            # Returning True will suppress the exception
+            # False means the exception will propagate
+            return False
+        return True
 
-    def start_listening(self):
-        self.listen = True
-        self.init_time = time.time()
-
-    def stop_listening(self):
-        self.listen = False
-
-    def mock_stream(self):
+    def run_offline(self) -> None:
+        """Offline method for computing features"""
+        self.init_time = 0
         duration = int(librosa.get_duration(path=self.file_path))
         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
@@ -185,6 +210,8 @@ class MockAudioStream(AudioStream):
         ]
         self.start_listening()
         run_counter = 0
+
+        self.prev_time = 0
         while self.listen and trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
             f_time = run_counter * self.chunk_size / self.sample_rate
@@ -192,6 +219,7 @@ class MockAudioStream(AudioStream):
             self._process_feature(target_audio, run_counter)
             trimmed_audio = trimmed_audio[self.chunk_size :]
             run_counter += 1
+            self.prev_time = f_time
 
             # time_interval = self.chunk_size / self.sample_rate  # 0.2 sec
             # time.sleep(time_interval)  # 실제 시간과 동일하게 simulation
@@ -203,7 +231,94 @@ class MockAudioStream(AudioStream):
             self._process_feature(target_audio, f_time)
             additional_padding_size -= self.chunk_size
             run_counter += 1
+            self.prev_time = f_time
 
-    def run(self):
-        print(f"* [Mocking] Loading existing audio file({self.file_path})....")
-        self.mock_stream()
+    def run_online(self) -> None:
+        self.audio_interface = pyaudio.PyAudio()
+        self.audio_stream = self.audio_interface.open(
+            format=self.format,
+            channels=CHANNELS,
+            rate=self.sample_rate,
+            input=True,
+            frames_per_buffer=self.chunk_size,
+            stream_callback=self._process_frame,
+            input_device_index=self.input_device_index,
+        )
+        self.prev_time = self.audio_stream.get_time()
+        self.init_time = self.audio_stream.get_time()
+        self.start_listening()
+
+    def stop(self):
+        self.stop_listening()
+
+
+# class MockAudioStream(AudioStream):
+#     """
+#     A class to process audio stream from a file
+
+#     Parameters
+#     ----------
+#     file_path : str
+#         Path to the audio file
+#     """
+
+#     def __init__(
+#         self,
+#         features: List[Callable],
+#         sample_rate: int = SAMPLE_RATE,
+#         hop_length: int = HOP_LENGTH,
+#         chunk_size: int = CHUNK_SIZE,
+#         file_path: str = "",
+#         include_ftime: bool = False,
+#         queue: RECVQueue = None,
+#     ):
+#         super().__init__(
+#             sample_rate=sample_rate,
+#             hop_length=hop_length,
+#             queue=queue,
+#             processor=features,
+#             chunk_size=chunk_size,
+#         )
+#         self.file_path = file_path
+#         self.include_ftime = include_ftime
+
+#     def start_listening(self):
+#         self.listen = True
+#         self.init_time = time.time()
+
+#     def stop_listening(self):
+#         self.listen = False
+
+#     def mock_stream(self):
+#         duration = int(librosa.get_duration(path=self.file_path))
+#         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
+#         padded_audio = np.concatenate(  # zero padding at the end
+#             (audio_y, np.zeros(duration * 2 * self.sample_rate, dtype=np.float32))
+#         )
+#         trimmed_audio = padded_audio[  # trim to multiple of chunk_size
+#             : len(padded_audio) - (len(padded_audio) % self.chunk_size)
+#         ]
+#         self.start_listening()
+#         run_counter = 0
+#         while self.listen and trimmed_audio.any():
+#             target_audio = trimmed_audio[: self.chunk_size]
+#             f_time = run_counter * self.chunk_size / self.sample_rate
+
+#             self._process_feature(target_audio, run_counter)
+#             trimmed_audio = trimmed_audio[self.chunk_size :]
+#             run_counter += 1
+
+#             # time_interval = self.chunk_size / self.sample_rate  # 0.2 sec
+#             # time.sleep(time_interval)  # 실제 시간과 동일하게 simulation
+
+#         # fill empty values with zeros after stream is finished (50% of duration)
+#         additional_padding_size = (duration // 2) * self.sample_rate
+#         while self.listen and additional_padding_size > 0:
+#             f_time = run_counter * self.chunk_size / self.sample_rate
+#             self._process_feature(target_audio, f_time)
+#             additional_padding_size -= self.chunk_size
+#             run_counter += 1
+
+#     def run(self):
+#         print(f"* [Mocking] Loading existing audio file({self.file_path})....")
+#         self.mock_stream()

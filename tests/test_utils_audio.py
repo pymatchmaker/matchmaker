@@ -4,18 +4,22 @@
 This module contains tests for the utils/audio.py module.
 """
 import unittest
+from io import StringIO
+from unittest.mock import patch
 
 import pyaudio
 
-from unittest.mock import patch
-from io import StringIO
-
-from matchmaker.utils.audio import AudioDeviceInfo, get_audio_devices, check_input_audio_devices, list_audio_devices, get_device_index_from_name
+from matchmaker.utils.audio import (
+    AudioDeviceInfo,
+    check_input_audio_devices,
+    get_audio_devices,
+    get_device_index_from_name,
+    list_audio_devices,
+)
 
 
 def has_audio_devices():
-    """Check if system has audio devices
-    """
+    """Check if system has audio devices"""
     p = pyaudio.PyAudio()
 
     DEVICE_COUNT = p.get_device_count()
@@ -32,18 +36,18 @@ SKIP_REASON = (not HAS_AUDIO_DEVICES, "No audio device detected")
 
 
 class TestUtilsAudio(unittest.TestCase):
-
     @unittest.skipIf(*SKIP_REASON)
     def test_AudioDeviceInfo(self) -> None:
 
         p = pyaudio.PyAudio()
 
-        device_info = AudioDeviceInfo(device_info=p.get_device_info_by_index(0), device_index=0)
+        device_info = AudioDeviceInfo(
+            device_info=p.get_device_info_by_index(0), device_index=0
+        )
 
         out_str = device_info.__str__()
 
         self.assertTrue(isinstance(out_str, str))
-
 
     @unittest.skipIf(*SKIP_REASON)
     def test_get_audio_devices(self) -> None:
@@ -62,10 +66,12 @@ class TestUtilsAudio(unittest.TestCase):
 
         self.assertTrue(isinstance(has_audio_inputs, bool))
 
-    
     @unittest.skipIf(*SKIP_REASON)
-    @patch('matchmaker.utils.audio.get_audio_devices', return_value=["Device 1", "Device 2"])
-    @patch('sys.stdout', new_callable=StringIO)
+    @patch(
+        "matchmaker.utils.audio.get_audio_devices",
+        return_value=["Device 1", "Device 2"],
+    )
+    @patch("sys.stdout", new_callable=StringIO)
     def test_list_audio_devices_runs(self, mock_stdout, mock_get_audio_devices):
         list_audio_devices()
 
@@ -80,9 +86,9 @@ class TestUtilsAudio(unittest.TestCase):
         mock_get_audio_devices.assert_called_once()
 
     @unittest.skipIf(*SKIP_REASON)
-    @patch('sys.stdout', new_callable=StringIO)
+    @patch("sys.stdout", new_callable=StringIO)
     def test_get_device_index_from_name(self, mock_stdout) -> None:
-        
+
         # Test existing audio devices
         audio_devices = get_audio_devices()
 
@@ -95,10 +101,3 @@ class TestUtilsAudio(unittest.TestCase):
         # Test raising error
         with self.assertRaises(ValueError):
             get_device_index_from_name("NoT a ReAl AuDiO dEvIcE")
-
-        
-
-
-
-
-

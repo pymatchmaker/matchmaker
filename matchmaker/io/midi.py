@@ -18,7 +18,7 @@ from partitura.performance import Performance, PerformanceLike, PerformedPart
 
 from matchmaker.io.mediator import CeusMediator
 from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.processor import ProcessorWrapper
+from matchmaker.utils.processor import DummyProcessor, Processor, ProcessorWrapper
 from matchmaker.utils.stream import Stream
 from matchmaker.utils.symbolic import (
     framed_midi_messages_from_performance,
@@ -94,7 +94,7 @@ class Buffer(object):
         return str(self.frame)
 
 
-class MidiStream(threading.Thread, Stream):
+class MidiStream(Stream):
     """
     A class to process input MIDI stream in real time
 
@@ -127,7 +127,7 @@ class MidiStream(threading.Thread, Stream):
     init_time: float
     listen: bool
     queue: RECVQueue
-    features: List[Callable]
+    processor: Callable
     return_midi_messages: bool
     first_message: bool
     mediator: CeusMediator
@@ -137,18 +137,19 @@ class MidiStream(threading.Thread, Stream):
 
     def __init__(
         self,
-        port: MidiInputPort,
+        processor: Optional[Union[Callable, Processor]] = None,
+        file_path: Optional[str] = None,
+        polling_period: Optional[float] = POLLING_PERIOD,
+        port: Optional[MidiInputPort] = None,
         queue: RECVQueue = None,
         init_time: Optional[float] = None,
-        features: Optional[List[Callable]] = None,
         return_midi_messages: bool = False,
         mediator: Optional[CeusMediator] = None,
-        polling_period: Optional[float] = POLLING_PERIOD,
     ):
-        if features is None:
-            features = [ProcessorWrapper(lambda x: x)]
-        threading.Thread.__init__(self)
-        Stream.__init__(self, features=features)
+        if processor is None:
+            processor = DummyProcessor()
+
+        Stream.__init__(self, features=processor)
 
         self.midi_in = port
         self.init_time = init_time
@@ -184,7 +185,7 @@ class MidiStream(threading.Thread, Stream):
     ) -> None:
 
         # TODO: Use an OutputProcessor
-        output = [proc(([(msg, c_time)], c_time))[0] for proc in self.features]
+        output = [proc(([(msg, c_time)], c_time))[0] for proc in self.processor]
         if self.return_midi_messages:
             self.queue.put(((msg, c_time), output))
         else:
@@ -286,7 +287,7 @@ class FramedMidiStream(MidiStream):
             port=port,
             queue=queue,
             init_time=init_time,
-            features=features,
+            processor=features,
             return_midi_messages=return_midi_messages,
             mediator=mediator,
         )
@@ -299,7 +300,7 @@ class FramedMidiStream(MidiStream):
         **kwargs,
     ) -> None:
         # the data is the Buffer instance
-        output = [proc((data.frame[:], data.time))[0] for proc in self.features]
+        output = [proc((data.frame[:], data.time))[0] for proc in self.processor]
         # output = self.pipeline((frame.frame[:], frame.time))
         if self.return_midi_messages:
             self.queue.put((data.frame, output))
@@ -359,7 +360,7 @@ class MockMidiStream(MidiStream):
             port=None,
             queue=queue,
             init_time=None,
-            features=features,
+            processor=features,
             return_midi_messages=return_midi_messages,
             mediator=mediator,
         )
@@ -449,7 +450,7 @@ class MockFramedMidiStream(FramedMidiStream):
         **kwargs,
     ) -> None:
         # the data is the Buffer instance
-        output = [proc((frame, f_time))[0] for proc in self.features]
+        output = [proc((frame, f_time))[0] for proc in self.processor]
         if self.return_midi_messages:
             self.queue.put((frame, output))
         else:

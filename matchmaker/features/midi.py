@@ -3,22 +3,22 @@
 """
 This module contains methods to compute features from MIDI signals.
 """
-from typing import Dict, List, Optional, Tuple, Union
 import os
-from numpy.typing import NDArray
+from typing import Dict, List, Optional, Tuple, Union
+
 import numpy as np
 import partitura as pt
+from numpy.typing import NDArray
+from partitura.performance import Performance, PerformanceLike, PerformedPart
+from partitura.score import Part, Score, ScoreLike, merge_parts
+from partitura.utils.music import performance_from_part
 
 from matchmaker.utils.processor import Processor
-from matchmaker.utils.typing import InputMIDIFrame, NDArrayFloat
 from matchmaker.utils.symbolic import (
     framed_midi_messages_from_performance,
     midi_messages_from_performance,
 )
-
-from partitura.score import Score, ScoreLike, Part, merge_parts
-from partitura.performance import Performance, PerformanceLike, PerformedPart
-from partitura.utils.music import performance_from_part
+from matchmaker.utils.typing import InputMIDIFrame, NDArrayFloat
 
 
 class PitchProcessor(Processor):

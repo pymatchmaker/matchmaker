@@ -5,12 +5,12 @@ This module contains all Stream related functionality.
 """
 from __future__ import annotations
 
-from threading import Thread
 import time
-from typing import TYPE_CHECKING, Callable, Union, Any, Optional
+from threading import Thread
+from types import TracebackType
+from typing import TYPE_CHECKING, Any, Callable, Optional, Type, Union
 
-
-if TYPE_CHECKING: # pragma: no cover
+if TYPE_CHECKING:  # pragma: no cover
     from matchmaker.utils.processor import Processor
 
 
@@ -57,8 +57,7 @@ class Stream(Thread):
             self.init_time = time.time()
 
     def stop_listening(self):
-        """Set listen to false
-        """
+        """Set listen to false"""
         self.listen = False
 
     def _process_frame(self, data: Any, *args, **kwargs) -> Any:
@@ -80,32 +79,36 @@ class Stream(Thread):
         This method should be implemented in derived subclasses
         """
         raise NotImplementedError
-    
+
     def __enter__(self):
         """Enter method for context managers.
 
         This method should be implemented in derived subclasses.
         """
         raise NotImplementedError
-    
-    def __exit__(self): # pragma: no cover
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> Optional[bool]:  # pragma: no cover
         """Enter method for context managers.
 
         This method should be implemented in derived subclasses.
         """
         raise NotImplementedError
-    
+
     def run(self):
         """Run thread method
 
         This method should be implemented in derived subclasses.
         """
         raise NotImplementedError
-    
+
     def stop(self):
         """Enter method for context managers.
 
         This method should be implemented in derived subclasses.
         """
         raise NotImplementedError
-

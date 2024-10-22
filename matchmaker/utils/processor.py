@@ -70,39 +70,6 @@ class ProcessorWrapper(Processor):
         return output
 
 
-# class SequentialOutputProcessor(object):
-#     """
-#     Abstract base class for sequential processing of data
-
-#     Parameters
-#     ----------
-#     processors: list
-#         List of processors to be applied sequentially.
-#     """
-
-#     processors: List[Processor]
-
-#     def __init__(self, processors: Union[Processor, List[Any]]) -> None:
-#         self.processors = list(processors)
-
-#     def __call__(self, data: Any, **kwargs: Any) -> Any:
-#         """
-#         Makes a processor callable.
-#         """
-#         for proc in self.processors:
-#             data, kwargs = proc(data, kwargs)
-#         return data
-
-#     def reset(self) -> None:
-#         """
-#         Reset the processor. Must be implemented in the derived class
-#         to reset the processor to its initial state.
-#         """
-#         for proc in self.processors:
-#             if hasattr(proc, "reset"):
-#                 proc.reset()
-
-
 class DummyProcessor(Processor):
     """
     Dummy sequential output processor, which always returns

@@ -1,20 +1,19 @@
-import unittest
-import numpy as np
 import threading
 import time
+import unittest
 
+import numpy as np
 
 from matchmaker.utils.misc import (
-    MatchmakerInvalidParameterTypeError,
     MatchmakerInvalidOptionError,
+    MatchmakerInvalidParameterTypeError,
     MatchmakerMissingParameterError,
-    ensure_rng,
     RECVQueue,
+    ensure_rng,
 )
 
 
 class TestMatchmakerExceptions(unittest.TestCase):
-
     def test_invalid_parameter_type_error(self):
         try:
             raise MatchmakerInvalidParameterTypeError(
@@ -117,10 +116,10 @@ class TestRECVQueue(unittest.TestCase):
     def test_poll_method(self):
         queue = RECVQueue()
         # Queue is empty
-        self.assertTrue(queue.poll())  
+        self.assertTrue(queue.poll())
         queue.put("item")
         # Queue is not empty
-        self.assertFalse(queue.poll())  
+        self.assertFalse(queue.poll())
 
 
 if __name__ == "__main__":

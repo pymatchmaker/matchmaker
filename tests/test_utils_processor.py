@@ -7,7 +7,7 @@ import unittest
 
 import numpy as np
 
-from matchmaker.utils.processor import Processor, ProcessorWrapper, DummyProcessor
+from matchmaker.utils.processor import DummyProcessor, Processor, ProcessorWrapper
 
 RNG = np.random.RandomState(1984)
 
@@ -28,6 +28,7 @@ class TestProcessorWrapper(unittest.TestCase):
     """
     Tests for `ProcessorWrapper` class
     """
+
     def test_init(self):
         func = lambda x: 2 * x
         processor = ProcessorWrapper(func=func)
@@ -41,6 +42,7 @@ class TestDummyProcessor(unittest.TestCase):
     """
     Tests for `DummyProcessor` class
     """
+
     def test_init(self):
         processor = DummyProcessor()
         data = RNG.rand(100, 7)

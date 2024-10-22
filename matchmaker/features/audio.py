@@ -7,8 +7,9 @@ from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import librosa
 import numpy as np
-from matchmaker.utils.processor import Processor
 from madmom.audio.chroma import DeepChromaProcessor
+
+from matchmaker.utils.processor import Processor
 
 SAMPLE_RATE = 44100
 FRAME_RATE = 30

@@ -115,7 +115,7 @@ class TestMidiStream(unittest.TestCase):
         midi_stream = MidiStream(
             port=port,
             queue=queue,
-            features=features,
+            processor=features,
         )
         midi_stream.start()
 
@@ -140,7 +140,7 @@ class TestMidiStream(unittest.TestCase):
         midi_stream = MidiStream(
             port=port,
             queue=queue,
-            features=features,
+            processor=features,
             return_midi_messages=True,
         )
         midi_stream.start()

@@ -4,16 +4,17 @@
 This module contains tests for the utils/stream.py module.
 """
 import unittest
-from matchmaker.utils.stream import Stream
-from matchmaker.utils.processor import DummyProcessor
 from threading import Thread
+
 import numpy as np
+
+from matchmaker.utils.processor import DummyProcessor
+from matchmaker.utils.stream import Stream
 
 RNG = np.random.RandomState(1984)
 
 
 class TestStream(unittest.TestCase):
-
     def test_init(self):
 
         # Test initialization

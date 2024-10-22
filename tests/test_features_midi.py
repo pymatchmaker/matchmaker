@@ -9,7 +9,7 @@ import numpy as np
 import partitura as pt
 from partitura.performance import PerformedPart
 
-from matchmaker import EXAMPLE_PERFORMANCE, EXAMPLE_MATCH, EXAMPLE_SCORE
+from matchmaker import EXAMPLE_MATCH, EXAMPLE_PERFORMANCE, EXAMPLE_SCORE
 from matchmaker.features.midi import (
     PitchIOIProcessor,
     PitchProcessor,
@@ -212,7 +212,6 @@ class TestPitchIOIProcessor(unittest.TestCase):
 
 
 class TestComputeFeaturesFromSymbolic(unittest.TestCase):
-
     def test_framed_features(self):
 
         score = pt.load_musicxml(EXAMPLE_SCORE)

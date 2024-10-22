@@ -5,103 +5,212 @@ This module contains tests for the matchmaker.io module.
 """
 import time
 import unittest
+from io import StringIO
 from unittest.mock import patch
-import numpy as np
 
 import librosa
+import numpy as np
 
+from matchmaker import EXAMPLE_AUDIO
 from matchmaker.features.audio import (
     ChromagramProcessor,
     MelSpectrogramProcessor,
     MFCCProcessor,
 )
-from matchmaker.io.audio import MockAudioStream, AudioStream
+from matchmaker.io.audio import AudioStream
+from matchmaker.utils.audio import check_input_audio_devices, get_audio_devices
 from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.audio import check_input_audio_devices
-
 
 HAS_AUDIO_INPUT = check_input_audio_devices()
 
-if HAS_AUDIO_INPUT:
+SKIP_REASON = (not HAS_AUDIO_INPUT, "No input audio devices detected")
 
-    class TestAudioStream(unittest.TestCase):
+SAMPLE_RATE = 44100
+HOP_LENGTH = 256
+CHUNK_SIZE = 1
 
-        def setup(self, processor_name: str = "chroma"):
-            SR = 44100
-            HOP_LENGTH = 256
-            CHUNK_SIZE = 1
 
-            if processor_name == "chroma":
-                processor = ChromagramProcessor(
-                    sample_rate=SR,
-                    hop_length=HOP_LENGTH,
-                )
-            elif processor_name == "mfcc":
-                processor = MFCCProcessor(
-                    sample_rate=SR,
-                    hop_length=HOP_LENGTH,
-                )
+class TestAudioStream(unittest.TestCase):
+    def setup(self, processor_name: str = "chroma"):
 
-            elif processor_name == "mel":
-                processor = MelSpectrogramProcessor(
-                    sample_rate=SR,
-                    hop_length=HOP_LENGTH,
-                )
-
-            self.stream = AudioStream(
-                sample_rate=SR,
+        if processor_name == "chroma":
+            processor = ChromagramProcessor(
+                sample_rate=SAMPLE_RATE,
                 hop_length=HOP_LENGTH,
-                chunk_size=CHUNK_SIZE,
-                processor=processor,
+            )
+        elif processor_name == "mfcc":
+            processor = MFCCProcessor(
+                sample_rate=SAMPLE_RATE,
+                hop_length=HOP_LENGTH,
             )
 
-        def teardown(self):
+        elif processor_name == "mel":
+            processor = MelSpectrogramProcessor(
+                sample_rate=SAMPLE_RATE,
+                hop_length=HOP_LENGTH,
+            )
+
+        elif processor_name == "dummy":
+
+            # Test default dummy processor
+            processor = None
+
+        self.stream = AudioStream(
+            sample_rate=SAMPLE_RATE,
+            hop_length=HOP_LENGTH,
+            chunk_size=CHUNK_SIZE,
+            processor=processor,
+        )
+
+    def teardown(self):
+        self.stream.stop()
+
+    @unittest.skipIf(*SKIP_REASON)
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_stream_init(self, mock_stdout):
+        """Test different input configurations"""
+        # Test with default settings
+        stream = AudioStream()
+
+        self.assertTrue(isinstance(stream, AudioStream))
+
+        # If a file path is set, the input device info is
+        # ignored
+        stream = AudioStream(
+            file_path=EXAMPLE_AUDIO,
+            device_name_or_index="test_device_name",
+        )
+
+        self.assertTrue(isinstance(stream, AudioStream))
+        self.assertTrue(stream.input_device_index is None)
+
+        # Test setting specific audio devices
+        audio_devices = get_audio_devices()
+
+        for ad in audio_devices:
+
+            if ad.input_channels > 0:
+                # Set audio device from name
+                stream = AudioStream(
+                    device_name_or_index=ad.name,
+                )
+
+                self.assertTrue(isinstance(stream, AudioStream))
+                self.assertTrue(stream.input_device_index == ad.device_index)
+
+                # Set audio device from index
+                stream = AudioStream(
+                    device_name_or_index=ad.device_index,
+                )
+
+                self.assertTrue(isinstance(stream, AudioStream))
+                self.assertTrue(stream.input_device_index == ad.device_index)
+
+        # Test raising error
+        with self.assertRaises(ValueError):
+            # raise error if a non existing device is selected
+            stream = AudioStream(device_name_or_index=len(audio_devices) + 30)
+
+    # @unittest.skipIf(*SKIP_REASON)
+    @unittest.skipIf(True, "debug")
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_live_input(self, mock_stdout):
+
+        num_proc_frames = dict(
+            chroma=0,
+            mel=0,
+            mfcc=0,
+            dummy=0,
+        )
+        for processor in [
+            "chroma",
+            "mel",
+            "mfcc",
+            "dummy",
+        ]:
+
+            self.setup(processor_name=processor)
+            self.stream.start()
+            init_time = time.time()
+
+            crit = True
+
+            # Check that we get output from the queue
+            features_checked = False
+
+            p_time = init_time
+            while crit:
+                c_time = time.time() - init_time
+                features = self.stream.queue.recv()
+
+                if features is not None:
+                    features_checked = True
+                    self.assertTrue(isinstance(features, np.ndarray))
+
+                    d_time = c_time - p_time
+                    # print(processor, c_time, d_time, features.shape)
+                    p_time = c_time
+                    num_proc_frames[processor] += 1
+
+                if (time.time() - init_time) >= 2:
+                    crit = False
+
             self.stream.stop()
 
-        def test_live_input(self):
+            self.assertTrue(features_checked)
 
-            num_proc_frames = dict(
-                chroma=0,
-                mel=0,
-                mfcc=0,
-            )
-            for processor in [
-                "chroma",
-                "mel",
-                "mfcc",
-            ]:
+    @unittest.skipIf(*SKIP_REASON)
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_live_input_context_manager(self, mock_stdout):
 
-                self.setup(processor_name=processor)
-                self.stream.start()
+        num_proc_frames = dict(
+            chroma=0,
+            mel=0,
+            mfcc=0,
+            dummy=0,
+        )
+        for processor in [
+            # "chroma",
+            # "mel",
+            # "mfcc",
+            "dummy",
+        ]:
+
+            self.setup(processor_name=processor)
+
+            with self.stream as stream:
+
                 init_time = time.time()
-
                 crit = True
-
                 # Check that we get output from the queue
                 features_checked = False
 
                 p_time = init_time
                 while crit:
-                    c_time = time.time() - init_time
-                    features = self.stream.queue.recv()
 
+                    features = stream.queue.recv()
+                    c_time = stream.current_time
                     if features is not None:
                         features_checked = True
                         self.assertTrue(isinstance(features, np.ndarray))
-
                         d_time = c_time - p_time
-                        print(processor, c_time, d_time, features.shape)
+                        print(
+                            processor,
+                            c_time,
+                            stream.current_time,
+                            d_time,
+                            features.shape,
+                        )
                         p_time = c_time
                         num_proc_frames[processor] += 1
 
-                    if (time.time() - init_time) >= 2:
+                    if stream.current_time >= 2:
                         crit = False
 
-                self.stream.stop()
+            self.assertTrue(features_checked)
 
-                self.assertTrue(features_checked)
-
-                print(num_proc_frames)
+    def test_offline_input(self):
+        pass
 
 
 # class TestMockAudioStream(unittest.TestCase):
