@@ -4,6 +4,7 @@
 This module contains tests for the matchmaker.io module.
 """
 import time
+from typing import Optional
 import unittest
 from io import StringIO
 from unittest.mock import patch
@@ -23,7 +24,8 @@ from matchmaker.utils.misc import RECVQueue
 
 HAS_AUDIO_INPUT = check_input_audio_devices()
 
-SKIP_REASON = (not HAS_AUDIO_INPUT, "No input audio devices detected")
+# SKIP_REASON = (not HAS_AUDIO_INPUT, "No input audio devices detected")
+SKIP_REASON = (False, "No input audio devices detected")
 
 SAMPLE_RATE = 44100
 HOP_LENGTH = 256
@@ -31,7 +33,11 @@ CHUNK_SIZE = 1
 
 
 class TestAudioStream(unittest.TestCase):
-    def setup(self, processor_name: str = "chroma"):
+    def setup(
+        self,
+        processor_name: str = "chroma",
+        file_path: Optional[str] = None,
+    ):
 
         if processor_name == "chroma":
             processor = ChromagramProcessor(
@@ -56,6 +62,7 @@ class TestAudioStream(unittest.TestCase):
             processor = None
 
         self.stream = AudioStream(
+            file_path=file_path,
             sample_rate=SAMPLE_RATE,
             hop_length=HOP_LENGTH,
             chunk_size=CHUNK_SIZE,
@@ -210,7 +217,27 @@ class TestAudioStream(unittest.TestCase):
             self.assertTrue(features_checked)
 
     def test_offline_input(self):
-        pass
+        for processor in [
+            # "chroma",
+            # "mel",
+            # "mfcc",
+            "dummy",
+        ]:
+            self.setup(processor_name=processor, file_path=EXAMPLE_AUDIO,)
+
+            with self.stream as stream:
+
+                while True:
+                    features = stream.queue.recv()
+
+                    print(features)
+
+
+
+
+
+
+
 
 
 # class TestMockAudioStream(unittest.TestCase):
