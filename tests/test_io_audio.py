@@ -33,11 +33,12 @@ CHUNK_SIZE = 1
 
 
 class TestAudioStream(unittest.TestCase):
+
     def setup(
         self,
         processor_name: str = "dummy",
         file_path: Optional[str] = None,
-        include_ftime: bool=False,
+        include_ftime: bool = False,
     ):
 
         if processor_name == "chroma":
@@ -137,7 +138,10 @@ class TestAudioStream(unittest.TestCase):
             "dummy",
         ]:
 
-            self.setup(processor_name=processor, include_ftime=False,)
+            self.setup(
+                processor_name=processor,
+                include_ftime=False,
+            )
             self.stream.start()
             init_time = time.time()
 
@@ -248,7 +252,6 @@ class TestAudioStream(unittest.TestCase):
 
         self.assertTrue(np.all(processed_frames == processed_frames[0]))
 
-
     @patch("sys.stdout", new_callable=StringIO)
     def test_clear_queue(self, mock_stdout):
 
@@ -266,7 +269,7 @@ class TestAudioStream(unittest.TestCase):
         outputs = list(self.stream.queue.queue)
 
         self.assertTrue(len(outputs) == 0)
-    
+
 
 # class TestMockAudioStream(unittest.TestCase):
 #     def setUp(self):
