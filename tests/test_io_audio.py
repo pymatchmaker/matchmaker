@@ -24,10 +24,10 @@ from matchmaker.utils.misc import RECVQueue
 
 HAS_AUDIO_INPUT = check_input_audio_devices()
 
-# SKIP_REASON = (not HAS_AUDIO_INPUT, "No input audio devices detected")
-SKIP_REASON = (False, "No input audio devices detected")
+SKIP_REASON = (not HAS_AUDIO_INPUT, "No input audio devices detected")
+# SKIP_REASON = (True, "No input audio devices detected")
 
-SAMPLE_RATE = 44100
+SAMPLE_RATE = 22050
 HOP_LENGTH = 256
 CHUNK_SIZE = 1
 
@@ -35,8 +35,9 @@ CHUNK_SIZE = 1
 class TestAudioStream(unittest.TestCase):
     def setup(
         self,
-        processor_name: str = "chroma",
+        processor_name: str = "dummy",
         file_path: Optional[str] = None,
+        include_ftime: bool=False,
     ):
 
         if processor_name == "chroma":
@@ -67,6 +68,7 @@ class TestAudioStream(unittest.TestCase):
             hop_length=HOP_LENGTH,
             chunk_size=CHUNK_SIZE,
             processor=processor,
+            include_ftime=include_ftime,
         )
 
     def teardown(self):
@@ -118,8 +120,7 @@ class TestAudioStream(unittest.TestCase):
             # raise error if a non existing device is selected
             stream = AudioStream(device_name_or_index=len(audio_devices) + 30)
 
-    # @unittest.skipIf(*SKIP_REASON)
-    @unittest.skipIf(True, "debug")
+    @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)
     def test_live_input(self, mock_stdout):
 
@@ -136,7 +137,7 @@ class TestAudioStream(unittest.TestCase):
             "dummy",
         ]:
 
-            self.setup(processor_name=processor)
+            self.setup(processor_name=processor, include_ftime=False,)
             self.stream.start()
             init_time = time.time()
 
@@ -216,29 +217,56 @@ class TestAudioStream(unittest.TestCase):
 
             self.assertTrue(features_checked)
 
-    def test_offline_input(self):
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_offline_input(self, mock_stdout):
+
+        processed_frames = []
         for processor in [
-            # "chroma",
+            "chroma",
             # "mel",
             # "mfcc",
             "dummy",
         ]:
-            self.setup(processor_name=processor, file_path=EXAMPLE_AUDIO,)
+            self.setup(
+                processor_name=processor,
+                file_path=librosa.ex("pistachio"),
+                include_ftime=True,
+            )
 
-            with self.stream as stream:
+            self.stream.start()
+            print("current time", self.stream.current_time)
+            self.stream.join()
 
-                while True:
-                    features = stream.queue.recv()
+            outputs = list(self.stream.queue.queue)
 
-                    print(features)
+            for _, ftime in outputs:
+                self.assertTrue(isinstance(ftime, float))
+
+            processed_frames.append(len(outputs))
+
+        processed_frames = np.array(processed_frames)
+
+        self.assertTrue(np.all(processed_frames == processed_frames[0]))
 
 
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_clear_queue(self, mock_stdout):
 
+        processor = "dummy"
+        self.setup(
+            processor_name=processor,
+            file_path=librosa.ex("pistachio"),
+            include_ftime=False,
+        )
 
+        self.stream.start()
+        self.stream.join()
 
+        self.stream.clear_queue()
+        outputs = list(self.stream.queue.queue)
 
-
-
+        self.assertTrue(len(outputs) == 0)
+    
 
 # class TestMockAudioStream(unittest.TestCase):
 #     def setUp(self):

@@ -204,39 +204,61 @@ class AudioStream(Stream):
 
     def run_offline(self) -> None:
         """Offline method for computing features"""
+        self.start_listening()
         self.init_time = 0
         duration = int(librosa.get_duration(path=self.file_path))
         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
-            (audio_y, np.zeros(duration * 2 * self.sample_rate, dtype=np.float32))
+            (
+                audio_y,
+                np.zeros(int(duration * 0.1 * self.sample_rate), dtype=np.float32),
+            )
         )
         trimmed_audio = padded_audio[  # trim to multiple of chunk_size
             : len(padded_audio) - (len(padded_audio) % self.chunk_size)
         ]
-        self.start_listening()
-        run_counter = 0
-
-        self.prev_time = 0
-        while self.listen and trimmed_audio.any():
+        # self.start_listening()
+        while trimmed_audio.any():
             target_audio = trimmed_audio[: self.chunk_size]
-            f_time = run_counter * self.chunk_size / self.sample_rate
-
-            self._process_feature(target_audio, run_counter)
-            trimmed_audio = trimmed_audio[self.chunk_size :]
-            run_counter += 1
-            self.prev_time = f_time
-
-            # time_interval = self.chunk_size / self.sample_rate  # 0.2 sec
-            # time.sleep(time_interval)  # 실제 시간과 동일하게 simulation
-
-        # fill empty values with zeros after stream is finished (50% of duration)
-        additional_padding_size = (duration // 2) * self.sample_rate
-        while self.listen and additional_padding_size > 0:
-            f_time = run_counter * self.chunk_size / self.sample_rate
+            f_time = time.time()
+            self.last_time = f_time
             self._process_feature(target_audio, f_time)
-            additional_padding_size -= self.chunk_size
-            run_counter += 1
-            self.prev_time = f_time
+            trimmed_audio = trimmed_audio[self.chunk_size :]
+
+        # self.init_time = 0
+        # duration = int(librosa.get_duration(path=self.file_path))
+        # audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
+        # padded_audio = np.concatenate(  # zero padding at the end
+        #     (audio_y, np.zeros(duration * 2 * self.sample_rate, dtype=np.float32))
+        # )
+        # trimmed_audio = padded_audio[  # trim to multiple of chunk_size
+        #     : len(padded_audio) - (len(padded_audio) % self.chunk_size)
+        # ]
+        # self.start_listening()
+        # run_counter = 0
+
+        # self.prev_time = 0
+        # while trimmed_audio.any():
+
+        #     target_audio = trimmed_audio[: self.chunk_size]
+        #     f_time = run_counter * self.chunk_size / self.sample_rate
+
+        #     self._process_feature(target_audio, run_counter)
+        #     trimmed_audio = trimmed_audio[self.chunk_size :]
+        #     run_counter += 1
+        #     self.prev_time = f_time
+
+        # # fill empty values with zeros after stream is finished (50% of duration)
+        # additional_padding_size = (duration // 2) * self.sample_rate
+        # while self.listen and additional_padding_size > 0:
+        #     f_time = run_counter * self.chunk_size / self.sample_rate
+        #     self._process_feature(target_audio, f_time)
+        #     additional_padding_size -= self.chunk_size
+        #     run_counter += 1
+        #     self.prev_time = f_time
+
+        # end run
+        
 
     def run_online(self) -> None:
         self.audio_interface = pyaudio.PyAudio()
@@ -255,3 +277,8 @@ class AudioStream(Stream):
 
     def stop(self):
         self.stop_listening()
+        self.join()
+
+    def clear_queue(self):
+        if self.queue.not_empty:
+            self.queue.queue.clear()
