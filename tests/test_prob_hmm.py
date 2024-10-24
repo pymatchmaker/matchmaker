@@ -110,7 +110,7 @@ class TestPitchHMM(unittest.TestCase):
 
         observations = process_midi_offline(
             perf_info=perf,
-            features=[PitchProcessor(piano_range=True)],
+            processor=PitchProcessor(piano_range=True),
         )
 
         for obs in observations:
@@ -246,7 +246,7 @@ class TestPitchIOIHMM(unittest.TestCase):
 
         observations = process_midi_offline(
             perf_info=perf,
-            features=[PitchIOIProcessor(piano_range=True)],
+            processor=PitchIOIProcessor(piano_range=True),
         )
 
         for obs in observations:
@@ -312,7 +312,7 @@ class TestPitchIOIHMM(unittest.TestCase):
 
         observations = process_midi_offline(
             perf_info=perf,
-            features=[PitchIOIProcessor(piano_range=True)],
+            processor=PitchIOIProcessor(piano_range=True),
         )
 
         for obs in observations:

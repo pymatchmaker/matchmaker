@@ -13,12 +13,12 @@ dependencies:
   - pytorch==2.1.0
   - scipy==1.11.3
   - tqdm==4.65.0
+  - librosa==0.10.1
   - pip
 
   - pip:
     - pyaudio==0.2.14
     - fastdtw==0.3.4
-    - librosa==0.10.1
     - mido==1.3.0
     - python-rtmidi==1.5.8
     - git+https://github.com/CPJKU/madmom.git

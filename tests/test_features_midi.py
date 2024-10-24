@@ -61,7 +61,7 @@ class TestPitchProcessor(unittest.TestCase):
         outputs = process_midi_offline(
             perf_info=perf,
             polling_period=polling_period,
-            features=[
+            processor=[
                 feature_processor,
                 feature_processor_pr,
                 feature_processor_pl,
@@ -147,7 +147,7 @@ class TestPitchIOIProcessor(unittest.TestCase):
         outputs = process_midi_offline(
             perf_info=perf,
             polling_period=polling_period,
-            features=[
+            processor=[
                 feature_processor,
                 feature_processor_pr,
                 feature_processor_pl,

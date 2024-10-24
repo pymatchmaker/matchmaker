@@ -16,7 +16,7 @@ from partitura.io.exportaudio import save_wav_fluidsynth
 from partitura.performance import PerformanceLike
 
 from matchmaker.io.audio import CHUNK_SIZE, HOP_LENGTH, SAMPLE_RATE, AudioStream
-from matchmaker.io.midi import POLLING_PERIOD, MockFramedMidiStream, MockMidiStream
+from matchmaker.io.midi import POLLING_PERIOD, MidiStream
 from matchmaker.utils.misc import RECVQueue
 
 # Random number generator
@@ -269,7 +269,7 @@ def generate_example_sequences(
 
 def process_midi_offline(
     perf_info: Union[PerformanceLike, str],
-    features: List[Callable],
+    processor: Callable,
     polling_period: Optional[float] = POLLING_PERIOD,
 ) -> List[Any]:
     """
@@ -278,23 +278,32 @@ def process_midi_offline(
 
     queue = RECVQueue()
 
-    if polling_period is not None:
-        input_stream = MockFramedMidiStream(
-            file_path=perf_info,
-            queue=queue,
-            polling_period=polling_period,
-            features=features,
-            return_midi_messages=False,
-            mediator=None,
-        )
-    else:
-        input_stream = MockMidiStream(
-            file_path=perf_info,
-            queue=queue,
-            features=features,
-            return_midi_messages=False,
-            mediator=None,
-        )
+    input_stream = MidiStream(
+        processor=processor,
+        file_path=perf_info,
+        polling_period=polling_period,
+        return_midi_messages=False,
+        mediator=None,
+
+    )
+
+    # if polling_period is not None:
+    #     input_stream = MockFramedMidiStream(
+    #         file_path=perf_info,
+    #         queue=queue,
+    #         polling_period=polling_period,
+    #         features=features,
+    #         return_midi_messages=False,
+    #         mediator=None,
+    #     )
+    # else:
+    #     input_stream = MockMidiStream(
+    #         file_path=perf_info,
+    #         queue=queue,
+    #         features=features,
+    #         return_midi_messages=False,
+    #         mediator=None,
+    #     )
 
     input_stream.start()
     input_stream.join()

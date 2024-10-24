@@ -52,7 +52,7 @@ class PitchProcessor(Processor):
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[Optional[Tuple[NDArrayFloat, float]], Dict]:
+    ) -> Optional[Tuple[NDArrayFloat, float]]:
         data, f_time = frame
         # pitch_obs = []
         pitch_obs = np.zeros(
@@ -83,9 +83,9 @@ class PitchProcessor(Processor):
                     ),
                     {},
                 )
-            return pitch_obs, {}
+            return pitch_obs
         else:
-            return None, {}
+            return None
 
     def reset(self) -> None:
         pass
@@ -123,7 +123,7 @@ class PitchIOIProcessor(Processor):
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[Optional[Tuple[NDArrayFloat, float]], Dict]:
+    ) -> Optional[Tuple[NDArrayFloat, float]]:
         data, f_time = frame
         # pitch_obs = []
         pitch_obs = np.zeros(
@@ -159,10 +159,10 @@ class PitchIOIProcessor(Processor):
                         dtype=np.float32,
                     ),
                     ioi_obs,
-                ), {}
-            return (pitch_obs, ioi_obs), {}
+                )
+            return (pitch_obs, ioi_obs)
         else:
-            return None, {}
+            return None
 
     def reset(self) -> None:
         pass
@@ -201,7 +201,7 @@ class PianoRollProcessor(Processor):
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[np.ndarray, Dict]:
+    ) -> np.ndarray:
         # initialize piano roll
         piano_roll_slice: np.ndarray = np.zeros(128, dtype=self.dtype)
         data, f_time = frame
@@ -225,7 +225,7 @@ class PianoRollProcessor(Processor):
             piano_roll_slice = piano_roll_slice[21:109]
         self.piano_roll_slices.append(piano_roll_slice)
 
-        return piano_roll_slice, {}
+        return piano_roll_slice
 
     def reset(self) -> None:
         self.piano_roll_slices = []
@@ -263,7 +263,7 @@ class PitchClassPianoRollProcessor(Processor):
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[np.ndarray, Dict]:
+    ) -> np.ndarray:
         # initialize pitch class
         pitch_class_slice: np.ndarray = np.zeros(12, dtype=self.dtype)
         data, f_time = frame
@@ -285,7 +285,7 @@ class PitchClassPianoRollProcessor(Processor):
 
         self.pitch_class_slices.append(pitch_class_slice)
 
-        return pitch_class_slice, {}
+        return pitch_class_slice
 
     def reset(self) -> None:
         self.pitch_class_slices = []
@@ -326,7 +326,7 @@ class CumSumPianoRollProcessor(Processor):
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[np.ndarray, Dict]:
+    ) -> np.ndarray:
         # initialize piano roll
         piano_roll_slice = np.zeros(128, dtype=self.dtype)
         data, f_time = frame
@@ -350,7 +350,7 @@ class CumSumPianoRollProcessor(Processor):
             piano_roll_slice = piano_roll_slice[21:109]
         self.piano_roll_slices.append(piano_roll_slice)
 
-        return piano_roll_slice, {}
+        return piano_roll_slice
 
     def reset(self) -> None:
         self.piano_roll_slices = []

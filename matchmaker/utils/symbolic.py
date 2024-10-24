@@ -3,7 +3,7 @@
 """
 Utilities for symbolic music processing (e.g., MIDI)
 """
-from typing import Tuple
+from typing import List, Optional, Tuple
 
 import mido
 import numpy as np
@@ -11,7 +11,77 @@ import partitura as pt
 from numpy.typing import NDArray
 from partitura.performance import Performance, PerformanceLike, PerformedPart
 
+class Buffer(object):
+    """
+    A Buffer for MIDI input
 
+    This class is a buffer to collect MIDI messages
+    within a specified time window.
+
+    Parameters
+    ----------
+    polling_period : float
+        Polling period in seconds
+
+    Attributes
+    ----------
+    polling_period : float
+        Polling period in seconds.
+
+    frame : list of tuples of (mido.Message and float)
+        A list of tuples containing MIDI messages and
+        the absolute time at which the messages arrived
+
+    start : float
+        The starting time of the buffer
+    """
+
+    polling_period: float
+    frame: List[Tuple[mido.Message, float]]
+    start: Optional[float]
+
+    def __init__(self, polling_period: float) -> None:
+        self.polling_period = polling_period
+        self.frame = []
+        self.start = None
+
+    def __len__(self) -> int:
+        return len(self.frame)
+
+    def append(self, input, time) -> None:
+        self.frame.append((input, time))
+
+    def set_start(self) -> None:
+        if len(self.frame) > 0:
+            self.start = np.min([time for _, time in self.frame])
+
+    def reset(self, time) -> None:
+        self.frame = []
+        self.start = time
+
+    @property
+    def end(self) -> float:
+        """
+        Maximal end time of the frame
+        """
+        return self.start + self.polling_period
+
+    @property
+    def time(self) -> float:
+        """
+        Time of the middle of the frame
+        """
+        return self.start + 0.5 * self.polling_period
+
+    def __len__(self) -> int:
+        """
+        Number of MIDI messages in the frame
+        """
+        return len(self.frame)
+
+    def __str__(self) -> str:
+        return str(self.frame)
+        
 def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
     """
     Get a list of MIDI messages and message times from
@@ -137,7 +207,6 @@ def midi_messages_to_framed_midi(
     midi_msgs: NDArray,
     msg_times: NDArray,
     polling_period: float,
-    # features: List[Callable],
 ) -> Tuple[NDArray, NDArray]:
     """
     Convert a list of MIDI messages to a framed MIDI representation
@@ -164,7 +233,8 @@ def midi_messages_to_framed_midi(
     frames = []
 
     for cursor in range(n_frames):
-
+        
+        buffer = Buffer(polling_period)
         if cursor == 0:
             # do not leave messages starting at 0 behind!
             idxs = np.where(msg_times <= polling_period)[0]
@@ -176,14 +246,22 @@ def midi_messages_to_framed_midi(
                 )
             )[0]
 
-        frames.append(
-            list(
+        buffer.frame = list(
                 zip(
                     midi_msgs[idxs],
                     msg_times[idxs],
                 )
             )
-        )
+        buffer.set_start()
+        frames.append(buffer)
+        # frames.append(
+        #     list(
+        #         zip(
+        #             midi_msgs[idxs],
+        #             msg_times[idxs],
+        #         )
+        #     )
+        # )
 
     frames_array = np.array(
         frames,
