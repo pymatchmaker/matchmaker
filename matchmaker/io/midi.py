@@ -67,6 +67,7 @@ class MidiStream(Stream):
     is_windowed: bool
     # mock_stream: bool
     polling_period: Optional[float]
+    midi_messages: List[Tuple[mido.Message, float]]
 
     def __init__(
         self,
@@ -100,6 +101,7 @@ class MidiStream(Stream):
         self.first_msg = False
         self.return_midi_messages = return_midi_messages
         self.mediator = mediator
+        self.midi_messages = []
 
         self.polling_period = polling_period
         if (polling_period is None) and (self.mock is False):
@@ -129,8 +131,6 @@ class MidiStream(Stream):
         c_time: float,
         **kwargs,
     ) -> None:
-
-        # output = [proc(([(msg, c_time)], c_time))[0] for proc in self.processor]
         output = self.processor(([(data, c_time)], c_time))
         if self.return_midi_messages:
             self.queue.put(((data, c_time), output))
@@ -162,9 +162,14 @@ class MidiStream(Stream):
                     and self.mediator.filter_check(msg.note)
                 ):
                     continue
+                c_time = self.current_time
+                self.add_midi_message(
+                    msg=msg,
+                    time=c_time,
+                )
                 self._process_frame_message(
                     data=msg,
-                    c_time=self.current_time,
+                    c_time=c_time,
                 )
 
     def run_online_windowed(self):
@@ -177,7 +182,6 @@ class MidiStream(Stream):
         st = self.polling_period * 0.001
         while self.listen:
             time.sleep(st)
-
             if self.listen:
                 # added if to check once again after sleep
                 c_time = self.current_time
@@ -189,8 +193,13 @@ class MidiStream(Stream):
                         and self.mediator.filter_check(msg.note)
                     ):
                         continue
+                    self.add_midi_message(
+                        msg=msg,
+                        time=c_time,
+                    )
                     if msg.type in ["note_on", "note_off"]:
-                        frame.append(msg, self.current_time)
+                        # TODO: check changing self.current_time for c_time
+                        frame.append(msg, c_time)
                         if not self.first_msg:
                             self.first_msg = True
 
@@ -209,6 +218,10 @@ class MidiStream(Stream):
         self.init_time = message_times.min()
         self.start_listening()
         for msg, c_time in zip(midi_messages, message_times):
+            self.add_midi_message(
+                msg=msg,
+                time=c_time,
+            )
             self._process_frame_message(
                 data=msg,
                 c_time=c_time,
@@ -220,6 +233,7 @@ class MidiStream(Stream):
         Simulate real-time stream as loop iterating
         over MIDI messages
         """
+        self.start_listening()
         midi_frames, frame_times = framed_midi_messages_from_performance(
             perf=self.file_path,
             polling_period=self.polling_period,
@@ -249,18 +263,20 @@ class MidiStream(Stream):
         Start listening to midi input (open input port and
         get starting time)
         """
-        print("* Start listening to MIDI stream....")
         self.listen = True
+        if self.mock:
+            print("* Mock listening to stream....")
+        else:
+            print("* Start listening to MIDI stream....")
         # set initial time
         self.current_time
-        # if self.init_time is None:
-        #     self.init_time = time.time()
 
     def stop_listening(self):
         """
         Stop listening to MIDI input
         """
-        print("* Stop listening to MIDI stream....")
+        if self.listen:
+            print("* Stop listening to MIDI stream....")
         # break while loop in self.run
         self.listen = False
         # reset init time
@@ -290,6 +306,9 @@ class MidiStream(Stream):
     def clear_queue(self):
         if self.queue.not_empty:
             self.queue.queue.clear()
+
+    def add_midi_message(self, msg: mido.Message, time: float) -> None:
+        self.midi_messages.append((msg, time))
 
 
 # class FramedMidiStream(MidiStream):

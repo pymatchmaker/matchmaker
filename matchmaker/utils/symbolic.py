@@ -3,7 +3,7 @@
 """
 Utilities for symbolic music processing (e.g., MIDI)
 """
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import mido
 import numpy as np
@@ -63,9 +63,9 @@ class Buffer(object):
     def append(self, input: mido.Message, time: float) -> None:
         self.frame.append((input, time))
 
-    def set_start(self) -> None:
-        if len(self.frame) > 0:
-            self.start = np.min([time for _, time in self.frame])
+    # def set_start(self) -> None:
+    #     if len(self.frame) > 0:
+    #         self.start = np.min([time for _, time in self.frame])
 
     def reset(self, time: float) -> None:
         self.frame = []
@@ -124,7 +124,7 @@ def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
     return message_array, message_times_array
 
 
-def midi_messages_from_performance(perf: PerformanceLike) -> Tuple[NDArray, NDArray]:
+def midi_messages_from_performance(perf: Union[PerformanceLike, str], print_type=False) -> Tuple[NDArray, NDArray]:
     """
     Get a list of MIDI messages and message times from
     a PerformedPart or a Performance object.
@@ -147,6 +147,14 @@ def midi_messages_from_performance(perf: PerformanceLike) -> Tuple[NDArray, NDAr
         An array containing the times of the messages
         in seconds.
     """
+
+    if isinstance(perf, str):
+        # from a MIDI/Match file
+        perf = pt.load_performance(perf)
+
+    elif isinstance(perf, np.ndarray):
+        # From a Note array
+        perf = PerformedPart.from_note_array(perf)
 
     if isinstance(perf, Performance):
         pparts = perf.performedparts
@@ -241,10 +249,11 @@ def midi_messages_to_framed_midi(
     """
     n_frames = int(np.ceil(msg_times.max() / polling_period))
     frame_times = (np.arange(n_frames) + 0.5) * polling_period
+    start_times = np.arange(n_frames) * polling_period
 
     frames = []
 
-    for cursor in range(n_frames):
+    for cursor, s_time in enumerate(start_times):
         
         buffer = Buffer(polling_period)
         if cursor == 0:
@@ -258,22 +267,15 @@ def midi_messages_to_framed_midi(
                 )
             )[0]
 
+
         buffer.frame = list(
                 zip(
                     midi_msgs[idxs],
                     msg_times[idxs],
                 )
             )
-        buffer.set_start()
+        buffer.start = s_time
         frames.append(buffer)
-        # frames.append(
-        #     list(
-        #         zip(
-        #             midi_msgs[idxs],
-        #             msg_times[idxs],
-        #         )
-        #     )
-        # )
 
     frames_array = np.array(
         frames,

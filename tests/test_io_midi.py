@@ -25,6 +25,7 @@ from matchmaker.io.midi import (
 )
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import DummyProcessor
+from matchmaker.utils.symbolic import midi_messages_from_midi
 
 RNG = np.random.RandomState(1984)
 
@@ -153,6 +154,7 @@ class TestMidiStream(unittest.TestCase):
             return_midi_messages=return_midi_messages,
         )
 
+    # @unittest.skipIf(True, "")
     def test_init(self):
         """Test that the MidiStream initializes correctly"""
         for processor in [
@@ -191,6 +193,7 @@ class TestMidiStream(unittest.TestCase):
                             if port is not None:
                                 port.close()
 
+    # @unittest.skipIf(True, "")
     @patch("sys.stdout", new_callable=StringIO)
     def test_run_online(self, mock_stdout):
         """
@@ -247,7 +250,8 @@ class TestMidiStream(unittest.TestCase):
                         self.stream.stop()
                         midi_player.join()
                         port.close()
-    
+
+    # @unittest.skipIf(True, "")
     @patch("sys.stdout", new_callable=StringIO)
     def test_run_online_context_manager(self, mock_stdout):
         """
@@ -294,6 +298,83 @@ class TestMidiStream(unittest.TestCase):
 
             midi_player.join()
             port.close()
+
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_run_offline_single(self, mock_io):
+        """
+        Test run_offline_single method.
+        """
+        mf = mido.MidiFile(EXAMPLE_PERFORMANCE)
+
+        valid_messages = [msg for msg in mf if not isinstance(msg, mido.MetaMessage)]
+        for processor in [
+            "pianoroll",
+            "pitchioi",
+            "dummy",
+        ]:
+            self.setup(
+                processor=processor,
+                polling_period=None,
+                file_path=EXAMPLE_PERFORMANCE,
+            )
+
+            with self.stream as stream:
+                pass
+
+            outputs = list(self.stream.queue.queue)
+            self.assertTrue(len(outputs) == len(valid_messages))
+
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_run_offline_windowed(self, mock_io):
+        """
+        Test run_offline_windowed method.
+        """
+
+        _, message_times = midi_messages_from_midi(
+            filename=EXAMPLE_PERFORMANCE,
+        )
+
+        polling_period = 0.01
+        expected_frames = int(np.ceil(message_times.max() / polling_period))
+
+        for processor in [
+            "pianoroll",
+            "pitchioi",
+            "dummy",
+        ]:
+            self.setup(
+                processor=processor,
+                polling_period=polling_period,
+                file_path=EXAMPLE_PERFORMANCE,
+            )
+
+            with self.stream as stream:
+                pass
+
+            outputs = list(self.stream.queue.queue)
+
+            self.assertTrue(len(outputs) == expected_frames)
+
+    # @unittest.skipIf(True, "")
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_clear_queue(self, mock_io):
+        """
+        Test clear_queue method
+        """
+        processor = "dummy"
+        self.setup(
+            processor=processor,
+            polling_period=None,
+            file_path=EXAMPLE_PERFORMANCE,
+        )
+
+        with self.stream as stream:
+            pass
+
+        self.stream.clear_queue()
+
+        outputs = list(self.stream.queue.queue)
+        self.assertTrue(len(outputs) == 0)
 
 
 # class TestMidiStream(unittest.TestCase):

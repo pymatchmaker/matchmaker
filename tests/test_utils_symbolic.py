@@ -17,7 +17,9 @@ from matchmaker.utils.symbolic import (
     framed_midi_messages_from_midi,
     midi_messages_from_midi,
     Buffer,
+    midi_messages_from_performance,
 )
+
 
 class TestBuffer(unittest.TestCase):
 
@@ -68,6 +70,7 @@ class TestBuffer(unittest.TestCase):
         self.buffer.append(msg, current_time)
         expected_str = str(self.buffer.frame)
         self.assertEqual(str(self.buffer), expected_str)
+
 
 class TestLoadingMethods(unittest.TestCase):
     """
@@ -129,3 +132,36 @@ class TestLoadingMethods(unittest.TestCase):
                         t >= ft - 0.5 * polling_period
                         and t <= ft + 0.5 * polling_period
                     )
+
+    def test_midi_messages_from_performance(self):
+
+        filename = matchmaker.EXAMPLE_PERFORMANCE
+        performance = pt.load_performance_midi(filename)
+        performed_part = performance[0]
+        note_array = performance.note_array()
+
+        msgs_filename, msgs_times_filename = midi_messages_from_performance(filename)
+        msgs_performance, msgs_times_performance = midi_messages_from_performance(
+            performance
+        )
+        msgs_performed_part, msgs_times_performed_part = midi_messages_from_performance(
+            performed_part
+        )
+        msgs_note_array, msgs_times_note_array = midi_messages_from_performance(
+            note_array, True
+        )
+
+        # Test times (not from note_array, since the message times
+        # also include pedals and controls, which are not included
+        # in note arrays)
+        self.assertTrue(np.all(msgs_times_filename == msgs_times_performance))
+        self.assertTrue(np.all(msgs_times_filename == msgs_times_performed_part))
+
+        self.assertTrue(all(msgs_filename == msgs_performance))
+        self.assertTrue(all(msgs_performed_part == msgs_performance))
+
+        note_on_messages = [msg for msg in msgs_filename if msg.type=="note_on" or msg.type=="note_off"]
+
+        self.assertTrue(len(msgs_note_array) == len(note_on_messages))
+
+        self.assertTrue(len(msgs_times_note_array) == len(note_on_messages))
