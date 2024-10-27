@@ -239,7 +239,7 @@ class MidiStream(Stream):
             polling_period=self.polling_period,
         )
         self.init_time = frame_times.min()
-        for frame, f_time in zip(midi_frames, frame_times):
+        for frame in midi_frames:
             self._process_frame_window(
                 data=frame,
             )

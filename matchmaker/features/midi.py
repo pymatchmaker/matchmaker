@@ -359,8 +359,8 @@ class CumSumPianoRollProcessor(Processor):
 
 def compute_features_from_symbolic(
     ref_info: Union[ScoreLike, PerformanceLike, NDArray, str],
-    features: List[str],
-    feature_kwargs: Optional[List[dict]] = None,
+    processor_name: str,
+    processor_kwargs: Optional[dict] = None,
     polling_period: Optional[float] = 0.01,
     bpm: Optional[float] = 120,
 ):
@@ -373,13 +373,15 @@ def compute_features_from_symbolic(
         "cumsum_pianoroll": CumSumPianoRollProcessor,
     }
 
-    if feature_kwargs is None:
-        feature_kwargs = [{}] * len(features)
+    if processor_kwargs is None:
+        processor_kwargs = {}
 
-    feature_processors = [
-        processor_mapping[name](**kwargs)
-        for name, kwargs in zip(features, feature_kwargs)
-    ]
+    # feature_processors = [
+    #     processor_mapping[name](**kwargs)
+    #     for name, kwargs in zip(processor_name, feature_kwargs)
+    # ]
+
+    feature_processor = processor_mapping[processor_name](**processor_kwargs)
 
     if isinstance(ref_info, Score):
 
@@ -414,9 +416,11 @@ def compute_features_from_symbolic(
 
     outputs = []
     for frame, f_time in zip(frames_array, frame_times):
-        features = [proc((frame, f_time))[0] for proc in feature_processors]
 
-        outputs.append(features)
+        output = feature_processor((frame, f_time))
+        # processor_name = [proc((frame, f_time))[0] for proc in feature_processors]
+
+        outputs.append(output)
 
     return outputs
 

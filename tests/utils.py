@@ -278,35 +278,15 @@ def process_midi_offline(
 
     queue = RECVQueue()
 
-    input_stream = MidiStream(
+    with MidiStream(
         processor=processor,
         file_path=perf_info,
         polling_period=polling_period,
         return_midi_messages=False,
         mediator=None,
-
-    )
-
-    # if polling_period is not None:
-    #     input_stream = MockFramedMidiStream(
-    #         file_path=perf_info,
-    #         queue=queue,
-    #         polling_period=polling_period,
-    #         features=features,
-    #         return_midi_messages=False,
-    #         mediator=None,
-    #     )
-    # else:
-    #     input_stream = MockMidiStream(
-    #         file_path=perf_info,
-    #         queue=queue,
-    #         features=features,
-    #         return_midi_messages=False,
-    #         mediator=None,
-    #     )
-
-    input_stream.start()
-    input_stream.join()
+        queue=queue,
+    ) as stream:
+        pass
 
     outputs = list(queue.queue)
 
