@@ -2,3 +2,4 @@
 source = matchmaker
 omit =
     */tests/*        # Exclude all files in the tests folder
+    */examples/*        # Exclude all files in the examples folder

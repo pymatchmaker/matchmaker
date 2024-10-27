@@ -114,7 +114,7 @@ class TestPitchHMM(unittest.TestCase):
         )
 
         for obs in observations:
-            if obs[0] is not None:
+            if obs is not None:
                 cp = hmm(obs[0])
                 self.assertTrue(cp in unique_sonsets)
 
@@ -250,8 +250,8 @@ class TestPitchIOIHMM(unittest.TestCase):
         )
 
         for obs in observations:
-            if obs[0] is not None:
-                cp = hmm(obs[0])
+            if obs is not None:
+                cp = hmm(obs)
                 self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
@@ -316,8 +316,8 @@ class TestPitchIOIHMM(unittest.TestCase):
         )
 
         for obs in observations:
-            if obs[0] is not None:
-                cp = hmm(obs[0])
+            if obs is not None:
+                cp = hmm(obs)
                 self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
