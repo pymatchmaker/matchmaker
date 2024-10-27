@@ -171,6 +171,7 @@ matchmaker/dp/dtw_loop.c
 matchmaker/utils/distances.c
 tests/dev*.py
 tests/tmp/
+matchmaker/rl/*
 
 *~
 tests/test_io_error_trace.txt
