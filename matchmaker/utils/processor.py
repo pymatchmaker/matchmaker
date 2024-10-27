@@ -8,21 +8,6 @@ This module contains all processor related functionality.
 from typing import Any, Callable, Dict, List, Tuple, Union
 
 
-class Stream(object):
-    """
-    Abstract class for a stream
-    """
-
-    def __init__(self, features: List[Callable]) -> None:
-        self.features = features
-
-    def _process_feature(self, *args, **kwargs) -> None:
-        raise NotImplementedError
-
-    def _process_frame(self, data: Any, *args, **kwargs) -> Any:
-        raise NotImplementedError
-
-
 class Processor(object):
     """
     Abstract class for a processor.
@@ -31,8 +16,8 @@ class Processor(object):
     def __call__(
         self,
         data: Any,
-        **kwargs: Any,
-    ) -> Tuple[Any, Dict[str, Any]]:
+        **kwargs,
+    ) -> Any:
         """
         Parameters
         ----------
@@ -45,13 +30,17 @@ class Processor(object):
         -------
         output: Any
             The output of the processor
-        kwargs : Dict[str, Any]
-            The keyword arguments (to be passed for further processing).
-            The method can just pass the input keyword arguments as they are,
-            or modify them in any necessary way.
         """
 
         raise NotImplementedError
+
+    def reset(self):
+        """
+        Resets the processor, if it has any internal states.
+
+        This method needs to be implemented in derived classes if needed.
+        """
+        pass
 
 
 class ProcessorWrapper(Processor):
@@ -75,55 +64,25 @@ class ProcessorWrapper(Processor):
         super().__init__()
         self.func = func
 
-    def __call__(self, data: Any, **kwargs: Any) -> Tuple[Any, Dict[str, Any]]:
+    def __call__(self, data: Any, **kwargs) -> Any:
         output = self.func(data, **kwargs)
 
-        return output, kwargs
+        return output
 
 
-class SequentialOutputProcessor(object):
-    """
-    Abstract base class for sequential processing of data
-
-    Parameters
-    ----------
-    processors: list
-        List of processors to be applied sequentially.
-    """
-
-    processors: List[Processor]
-
-    def __init__(self, processors: Union[Processor, List[Any]]) -> None:
-        self.processors = list(processors)
-
-    def __call__(self, data: Any, **kwargs: Any) -> Any:
-        """
-        Makes a processor callable.
-        """
-        for proc in self.processors:
-            data, kwargs = proc(data, kwargs)
-        return data
-
-    def reset(self) -> None:
-        """
-        Reset the processor. Must be implemented in the derived class
-        to reset the processor to its initial state.
-        """
-        for proc in self.processors:
-            if hasattr(proc, "reset"):
-                proc.reset()
-
-
-class DummySequentialOutputProcessor(SequentialOutputProcessor):
+class DummyProcessor(Processor):
     """
     Dummy sequential output processor, which always returns
     the inputs unmodified inputs
     """
 
-    def __init__(self) -> None:
+    def __call__(
+        self,
+        data: Any,
+        **kwargs,
+    ) -> Any:
 
-        dummy_processors = [ProcessorWrapper(lambda x: x)]
-        super().__init__(processors=dummy_processors)
+        return data
 
 
 if __name__ == "__main__":

@@ -288,9 +288,9 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
     def get_new_input(self):
         target_feature, f_time = self.queue.get()
         q_length = self.frame_per_seg
-        self.input_features[self.target_pointer : self.target_pointer + q_length] = (
-            target_feature
-        )
+        self.input_features[
+            self.target_pointer : self.target_pointer + q_length
+        ] = target_feature
         self.target_pointer += q_length
         self.last_queue_update = time.time()
 

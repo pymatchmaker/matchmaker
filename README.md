@@ -1,6 +1,12 @@
-# matchmaker
+# Matchmaker
 
 Matchmaker is a Python library for real-time music alignment.
+
+Music alignment is a fundamental MIR task, and real-time music alignment is a necessary component of many interactive applications (e.g., automatic accompaniment systems, automatic page turning).
+
+Unlike offline alignment methods, for which state-of-the-art implementations are publicly available, real-time (online) methods have no standard implementation, forcing researchers and developers to build them from scratch for their projects.
+  
+We aim to provide efficient reference implementations of score followers for use in real-time applications which can be easily integrated into existing projects.
 
 
 ## Setup
@@ -18,7 +24,7 @@ To setup the experiments, use the following script.
 
 ```bash
 # Clone matchmaker
-git clone https://github.com/neosatrapahereje/matchmaker.git
+git clone https://github.com/CarlosCancino-Chacon/matchmaker.git
 
 cd matchmaker
 
@@ -29,13 +35,10 @@ conda env create -f environment.yml
 pip install -e .
 ```
 
-## Changes
-
-* Simplify feature processors.
 ## Example Usage
 
 TBD
 
 ## Acknowledgments
 
-TBD
+This work has been supported by the Austrian Science Fund (FWF), grant agreement PAT 8820923 ("*Rach3: A Computational Approach to Study Piano Rehearsals*"). Additionally, this work was supported by the National Research Foundation of Korea (NRF) grant funded by the Korea government (MSIT) (No. NRF-2023R1A2C3007605).

@@ -3,8 +3,8 @@
 """
 This module implements Hidden Markov Models for score following
 """
-import warnings
 import time
+import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
@@ -16,6 +16,10 @@ from hiddenmarkov import (
     ObservationModel,
     TransitionModel,
 )
+from numpy.typing import NDArray
+from scipy.sparse import lil_matrix
+from scipy.stats import gumbel_l, norm
+
 from matchmaker.base import OnlineAlignment
 from matchmaker.utils.misc import (
     MatchmakerMissingParameterError,
@@ -23,9 +27,6 @@ from matchmaker.utils.misc import (
     get_window_indices,
 )
 from matchmaker.utils.tempo_models import TempoModel
-from numpy.typing import NDArray
-from scipy.sparse import lil_matrix
-from scipy.stats import gumbel_l, norm
 
 # Alias for typing arrays
 NDArrayFloat = NDArray[np.float32]
@@ -514,7 +515,9 @@ def compute_bernoulli_pitch_probabilities(
     """
 
     # Compute Bernoulli probability:
-    pitch_prob = (pitch_profiles**pitch_obs) * ((1 - pitch_profiles) ** (1 - pitch_obs))
+    pitch_prob = (pitch_profiles**pitch_obs) * (
+        (1 - pitch_profiles) ** (1 - pitch_obs)
+    )
 
     obs_prob = np.prod(pitch_prob, 1)
 
@@ -592,7 +595,6 @@ class BernoulliPitchObservationModel(ObservationModel):
 
 
 class PitchIOIObservationModel(ObservationModel):
-
     def __init__(
         self,
         pitch_obs_prob_func: Callable[..., NDArrayFloat],

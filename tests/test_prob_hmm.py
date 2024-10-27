@@ -4,43 +4,39 @@
 This module contains tests for the prob/hmm.py module.
 """
 import unittest
-from matplotlib import pyplot as plt
+
 import numpy as np
 import partitura as pt
-
+from hiddenmarkov import CategoricalObservationModel, ConstantTransitionModel
+from matplotlib import pyplot as plt
 from partitura.musicanalysis.performance_codec import get_time_maps_from_alignment
 
+from matchmaker import EXAMPLE_AUDIO, EXAMPLE_MATCH, EXAMPLE_SCORE
 from matchmaker.features.audio import (
     HOP_LENGTH,
     SAMPLE_RATE,
-    ChromagramProcessor,
     ChromagramIOIProcessor,
+    ChromagramProcessor,
 )
 from matchmaker.features.midi import PitchIOIProcessor, PitchProcessor
-from matchmaker import EXAMPLE_MATCH, EXAMPLE_AUDIO, EXAMPLE_SCORE
 from matchmaker.io.audio import CHUNK_SIZE
 from matchmaker.prob.hmm import (
-    gumbel_transition_matrix,
-    gumbel_init_dist,
-    compute_discrete_pitch_profiles,
-    compute_continous_pitch_profiles,
-    PitchHMM,
-    BernoulliPitchObservationModel,
     BaseHMM,
-    PitchIOIHMM,
     BernoulliGaussianPitchIOIObservationModel,
+    BernoulliPitchObservationModel,
+    PitchHMM,
+    PitchIOIHMM,
+    compute_continous_pitch_profiles,
+    compute_discrete_pitch_profiles,
     compute_ioi_matrix,
+    gumbel_init_dist,
+    gumbel_transition_matrix,
 )
-
 from matchmaker.utils.tempo_models import ReactiveTempoModel
-
-from hiddenmarkov import CategoricalObservationModel, ConstantTransitionModel
-
 from tests.utils import process_audio_offline, process_midi_offline
 
 
 class TestBaseHMM(unittest.TestCase):
-
     def test_init(self):
         # Non musical example, to test initialization
 
@@ -71,7 +67,6 @@ class TestBaseHMM(unittest.TestCase):
 
 
 class TestPitchHMM(unittest.TestCase):
-
     def test_symbolic(self):
 
         perf, _, score = pt.load_match(EXAMPLE_MATCH, create_score=True)
@@ -115,16 +110,15 @@ class TestPitchHMM(unittest.TestCase):
 
         observations = process_midi_offline(
             perf_info=perf,
-            features=[PitchProcessor(piano_range=True)],
+            processor=PitchProcessor(piano_range=True),
         )
 
         for obs in observations:
-            if obs[0] is not None:
+            if obs is not None:
                 cp = hmm(obs[0])
                 self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
-
 
     def test_audio(self):
 
@@ -133,12 +127,10 @@ class TestPitchHMM(unittest.TestCase):
         # Get score features
         score_features = process_audio_offline(
             perf_info=score,
-            features=[
-                ChromagramProcessor(
-                    sample_rate=SAMPLE_RATE,
-                    hop_length=HOP_LENGTH,
-                )
-            ],
+            processor=ChromagramProcessor(
+                sample_rate=SAMPLE_RATE,
+                hop_length=HOP_LENGTH,
+            ),
             hop_length=HOP_LENGTH,
             sample_rate=SAMPLE_RATE,
             chunk_size=1,
@@ -184,12 +176,10 @@ class TestPitchHMM(unittest.TestCase):
         observations = process_audio_offline(
             perf_info=score,
             # perf_info=EXAMPLE_AUDIO,
-            features=[
-                ChromagramProcessor(
-                    sample_rate=SAMPLE_RATE,
-                    hop_length=HOP_LENGTH,
-                )
-            ],
+            processor=ChromagramProcessor(
+                sample_rate=SAMPLE_RATE,
+                hop_length=HOP_LENGTH,
+            ),
             hop_length=HOP_LENGTH,
             sample_rate=SAMPLE_RATE,
             chunk_size=4,
@@ -203,7 +193,6 @@ class TestPitchHMM(unittest.TestCase):
 
 
 class TestPitchIOIHMM(unittest.TestCase):
-
     def test_symbolic(self):
 
         perf, _, score = pt.load_match(EXAMPLE_MATCH, create_score=True)
@@ -257,17 +246,16 @@ class TestPitchIOIHMM(unittest.TestCase):
 
         observations = process_midi_offline(
             perf_info=perf,
-            features=[PitchIOIProcessor(piano_range=True)],
+            processor=PitchIOIProcessor(piano_range=True),
         )
 
         for obs in observations:
-            if obs[0] is not None:
-                cp = hmm(obs[0])
+            if obs is not None:
+                cp = hmm(obs)
                 self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
 
-    
     def test_symbolic_insertions(self):
 
         perf, _, score = pt.load_match(EXAMPLE_MATCH, create_score=True)
@@ -324,12 +312,12 @@ class TestPitchIOIHMM(unittest.TestCase):
 
         observations = process_midi_offline(
             perf_info=perf,
-            features=[PitchIOIProcessor(piano_range=True)],
+            processor=PitchIOIProcessor(piano_range=True),
         )
 
         for obs in observations:
-            if obs[0] is not None:
-                cp = hmm(obs[0])
+            if obs is not None:
+                cp = hmm(obs)
                 self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))

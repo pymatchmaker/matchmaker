@@ -5,7 +5,7 @@ Miscellaneous utilities
 """
 import numbers
 from queue import Empty, Queue
-from typing import Any, Iterable, Union, List
+from typing import Any, Iterable, List, Union
 
 import numpy as np
 
@@ -44,6 +44,7 @@ class MatchmakerInvalidOptionError(Exception):
 
         super().__init__(message, *args)
 
+
 class MatchmakerMissingParameterError(Exception):
     """
     Error for flagging a missing parameter
@@ -57,7 +58,6 @@ class MatchmakerMissingParameterError(Exception):
         else:
             message = f"`{parameter_name}` was not given."
         super().__init__(message, *args)
-
 
 
 def ensure_rng(
@@ -111,20 +111,20 @@ class RECVQueue(Queue):
         while True:
             try:
                 return self.get(timeout=1)
-            except Empty:
+            except Empty:  # pragma: no cover
                 pass
 
     def poll(self) -> bool:
         return self.empty()
-    
+
 
 def get_window_indices(indices: np.ndarray, context: int) -> np.ndarray:
     # Create a range array from -context to context (inclusive)
     range_array = np.arange(-context, context + 1)
-    
+
     # Reshape indices to be a column vector (len(indices), 1)
     indices = indices[:, np.newaxis]
-    
+
     # Use broadcasting to add the range array to each index
     out_array = indices + range_array
 

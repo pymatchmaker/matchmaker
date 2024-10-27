@@ -3,22 +3,22 @@
 """
 This module contains methods to compute features from MIDI signals.
 """
-from typing import Dict, List, Optional, Tuple, Union
 import os
-from numpy.typing import NDArray
+from typing import Dict, List, Optional, Tuple, Union
+
 import numpy as np
 import partitura as pt
+from numpy.typing import NDArray
+from partitura.performance import Performance, PerformanceLike, PerformedPart
+from partitura.score import Part, Score, ScoreLike, merge_parts
+from partitura.utils.music import performance_from_part
 
 from matchmaker.utils.processor import Processor
-from matchmaker.utils.typing import InputMIDIFrame, NDArrayFloat
 from matchmaker.utils.symbolic import (
     framed_midi_messages_from_performance,
     midi_messages_from_performance,
 )
-
-from partitura.score import Score, ScoreLike, Part, merge_parts
-from partitura.performance import Performance, PerformanceLike, PerformedPart
-from partitura.utils.music import performance_from_part
+from matchmaker.utils.typing import InputMIDIFrame, NDArrayFloat
 
 
 class PitchProcessor(Processor):
@@ -52,7 +52,7 @@ class PitchProcessor(Processor):
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[Optional[Tuple[NDArrayFloat, float]], Dict]:
+    ) -> Optional[Tuple[NDArrayFloat, float]]:
         data, f_time = frame
         # pitch_obs = []
         pitch_obs = np.zeros(
@@ -83,9 +83,9 @@ class PitchProcessor(Processor):
                     ),
                     {},
                 )
-            return pitch_obs, {}
+            return pitch_obs
         else:
-            return None, {}
+            return None
 
     def reset(self) -> None:
         pass
@@ -123,7 +123,7 @@ class PitchIOIProcessor(Processor):
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[Optional[Tuple[NDArrayFloat, float]], Dict]:
+    ) -> Optional[Tuple[NDArrayFloat, float]]:
         data, f_time = frame
         # pitch_obs = []
         pitch_obs = np.zeros(
@@ -159,10 +159,10 @@ class PitchIOIProcessor(Processor):
                         dtype=np.float32,
                     ),
                     ioi_obs,
-                ), {}
-            return (pitch_obs, ioi_obs), {}
+                )
+            return (pitch_obs, ioi_obs)
         else:
-            return None, {}
+            return None
 
     def reset(self) -> None:
         pass
@@ -201,7 +201,7 @@ class PianoRollProcessor(Processor):
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[np.ndarray, Dict]:
+    ) -> np.ndarray:
         # initialize piano roll
         piano_roll_slice: np.ndarray = np.zeros(128, dtype=self.dtype)
         data, f_time = frame
@@ -225,7 +225,7 @@ class PianoRollProcessor(Processor):
             piano_roll_slice = piano_roll_slice[21:109]
         self.piano_roll_slices.append(piano_roll_slice)
 
-        return piano_roll_slice, {}
+        return piano_roll_slice
 
     def reset(self) -> None:
         self.piano_roll_slices = []
@@ -263,7 +263,7 @@ class PitchClassPianoRollProcessor(Processor):
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[np.ndarray, Dict]:
+    ) -> np.ndarray:
         # initialize pitch class
         pitch_class_slice: np.ndarray = np.zeros(12, dtype=self.dtype)
         data, f_time = frame
@@ -285,7 +285,7 @@ class PitchClassPianoRollProcessor(Processor):
 
         self.pitch_class_slices.append(pitch_class_slice)
 
-        return pitch_class_slice, {}
+        return pitch_class_slice
 
     def reset(self) -> None:
         self.pitch_class_slices = []
@@ -326,7 +326,7 @@ class CumSumPianoRollProcessor(Processor):
         self,
         frame: InputMIDIFrame,
         kwargs: Dict = {},
-    ) -> Tuple[np.ndarray, Dict]:
+    ) -> np.ndarray:
         # initialize piano roll
         piano_roll_slice = np.zeros(128, dtype=self.dtype)
         data, f_time = frame
@@ -350,7 +350,7 @@ class CumSumPianoRollProcessor(Processor):
             piano_roll_slice = piano_roll_slice[21:109]
         self.piano_roll_slices.append(piano_roll_slice)
 
-        return piano_roll_slice, {}
+        return piano_roll_slice
 
     def reset(self) -> None:
         self.piano_roll_slices = []
@@ -359,8 +359,8 @@ class CumSumPianoRollProcessor(Processor):
 
 def compute_features_from_symbolic(
     ref_info: Union[ScoreLike, PerformanceLike, NDArray, str],
-    features: List[str],
-    feature_kwargs: Optional[List[dict]] = None,
+    processor_name: str,
+    processor_kwargs: Optional[dict] = None,
     polling_period: Optional[float] = 0.01,
     bpm: Optional[float] = 120,
 ):
@@ -373,13 +373,15 @@ def compute_features_from_symbolic(
         "cumsum_pianoroll": CumSumPianoRollProcessor,
     }
 
-    if feature_kwargs is None:
-        feature_kwargs = [{}] * len(features)
+    if processor_kwargs is None:
+        processor_kwargs = {}
 
-    feature_processors = [
-        processor_mapping[name](**kwargs)
-        for name, kwargs in zip(features, feature_kwargs)
-    ]
+    # feature_processors = [
+    #     processor_mapping[name](**kwargs)
+    #     for name, kwargs in zip(processor_name, feature_kwargs)
+    # ]
+
+    feature_processor = processor_mapping[processor_name](**processor_kwargs)
 
     if isinstance(ref_info, Score):
 
@@ -414,9 +416,11 @@ def compute_features_from_symbolic(
 
     outputs = []
     for frame, f_time in zip(frames_array, frame_times):
-        features = [proc((frame, f_time))[0] for proc in feature_processors]
 
-        outputs.append(features)
+        output = feature_processor((frame, f_time))
+        # processor_name = [proc((frame, f_time))[0] for proc in feature_processors]
+
+        outputs.append(output)
 
     return outputs
 
