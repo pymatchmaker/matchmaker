@@ -77,6 +77,12 @@ def setup_midi_player():
     note_array["duration_sec"] = 2 * RNG.rand(n_notes)
     note_array["velocity"] = RNG.randint(low=0, high=127, size=n_notes)
 
+    # normalize the random performance to last 1 second
+    # (makes the tests a bit faster ;)
+    max_duration = (note_array["onset_sec"] + note_array["duration_sec"]).max()
+    note_array["onset_sec"] /= max_duration
+    note_array["duration_sec"] /= max_duration
+
     # Generate temporary midi file
     tmp_file = NamedTemporaryFile(delete=True)
     save_performance_midi(
@@ -110,6 +116,7 @@ class TestMidiStream(unittest.TestCase):
         port=None,
         mediator: Optional[CeusMediator] = None,
         queue: Optional[RECVQueue] = None,
+        return_midi_messages: bool = False,
     ) -> None:
 
         if processor == "dummy":
@@ -128,6 +135,7 @@ class TestMidiStream(unittest.TestCase):
             port=port,
             mediator=mediator,
             queue=queue,
+            return_midi_messages=return_midi_messages,
         )
 
     def test_init(self):
@@ -139,10 +147,13 @@ class TestMidiStream(unittest.TestCase):
             for file_path in [EXAMPLE_PERFORMANCE, None]:
                 for polling_period in [None, 0.01]:
                     for port in [
-                        mido.open_input("port1", virtual=True),
+                        mido.open_input(
+                            "port1",
+                            virtual=True,
+                        ),
                         None,
                     ]:
-                        for mediator in [None]:
+                        for mediator in [None, CeusMediator()]:
                             self.setup(
                                 processor=processor,
                                 file_path=file_path,
@@ -165,13 +176,67 @@ class TestMidiStream(unittest.TestCase):
                             if port is not None:
                                 port.close()
 
-    def test_stream(self):
+    # @unittest.skipIf(True, "reason")
+    def test_run_online(self):
         """
         Test running an instance of a MidiStream class
         (i.e., getting features from a live input)
         """
 
+        polling_period = None
+        for processor in ["dummy", "pianoroll"]:
+            for return_midi_messages in [True, False]:
+                for polling_period in [None, 0.01]:
+
+                    port, queue, midi_player, _ = setup_midi_player()
+
+                    self.setup(
+                        processor=processor,
+                        file_path=None,
+                        port=port,
+                        queue=queue,
+                        mediator=None,
+                        return_midi_messages=return_midi_messages,
+                        polling_period=polling_period,
+                    )
+
+                    self.stream.start()
+
+                    midi_player.start()
+
+                    while midi_player.is_playing:
+                        output = queue.recv()
+
+                        if return_midi_messages and polling_period is None:
+                            (msg, msg_time), output = output
+                            self.assertTrue(isinstance(msg, mido.Message))
+                            self.assertTrue(isinstance(msg_time, float))
+
+                        elif return_midi_messages and polling_period is not None:
+                            messages, output = output
+
+                            for msg, msg_time in messages:
+                                self.assertTrue(isinstance(msg, mido.Message))
+                                self.assertTrue(isinstance(msg_time, float))
+
+                        if processor == "pianoroll":
+                            self.assertTrue(isinstance(output, np.ndarray))
+
+                    self.stream.stop()
+                    midi_player.join()
+                    port.close()
+
+    def test_run_online_context_manager(self):
+        """
+        Test running an instance of a MidiStream class
+        (i.e., getting features from a live input)
+        """
+
+        polling_period = None
         processor = "pianoroll"
+        return_midi_messages = True
+        polling_period = 0.01
+
         port, queue, midi_player, _ = setup_midi_player()
 
         self.setup(
@@ -180,32 +245,31 @@ class TestMidiStream(unittest.TestCase):
             port=port,
             queue=queue,
             mediator=None,
+            return_midi_messages=return_midi_messages,
+            polling_period=polling_period,
         )
 
-        # features = [
-        #     PitchIOIProcessor(),
-        #     PianoRollProcessor(),
-        #     CumSumPianoRollProcessor(),
-        # ]
-        # midi_stream = MidiStream(
-        #     port=port,
-        #     queue=queue,
-        #     processor=features,
-        # )
-        self.stream.start()
+        with self.stream as stream:
 
-        midi_player.start()
+            midi_player.start()
 
-        while midi_player.is_playing:
-            output = queue.recv()
+            while midi_player.is_playing:
+                output = stream.queue.recv()
+                messages, output = output
 
-            if processor == "pianoroll":
-                self.assertTrue(isinstance(output, np.ndarray))
+                for msg, msg_time in messages:
+                    self.assertTrue(isinstance(msg, mido.Message))
+                    self.assertTrue(isinstance(msg_time, float))
 
-            # self.assertTrue(len(output) == len(features))
-        self.stream.stop_listening()
-        midi_player.join()
-        port.close()
+                self.assertTrue(
+                        isinstance(
+                            output,
+                            np.ndarray,
+                        )
+                    )
+
+            midi_player.join()
+            port.close()
 
 
 # class TestMidiStream(unittest.TestCase):

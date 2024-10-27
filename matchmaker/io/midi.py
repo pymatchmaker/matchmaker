@@ -92,6 +92,7 @@ class MidiStream(Stream):
             # Do not open a MIDI port for running
             # stream offline
             port = None
+        self.file_path = file_path
         self.midi_in = port
         self.init_time = init_time
         self.listen = False
@@ -143,7 +144,7 @@ class MidiStream(Stream):
         **kwargs,
     ) -> None:
         # the data is the Buffer instance
-        output = [proc((data.frame[:], data.time))[0] for proc in self.processor]
+        output = self.processor((data.frame[:], data.time))
         # output = self.pipeline((frame.frame[:], frame.time))
         if self.return_midi_messages:
             self.queue.put((data.frame, output))
@@ -173,10 +174,12 @@ class MidiStream(Stream):
         frame.start = self.current_time
 
         # TODO: check the effect of smaller st
-        # st = self.polling_period * 0.01
+        st = self.polling_period * 0.001
         while self.listen:
-            # time.sleep(st)
+            time.sleep(st)
+
             if self.listen:
+                # added if to check once again after sleep
                 c_time = self.current_time
                 msg = self.midi_in.poll()
                 if msg is not None:
@@ -190,8 +193,8 @@ class MidiStream(Stream):
                         frame.append(msg, self.current_time)
                         if not self.first_msg:
                             self.first_msg = True
-                if c_time >= frame.end and self.first_msg:
 
+                if c_time >= frame.end and self.first_msg:
                     self._process_frame_window(data=frame)
                     frame.reset(c_time)
 
@@ -201,7 +204,7 @@ class MidiStream(Stream):
         over MIDI messages
         """
         midi_messages, message_times = midi_messages_from_performance(
-            perf=self.perf_data,
+            perf=self.file_path,
         )
         self.init_time = message_times.min()
         self.start_listening()
@@ -218,22 +221,28 @@ class MidiStream(Stream):
         over MIDI messages
         """
         midi_frames, frame_times = framed_midi_messages_from_performance(
-            perf=self.perf_data,
+            perf=self.file_path,
             polling_period=self.polling_period,
         )
         self.init_time = frame_times.min()
         for frame, f_time in zip(midi_frames, frame_times):
-            self._process_feature(
-                frame=frame,
-                f_time=f_time,
+            self._process_frame_window(
+                data=frame,
             )
 
     @property
-    def current_time(self):
+    def current_time(self) -> Optional[float]:
         """
         Get current time since starting to listen
         """
+        if self.init_time is None:
+            # TODO: Check if this has weird consequences
+            self.init_time = time.time()
+            return 0
+
         return time.time() - self.init_time
+
+        # return time.time() - self.init_time if self.init_time is not None else None
 
     def start_listening(self):
         """
@@ -242,8 +251,10 @@ class MidiStream(Stream):
         """
         print("* Start listening to MIDI stream....")
         self.listen = True
-        if self.init_time is None:
-            self.init_time = time.time()
+        # set initial time
+        self.current_time
+        # if self.init_time is None:
+        #     self.init_time = time.time()
 
     def stop_listening(self):
         """
@@ -271,6 +282,14 @@ class MidiStream(Stream):
             # False means the exception will propagate
             return False
         return True
+
+    def stop(self):
+        self.stop_listening()
+        self.join()
+
+    def clear_queue(self):
+        if self.queue.not_empty:
+            self.queue.queue.clear()
 
 
 # class FramedMidiStream(MidiStream):

@@ -121,10 +121,10 @@ class AudioStream(Stream):
 
     def _process_frame(
         self,
-        data,
-        frame_count,
-        time_info,
-        status_flag,
+        data: Union[bytes, np.ndarray],
+        frame_count: int,
+        time_info: dict,
+        status_flag: int,
     ) -> Tuple[np.ndarray, int]:
         self.prev_time = time_info["input_buffer_adc_time"]
         # initial y
@@ -133,7 +133,11 @@ class AudioStream(Stream):
 
         return (data, pyaudio.paContinue)
 
-    def _process_feature(self, target_audio, f_time):
+    def _process_feature(
+        self,
+        target_audio: np.ndarray,
+        f_time: float,
+    ):
 
         if self.last_chunk is None:  # add zero padding at the first block
             target_audio = np.concatenate(
@@ -169,13 +173,12 @@ class AudioStream(Stream):
         return self.audio_stream.get_time() - self.init_time if self.init_time else None
 
     def start_listening(self) -> None:
-        self.listen = True  
+        self.listen = True
         if self.mock:
             print("* Mock listening to stream....")
         else:
             self.audio_stream.start_stream()
             print("* Start listening to audio stream....")
-        
 
     def stop_listening(self) -> None:
         print("* Stop listening to audio stream....")
@@ -196,7 +199,7 @@ class AudioStream(Stream):
         traceback: Optional[TracebackType],
     ) -> Optional[bool]:
         self.stop()
-        if exc_type is not None: # pragma: no cover
+        if exc_type is not None:  # pragma: no cover
             # Returning True will suppress the exception
             # False means the exception will propagate
             return False
@@ -224,41 +227,6 @@ class AudioStream(Stream):
             self.last_time = f_time
             self._process_feature(target_audio, f_time)
             trimmed_audio = trimmed_audio[self.chunk_size :]
-
-        # self.init_time = 0
-        # duration = int(librosa.get_duration(path=self.file_path))
-        # audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
-        # padded_audio = np.concatenate(  # zero padding at the end
-        #     (audio_y, np.zeros(duration * 2 * self.sample_rate, dtype=np.float32))
-        # )
-        # trimmed_audio = padded_audio[  # trim to multiple of chunk_size
-        #     : len(padded_audio) - (len(padded_audio) % self.chunk_size)
-        # ]
-        # self.start_listening()
-        # run_counter = 0
-
-        # self.prev_time = 0
-        # while trimmed_audio.any():
-
-        #     target_audio = trimmed_audio[: self.chunk_size]
-        #     f_time = run_counter * self.chunk_size / self.sample_rate
-
-        #     self._process_feature(target_audio, run_counter)
-        #     trimmed_audio = trimmed_audio[self.chunk_size :]
-        #     run_counter += 1
-        #     self.prev_time = f_time
-
-        # # fill empty values with zeros after stream is finished (50% of duration)
-        # additional_padding_size = (duration // 2) * self.sample_rate
-        # while self.listen and additional_padding_size > 0:
-        #     f_time = run_counter * self.chunk_size / self.sample_rate
-        #     self._process_feature(target_audio, f_time)
-        #     additional_padding_size -= self.chunk_size
-        #     run_counter += 1
-        #     self.prev_time = f_time
-
-        # end run
-        
 
     def run_online(self) -> None:
         self.audio_interface = pyaudio.PyAudio()

@@ -44,18 +44,30 @@ class Buffer(object):
         self.polling_period = polling_period
         self.frame = []
         self.start = None
+        self.index = 0
 
-    def __len__(self) -> int:
-        return len(self.frame)
+    def __iter__(self):
+        return self
+    
+    def __next__(self):
+        # Logic to return the next item
+        if self.index < len(self.frame):
+            result = self.frame[self.index]
+            self.index += 1
+            return result
+        else:
+            # Raises StopIteration when the iteration is complete
+            raise StopIteration
 
-    def append(self, input, time) -> None:
+
+    def append(self, input: mido.Message, time: float) -> None:
         self.frame.append((input, time))
 
     def set_start(self) -> None:
         if len(self.frame) > 0:
             self.start = np.min([time for _, time in self.frame])
 
-    def reset(self, time) -> None:
+    def reset(self, time: float) -> None:
         self.frame = []
         self.start = time
 
