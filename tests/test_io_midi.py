@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import mido
 import numpy as np
+import partitura as pt
 
 from matchmaker import EXAMPLE_PERFORMANCE
 from matchmaker.features.midi import (
@@ -37,7 +38,7 @@ from partitura.performance import PerformedPart
 from tests.utils import DummyMidiPlayer
 
 
-def setup_midi_player():
+def setup_midi_player(use_example: bool = False):
     """
     Setup dummy MIDI player for testing
 
@@ -62,43 +63,51 @@ def setup_midi_player():
     outport = mido.open_output("port1")
     queue = RECVQueue()
 
-    # Generate a random MIDI file
-    n_notes = 5
-    iois = 2 * RNG.rand(n_notes - 1)
-    note_array = np.empty(
-        n_notes,
-        dtype=[
-            ("pitch", int),
-            ("onset_sec", float),
-            ("duration_sec", float),
-            ("velocity", int),
-        ],
-    )
+    if use_example:
+        filename = EXAMPLE_PERFORMANCE
+        perf = pt.load_performance_midi(filename)
+        note_array = perf.note_array()
+    else:
+        # Generate a random MIDI file
+        n_notes = 5
+        iois = 2 * RNG.rand(n_notes - 1)
+        note_array = np.empty(
+            n_notes,
+            dtype=[
+                ("pitch", int),
+                ("onset_sec", float),
+                ("duration_sec", float),
+                ("velocity", int),
+            ],
+        )
 
-    note_array["pitch"] = RNG.randint(low=0, high=127, size=n_notes)
-    note_array["onset_sec"] = np.r_[0, np.cumsum(iois)]
-    note_array["duration_sec"] = 2 * RNG.rand(n_notes)
-    note_array["velocity"] = RNG.randint(low=0, high=127, size=n_notes)
+        note_array["pitch"] = RNG.randint(low=0, high=127, size=n_notes)
+        note_array["onset_sec"] = np.r_[0, np.cumsum(iois)]
+        note_array["duration_sec"] = 2 * RNG.rand(n_notes)
+        note_array["velocity"] = RNG.randint(low=0, high=127, size=n_notes)
 
-    # normalize the random performance to last 1 second
-    # (makes the tests a bit faster ;)
-    max_duration = (note_array["onset_sec"] + note_array["duration_sec"]).max()
-    note_array["onset_sec"] /= max_duration
-    note_array["duration_sec"] /= max_duration
+        # normalize the random performance to last 1 second
+        # (makes the tests a bit faster ;)
+        max_duration = (note_array["onset_sec"] + note_array["duration_sec"]).max()
+        note_array["onset_sec"] /= max_duration
+        note_array["duration_sec"] /= max_duration
 
-    # Generate temporary midi file
-    tmp_file = NamedTemporaryFile(delete=True)
-    save_performance_midi(
-        performance_data=PerformedPart.from_note_array(note_array),
-        out=tmp_file.name,
-    )
+        # Generate temporary midi file
+        tmp_file = NamedTemporaryFile(delete=True)
+        save_performance_midi(
+            performance_data=PerformedPart.from_note_array(note_array),
+            out=tmp_file.name,
+        )
+        filename = tmp_file.name
     # Create DummyMidiPlayer instance
     midi_player = DummyMidiPlayer(
         port=outport,
-        filename=tmp_file.name,
+        filename=filename,
     )
-    # close and delete tmp midi file
-    tmp_file.close()
+
+    if not use_example:
+        # close and delete tmp midi file
+        tmp_file.close()
 
     mediator = CeusMediator()
 
@@ -299,6 +308,7 @@ class TestMidiStream(unittest.TestCase):
             midi_player.join()
             port.close()
 
+    # @unittest.skipIf(True, "")
     @patch("sys.stdout", new_callable=StringIO)
     def test_run_offline_single(self, mock_io):
         """
@@ -324,6 +334,7 @@ class TestMidiStream(unittest.TestCase):
             outputs = list(self.stream.queue.queue)
             self.assertTrue(len(outputs) == len(valid_messages))
 
+    # @unittest.skipIf(True, "")
     @patch("sys.stdout", new_callable=StringIO)
     def test_run_offline_windowed(self, mock_io):
         """
@@ -376,183 +387,40 @@ class TestMidiStream(unittest.TestCase):
         outputs = list(self.stream.queue.queue)
         self.assertTrue(len(outputs) == 0)
 
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_online_windowed_input(self, mock_io):
+        port, queue, midi_player, note_array, _ = setup_midi_player()
 
-# class TestMidiStream(unittest.TestCase):
-#     """
-#     This class tests the MidiStream class
+        polling_period = 0.01
 
-#     TODO
-#     ----
-#     * Test mediator
-#     """
+        self.setup(
+            processor="dummy",
+            port=port,
+            queue=queue,
+            polling_period=polling_period,
+        )
 
-#     def test_stream(self):
-#         """
-#         Test running an instance of a MidiStream class
-#         (i.e., getting features from a live input)
-#         """
-#         port, queue, midi_player, _ = setup_midi_player()
-#         features = [
-#             PitchIOIProcessor(),
-#             PianoRollProcessor(),
-#             CumSumPianoRollProcessor(),
-#         ]
-#         midi_stream = MidiStream(
-#             port=port,
-#             queue=queue,
-#             processor=features,
-#         )
-#         midi_stream.start()
+        perf_length = (
+            note_array["onset_sec"] + note_array["duration_sec"]
+        ).max()
 
-#         midi_player.start()
+        expected_frames = int(np.ceil(perf_length / polling_period))
+        n_outputs = 0
 
-#         while midi_player.is_playing:
-#             output = queue.recv()
-#             self.assertTrue(len(output) == len(features))
-#         midi_stream.stop_listening()
-#         midi_player.join()
-#         port.close()
+        with self.stream as stream:
+            midi_player.start()
+            while midi_player.is_playing:
+                output = queue.recv()
 
-#     def test_stream_with_midi_messages(self):
-#         """
-#         Test running an instance of a MidiStream class
-#         (i.e., getting features from a live input). This
-#         tests gets both computed features and input midi
-#         messages.
-#         """
-#         port, queue, midi_player, _ = setup_midi_player()
-#         features = [PitchIOIProcessor(return_pitch_list=True)]
-#         midi_stream = MidiStream(
-#             port=port,
-#             queue=queue,
-#             processor=features,
-#             return_midi_messages=True,
-#         )
-#         midi_stream.start()
+                if output is not None:
+                    n_outputs += 1
+                    # print(output, n_outputs)
 
-#         midi_player.start()
+        # Test whether the number of expected frames is within
+        # 2 frames of the number of expected frames (due to rounding)
+        # errors).
+        # print(n_outputs, expected_frames)
+        self.assertTrue(abs(n_outputs - expected_frames) <= 2)
 
-#         while midi_player.is_playing:
-#             (msg, msg_time), output = queue.recv()
-#             self.assertTrue(isinstance(msg, mido.Message))
-#             self.assertTrue(isinstance(msg_time, float))
-
-#             if msg.type == "note_on" and output[0] is not None:
-#                 self.assertTrue(msg.note == int(output[0][0][0]))
-#             self.assertTrue(len(output) == len(features))
-#         midi_stream.stop_listening()
-#         midi_stream.join()
-#         midi_player.join()
-#         port.close()
-
-
-# class TestFramedMidiStream(unittest.TestCase):
-#     """
-#     This class tests the FramedMidiStream class
-
-#     TODO
-#     ----
-#     * Test return_midi_messages=True
-#     * Test mediator
-#     * Test length and string of Buffer
-#     """
-
-#     def test_stream(self):
-#         port, queue, midi_player, note_array = setup_midi_player()
-#         features = [
-#             PitchIOIProcessor(),
-#             PianoRollProcessor(),
-#             CumSumPianoRollProcessor(),
-#         ]
-#         polling_period = 0.05
-#         midi_stream = FramedMidiStream(
-#             port=port,
-#             queue=queue,
-#             features=features,
-#             polling_period=polling_period,
-#         )
-#         midi_stream.start()
-
-#         midi_player.start()
-
-#         perf_length = (
-#             note_array["onset_sec"] + note_array["duration_sec"]
-#         ).max() - note_array["onset_sec"].min()
-
-#         expected_frames = np.ceil(perf_length / polling_period)
-#         n_outputs = 0
-#         while midi_player.is_playing:
-#             output = queue.recv()
-#             self.assertTrue(len(output) == len(features))
-#             n_outputs += 1
-
-#         # Test whether the number of expected frames is within
-#         # 2 frames of the number of expected frames (due to rounding)
-#         # errors).
-#         self.assertTrue(abs(n_outputs - expected_frames) <= 2)
-#         midi_stream.stop_listening()
-#         midi_stream.join()
-#         midi_player.join()
-#         port.close()
-
-
-# class TestMockMidiStream(unittest.TestCase):
-#     def test_stream(self):
-#         """
-#         Test running an instance of a MidiStream class
-#         (i.e., getting features from a live input)
-#         """
-
-#         queue = RECVQueue()
-#         features = [
-#             PitchIOIProcessor(),
-#             PianoRollProcessor(),
-#             CumSumPianoRollProcessor(),
-#         ]
-#         midi_stream = MockMidiStream(
-#             file_path=EXAMPLE_PERFORMANCE,
-#             queue=queue,
-#             features=features,
-#         )
-
-#         mf = mido.MidiFile(EXAMPLE_PERFORMANCE)
-
-#         valid_messages = [msg for msg in mf if not isinstance(msg, mido.MetaMessage)]
-
-#         midi_stream.start()
-#         midi_stream.join()
-#         # get all outputs of the queue at once
-#         outputs = list(queue.queue)
-#         self.assertTrue(len(outputs) == len(valid_messages))
-
-#         for output in outputs:
-#             self.assertTrue(len(output) == len(features))
-
-
-# class TestMockFramedMidiStream(unittest.TestCase):
-#     def test_stream(self):
-#         """
-#         Test running an instance of a MidiStream class
-#         (i.e., getting features from a live input)
-#         """
-
-#         queue = RECVQueue()
-#         features = [
-#             PitchIOIProcessor(piano_range=True),
-#             PianoRollProcessor(piano_range=True),
-#             CumSumPianoRollProcessor(piano_range=True),
-#         ]
-#         midi_stream = MockFramedMidiStream(
-#             file_path=EXAMPLE_PERFORMANCE,
-#             queue=queue,
-#             features=features,
-#         )
-
-#         midi_stream.start()
-#         midi_stream.join()
-#         # get all outputs of the queue at once
-#         outputs = list(queue.queue)
-#         self.assertTrue(len(outputs) >= 0)
-
-#         for output in outputs:
-#             self.assertTrue(len(output) == len(features))
+        midi_player.join()
+        port.close()
