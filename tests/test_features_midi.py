@@ -3,7 +3,9 @@
 """
 Tests for the features/midi.py module
 """
+from io import StringIO
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import partitura as pt
@@ -18,91 +20,87 @@ from matchmaker.features.midi import (
 from tests.utils import process_midi_offline
 
 
-# class TestPitchProcessor(unittest.TestCase):
-#     # @unittest.skipIf(True, "")
-#     def test_processor(self):
+class TestPitchProcessor(unittest.TestCase):
 
-#         note_array = np.empty(
-#             13,
-#             dtype=[
-#                 ("pitch", int),
-#                 ("onset_sec", float),
-#                 ("duration_sec", float),
-#                 ("velocity", int),
-#                 ("id", str),
-#             ],
-#         )
-#         for i, pitch in enumerate(range(60, 73)):
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_processor(self, mock_io):
 
-#             note_array[i] = (pitch, i, 0.5, 64, f"n{i}")
+        note_array = np.empty(
+            13,
+            dtype=[
+                ("pitch", int),
+                ("onset_sec", float),
+                ("duration_sec", float),
+                ("velocity", int),
+                ("id", str),
+            ],
+        )
+        for i, pitch in enumerate(range(60, 73)):
 
-#         perf = PerformedPart.from_note_array(note_array)
+            note_array[i] = (pitch, i, 0.5, 64, f"n{i}")
 
-#         feature_processor = PitchProcessor(
-#             piano_range=False,
-#             return_pitch_list=False,
-#         )
-#         feature_processor_pr = PitchProcessor(
-#             piano_range=True,
-#             return_pitch_list=False,
-#         )
-#         feature_processor_pl = PitchProcessor(
-#             piano_range=False,
-#             return_pitch_list=True,
-#         )
+        perf = PerformedPart.from_note_array(note_array)
 
-#         feature_processor_pl_pr = PitchProcessor(
-#             piano_range=True,
-#             return_pitch_list=True,
-#         )
-#         # For coverage of the reset method, since it does not
-#         # do anything in this case.
-#         feature_processor.reset()
-#         polling_period = 0.01
+        feature_processor = PitchProcessor(
+            piano_range=False,
+            return_pitch_list=False,
+        )
+        feature_processor_pr = PitchProcessor(
+            piano_range=True,
+            return_pitch_list=False,
+        )
+        feature_processor_pl = PitchProcessor(
+            piano_range=False,
+            return_pitch_list=True,
+        )
 
-#         outputs = []
-#         for processor in [feature_processor, feature_processor_pr, feature_processor_pl, feature_processor_pl_pr,]:
-#             output = process_midi_offline(
-#                 perf_info=perf,
-#                 processor=feature_processor,
-#                 polling_period=polling_period,
-#             )
+        feature_processor_pl_pr = PitchProcessor(
+            piano_range=True,
+            return_pitch_list=True,
+        )
+        # For coverage of the reset method, since it does not
+        # do anything in this case.
+        feature_processor.reset()
+        polling_period = 0.01
 
-#             outputs.append(output)
+        # outputs = []
+        for processor in [feature_processor, feature_processor_pr, feature_processor_pl, feature_processor_pl_pr,]:
+            output = process_midi_offline(
+                perf_info=perf,
+                processor=processor,
+                polling_period=polling_period,
+            )
 
-#         non_none_outputs = 0
-#         for output in outputs:
+            non_none_outputs = 0
+            if processor.piano_range and processor.return_pitch_list:
+                for out in output:
+                    if out is not None:
+                        self.assertTrue(len(out) == 1)
+                        self.assertTrue(out == non_none_outputs + 60 - 21)
+                        non_none_outputs += 1
 
-#             if output[0] is not None:
-#                 pitch_obs = output[0]
-#                 self.assertTrue(len(pitch_obs) == 128)
-#                 self.assertTrue(isinstance(pitch_obs, np.ndarray))
-#                 self.assertTrue(np.sum(pitch_obs) > 0)
-#                 self.assertTrue(np.argmax(pitch_obs) == 60 + non_none_outputs)
+            elif not processor.piano_range and processor.return_pitch_list:
+                for out in output:
+                    if out is not None:
+                        self.assertTrue(len(out) == 1)
+                        self.assertTrue(out == non_none_outputs + 60)
+                        non_none_outputs += 1
 
-#             if output[1] is not None:
-#                 pitch_obs = output[1]
-#                 self.assertTrue(len(pitch_obs) == 88)
-#                 self.assertTrue(isinstance(pitch_obs, np.ndarray))
-#                 self.assertTrue(np.sum(pitch_obs) > 0)
-#                 self.assertTrue(np.argmax(pitch_obs) == 60 + non_none_outputs - 21)
+            elif processor.piano_range and not processor.return_pitch_list:
+                for out in output:
+                    if out is not None:
+                        self.assertTrue(len(out) == 88)
+                        self.assertTrue(np.argmax(out) == non_none_outputs + 60 - 21)
+                        non_none_outputs += 1
+                        
+            elif not processor.piano_range and not processor.return_pitch_list:
+                for out in output:
+                    if out is not None:
+                        self.assertTrue(len(out) == 128)
+                        self.assertTrue(np.argmax(out) == non_none_outputs + 60)
+                        non_none_outputs += 1
 
-#             if output[2] is not None:
-#                 pitch_obs = output[2]
-#                 self.assertTrue(len(pitch_obs) == 1)
-#                 self.assertTrue(isinstance(pitch_obs, np.ndarray))
-#                 self.assertTrue(np.sum(pitch_obs) > 0)
-#                 self.assertTrue(pitch_obs[0] == 60 + non_none_outputs)
-
-#             if output[3] is not None:
-#                 pitch_obs = output[3]
-#                 self.assertTrue(len(pitch_obs) == 1)
-#                 self.assertTrue(isinstance(pitch_obs, np.ndarray))
-#                 self.assertTrue(np.sum(pitch_obs) > 0)
-#                 self.assertTrue(pitch_obs[0] == 60 + non_none_outputs - 21)
-#                 non_none_outputs += 1
-
-#         # self.assertTrue(non_none_outputs == len(note_array))
+            self.assertTrue(non_none_outputs == len(note_array))
 
 
 # class TestPitchIOIProcessor(unittest.TestCase):

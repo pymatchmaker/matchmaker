@@ -51,7 +51,6 @@ class PitchProcessor(Processor):
     def __call__(
         self,
         frame: InputMIDIFrame,
-        kwargs: Dict = {},
     ) -> Optional[Tuple[NDArrayFloat, float]]:
         data, f_time = frame
         # pitch_obs = []
@@ -76,12 +75,9 @@ class PitchProcessor(Processor):
                 pitch_obs = pitch_obs[21:109]
 
             if self.return_pitch_list:
-                return (
-                    np.array(
-                        pitch_obs_list,
-                        dtype=np.float32,
-                    ),
-                    {},
+                return np.array(
+                    pitch_obs_list,
+                    dtype=np.float32,
                 )
             return pitch_obs
         else:
@@ -376,11 +372,6 @@ def compute_features_from_symbolic(
     if processor_kwargs is None:
         processor_kwargs = {}
 
-    # feature_processors = [
-    #     processor_mapping[name](**kwargs)
-    #     for name, kwargs in zip(processor_name, feature_kwargs)
-    # ]
-
     feature_processor = processor_mapping[processor_name](**processor_kwargs)
 
     if isinstance(ref_info, Score):
@@ -418,7 +409,6 @@ def compute_features_from_symbolic(
     for frame, f_time in zip(frames_array, frame_times):
 
         output = feature_processor((frame, f_time))
-        # processor_name = [proc((frame, f_time))[0] for proc in feature_processors]
 
         outputs.append(output)
 
