@@ -118,7 +118,6 @@ class PitchIOIProcessor(Processor):
     def __call__(
         self,
         frame: InputMIDIFrame,
-        kwargs: Dict = {},
     ) -> Optional[Tuple[NDArrayFloat, float]]:
         data, f_time = frame
         # pitch_obs = []
@@ -196,7 +195,6 @@ class PianoRollProcessor(Processor):
     def __call__(
         self,
         frame: InputMIDIFrame,
-        kwargs: Dict = {},
     ) -> np.ndarray:
         # initialize piano roll
         piano_roll_slice: np.ndarray = np.zeros(128, dtype=self.dtype)
@@ -258,7 +256,6 @@ class PitchClassPianoRollProcessor(Processor):
     def __call__(
         self,
         frame: InputMIDIFrame,
-        kwargs: Dict = {},
     ) -> np.ndarray:
         # initialize pitch class
         pitch_class_slice: np.ndarray = np.zeros(12, dtype=self.dtype)
@@ -321,7 +318,6 @@ class CumSumPianoRollProcessor(Processor):
     def __call__(
         self,
         frame: InputMIDIFrame,
-        kwargs: Dict = {},
     ) -> np.ndarray:
         # initialize piano roll
         piano_roll_slice = np.zeros(128, dtype=self.dtype)
