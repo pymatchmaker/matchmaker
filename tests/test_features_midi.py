@@ -23,7 +23,7 @@ from tests.utils import process_midi_offline
 
 
 class TestPitchProcessor(unittest.TestCase):
-    # @unittest.skipIf(True, "")
+
     @patch("sys.stdout", new_callable=StringIO)
     def test_processor(self, mock_io):
 
@@ -374,7 +374,6 @@ class TestPitchClassPianoRollProcessor(unittest.TestCase):
         feature_processor.reset()
         polling_period = 0.01
 
-        # outputs = []
         for processor in [
             feature_processor,
             feature_processor_vel,

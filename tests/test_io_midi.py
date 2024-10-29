@@ -160,7 +160,6 @@ class TestMidiStream(unittest.TestCase):
             return_midi_messages=return_midi_messages,
         )
 
-    # @unittest.skipIf(True, "")
     def test_init(self):
         """Test that the MidiStream initializes correctly"""
         for processor in [
@@ -199,7 +198,6 @@ class TestMidiStream(unittest.TestCase):
                             if port is not None:
                                 port.close()
 
-    # @unittest.skipIf(True, "")
     @patch("sys.stdout", new_callable=StringIO)
     def test_run_online(self, mock_stdout):
         """
@@ -257,7 +255,6 @@ class TestMidiStream(unittest.TestCase):
                         midi_player.join()
                         port.close()
 
-    # @unittest.skipIf(True, "")
     @patch("sys.stdout", new_callable=StringIO)
     def test_run_online_context_manager(self, mock_stdout):
         """
@@ -305,7 +302,6 @@ class TestMidiStream(unittest.TestCase):
             midi_player.join()
             port.close()
 
-    # @unittest.skipIf(True, "")
     @patch("sys.stdout", new_callable=StringIO)
     def test_run_offline_single(self, mock_io):
         """
@@ -331,7 +327,6 @@ class TestMidiStream(unittest.TestCase):
             outputs = list(self.stream.queue.queue)
             self.assertTrue(len(outputs) == len(valid_messages))
 
-    # @unittest.skipIf(True, "")
     @patch("sys.stdout", new_callable=StringIO)
     def test_run_offline_windowed(self, mock_io):
         """
@@ -363,7 +358,6 @@ class TestMidiStream(unittest.TestCase):
 
             self.assertTrue(len(outputs) == expected_frames)
 
-    # @unittest.skipIf(True, "")
     @patch("sys.stdout", new_callable=StringIO)
     def test_clear_queue(self, mock_io):
         """
