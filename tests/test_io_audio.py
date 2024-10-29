@@ -4,9 +4,9 @@
 This module contains tests for the matchmaker.io module.
 """
 import time
-from typing import Optional
 import unittest
 from io import StringIO
+from typing import Optional
 from unittest.mock import patch
 
 import librosa
@@ -29,7 +29,6 @@ SKIP_REASON = (not HAS_AUDIO_INPUT, "No input audio devices detected")
 
 SAMPLE_RATE = 22050
 HOP_LENGTH = 256
-CHUNK_SIZE = 1
 
 
 class TestAudioStream(unittest.TestCase):
@@ -38,7 +37,6 @@ class TestAudioStream(unittest.TestCase):
         self,
         processor_name: str = "dummy",
         file_path: Optional[str] = None,
-        include_ftime: bool = False,
     ):
 
         if processor_name == "chroma":
@@ -59,7 +57,6 @@ class TestAudioStream(unittest.TestCase):
             )
 
         elif processor_name == "dummy":
-
             # Test default dummy processor
             processor = None
 
@@ -67,9 +64,7 @@ class TestAudioStream(unittest.TestCase):
             file_path=file_path,
             sample_rate=SAMPLE_RATE,
             hop_length=HOP_LENGTH,
-            chunk_size=CHUNK_SIZE,
             processor=processor,
-            include_ftime=include_ftime,
         )
 
     def teardown(self):
@@ -138,10 +133,7 @@ class TestAudioStream(unittest.TestCase):
             "dummy",
         ]:
 
-            self.setup(
-                processor_name=processor,
-                include_ftime=False,
-            )
+            self.setup(processor_name=processor)
             self.stream.start()
             init_time = time.time()
 
@@ -153,14 +145,13 @@ class TestAudioStream(unittest.TestCase):
             p_time = init_time
             while crit:
                 c_time = time.time() - init_time
-                features = self.stream.queue.recv()
+                features, f_time = self.stream.queue.recv()
 
                 if features is not None:
                     features_checked = True
                     self.assertTrue(isinstance(features, np.ndarray))
 
                     d_time = c_time - p_time
-                    # print(processor, c_time, d_time, features.shape)
                     p_time = c_time
                     num_proc_frames[processor] += 1
 
@@ -200,7 +191,7 @@ class TestAudioStream(unittest.TestCase):
                 p_time = init_time
                 while crit:
 
-                    features = stream.queue.recv()
+                    features, f_time = stream.queue.recv()
                     c_time = stream.current_time
                     if features is not None:
                         features_checked = True
@@ -234,7 +225,6 @@ class TestAudioStream(unittest.TestCase):
             self.setup(
                 processor_name=processor,
                 file_path=librosa.ex("pistachio"),
-                include_ftime=True,
             )
 
             self.stream.start()
@@ -259,7 +249,6 @@ class TestAudioStream(unittest.TestCase):
         self.setup(
             processor_name=processor,
             file_path=librosa.ex("pistachio"),
-            include_ftime=False,
         )
 
         self.stream.start()
@@ -277,7 +266,7 @@ class TestAudioStream(unittest.TestCase):
         )
 
         # same type of input as live input
-        original_data =np.zeros(HOP_LENGTH, dtype=np.float32)
+        original_data = np.zeros(HOP_LENGTH, dtype=np.float32)
         data = bytes(original_data)
         frame_count = 0
         time_info = {
@@ -299,7 +288,7 @@ class TestAudioStream(unittest.TestCase):
         # There is no live audio here, so this should be 0
         self.assertTrue(audio_continue == 0)
 
-        proc_output = self.stream.queue.recv()
+        proc_output, f_time = self.stream.queue.recv()
 
         expected_output = np.concatenate(
             (np.zeros(self.stream.hop_length, dtype=np.float32), original_data)

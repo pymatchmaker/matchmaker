@@ -6,7 +6,6 @@ Utilities for tests
 import numbers
 import tempfile
 import threading
-import time
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 import mido
@@ -15,7 +14,7 @@ import partitura as pt
 from partitura.io.exportaudio import save_wav_fluidsynth
 from partitura.performance import PerformanceLike
 
-from matchmaker.io.audio import CHUNK_SIZE, HOP_LENGTH, SAMPLE_RATE, AudioStream
+from matchmaker.io.audio import HOP_LENGTH, SAMPLE_RATE, AudioStream
 from matchmaker.io.midi import POLLING_PERIOD, MidiStream
 from matchmaker.utils.misc import RECVQueue
 
@@ -298,7 +297,6 @@ def process_audio_offline(
     processor: Callable,
     sample_rate: int = SAMPLE_RATE,
     hop_length: int = HOP_LENGTH,
-    chunk_size: int = CHUNK_SIZE,
     include_ftime: bool = False,
 ) -> List[Any]:
 
@@ -334,14 +332,13 @@ def process_audio_offline(
         processor=processor,
         sample_rate=sample_rate,
         hop_length=hop_length,
-        chunk_size=chunk_size,
         include_ftime=include_ftime,
     )
 
     input_stream.start()
     input_stream.join()
 
-    outputs = list(queue.queue)
+    outputs = [item[0] for item in list(queue.queue)]
 
     if temp_file is not None:
         temp_file.close()

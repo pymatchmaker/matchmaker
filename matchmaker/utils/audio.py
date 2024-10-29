@@ -62,6 +62,23 @@ def get_audio_devices() -> List[AudioDeviceInfo]:
     return audio_devices
 
 
+def get_default_input_device_index() -> int:
+    """Get the default input device index
+
+    Returns
+    -------
+    int
+        Index of the default input device
+    """
+    if not check_input_audio_devices():
+        raise ValueError("No audio devices found.")
+
+    p = pyaudio.PyAudio()
+    default_input_index = p.get_default_input_device_info()["index"]
+    p.terminate()
+    return default_input_index
+
+
 def check_input_audio_devices() -> bool:
     """
     Check whether the system has audio devices
@@ -73,12 +90,7 @@ def check_input_audio_devices() -> bool:
         True if the system has an audio device with inputs
     """
     audio_devices = get_audio_devices()
-
-    num_input_channels = sum([ad.input_channels for ad in audio_devices])
-
-    has_audio_inputs = num_input_channels > 0
-
-    return has_audio_inputs
+    return any([ad.input_channels > 0 for ad in audio_devices])
 
 
 def list_audio_devices() -> None:

@@ -3,23 +3,25 @@
 """
 Input audio stream
 """
-import threading
 import time
 from types import TracebackType
-from typing import Any, Callable, List, Optional, Tuple, Type, Union
+from typing import Callable, Optional, Tuple, Type, Union
 
 import librosa
 import numpy as np
 import pyaudio
 
-from matchmaker.features.audio import HOP_LENGTH, SAMPLE_RATE
-from matchmaker.utils.audio import get_audio_devices, get_device_index_from_name
+from matchmaker.features.audio import HOP_LENGTH, SAMPLE_RATE, ChromagramProcessor
+from matchmaker.utils.audio import (
+    get_audio_devices,
+    get_default_input_device_index,
+    get_device_index_from_name,
+)
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import DummyProcessor
 from matchmaker.utils.stream import Stream
 
 CHANNELS = 1
-CHUNK_SIZE = 1 * HOP_LENGTH
 
 
 class AudioStream(Stream):
@@ -39,8 +41,6 @@ class AudioStream(Stream):
         Hop length of the audio stream
     queue : RECVQueue
         Queue to store the processed audio
-    chunk_size : int
-        Size of the audio chunk
     device_name_or_index : Optional[Union[str, int]]
         Name or index of the audio device to be used. Ignored
         if `file_path` is given.
@@ -52,13 +52,15 @@ class AudioStream(Stream):
         file_path: Optional[str] = None,
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
-        chunk_size: int = CHUNK_SIZE,
-        include_ftime: bool = False,
+        include_ftime: bool = True,
         queue: Optional[RECVQueue] = None,
         device_name_or_index: Optional[Union[str, int]] = None,
     ):
         if processor is None:
             processor = DummyProcessor()
+            # processor = ChromagramProcessor(
+            #     sample_rate=sample_rate, hop_length=hop_length
+            # )
 
         Stream.__init__(
             self,
@@ -98,14 +100,16 @@ class AudioStream(Stream):
                     print(ad)
 
                 raise ValueError("Invalid index for audio device.")
+        elif device_name_or_index is None and not file_path:
+            default_index = get_default_input_device_index()
+            if default_index is not None:
+                self.input_device_index = default_index
+            else:
+                raise ValueError("No audio devices found!")
 
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.queue = queue or RECVQueue()
-
-        # @Jiyun: Why do we select the chunk size like this?
-        self.chunk_size = chunk_size * self.hop_length
-
         self.format = pyaudio.paFloat32
         self.audio_interface = None
         self.audio_stream: Optional[pyaudio.Stream] = None
@@ -145,20 +149,11 @@ class AudioStream(Stream):
             )
         else:
             # add last chunk at the beginning of the block
-            # ex) making 5 block, 1 block overlap -> 4 frames each time
             target_audio = np.concatenate((self.last_chunk, target_audio))
 
-        if self.include_ftime:
-            target_audio = (target_audio.squeeze(), f_time)
-
         features = self.processor(target_audio)
-
-        if self.include_ftime:
-            self.queue.put((features, f_time))
-            self.last_chunk = target_audio[0][-self.hop_length :]
-        else:
-            self.queue.put(features)
-            self.last_chunk = target_audio[-self.hop_length :]
+        self.queue.put((features, f_time))
+        self.last_chunk = target_audio[-self.hop_length :]
 
     @property
     def current_time(self) -> Optional[float]:
@@ -218,15 +213,15 @@ class AudioStream(Stream):
             )
         )
         trimmed_audio = padded_audio[  # trim to multiple of chunk_size
-            : len(padded_audio) - (len(padded_audio) % self.chunk_size)
+            : len(padded_audio) - (len(padded_audio) % self.hop_length)
         ]
         # self.start_listening()
         while trimmed_audio.any():
-            target_audio = trimmed_audio[: self.chunk_size]
+            target_audio = trimmed_audio[: self.hop_length]
             f_time = time.time()
             self.last_time = f_time
             self._process_feature(target_audio, f_time)
-            trimmed_audio = trimmed_audio[self.chunk_size :]
+            trimmed_audio = trimmed_audio[self.hop_length :]
 
     def run_online(self) -> None:
         self.audio_interface = pyaudio.PyAudio()
@@ -235,7 +230,7 @@ class AudioStream(Stream):
             channels=CHANNELS,
             rate=self.sample_rate,
             input=True,
-            frames_per_buffer=self.chunk_size,
+            frames_per_buffer=self.hop_length,
             stream_callback=self._process_frame,
             input_device_index=self.input_device_index,
         )

@@ -19,7 +19,6 @@ from matchmaker.features.audio import (
     ChromagramProcessor,
 )
 from matchmaker.features.midi import PitchIOIProcessor, PitchProcessor
-from matchmaker.io.audio import CHUNK_SIZE
 from matchmaker.prob.hmm import (
     BaseHMM,
     BernoulliGaussianPitchIOIObservationModel,
@@ -133,7 +132,6 @@ class TestPitchHMM(unittest.TestCase):
             ),
             hop_length=HOP_LENGTH,
             sample_rate=SAMPLE_RATE,
-            chunk_size=1,
         )
 
         score_features = np.vstack(score_features)
@@ -182,7 +180,6 @@ class TestPitchHMM(unittest.TestCase):
             ),
             hop_length=HOP_LENGTH,
             sample_rate=SAMPLE_RATE,
-            chunk_size=4,
         )
         observations = np.vstack(observations)
         for obs in observations:
