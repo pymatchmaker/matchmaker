@@ -342,7 +342,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         return next_direction
 
     def get_new_input(self):
-        input_feature = self.queue.get()
+        input_feature, f_time = self.queue.get()
         self.input_features = np.vstack([self.input_features, input_feature])
         self.input_pointer += self.frame_per_seg
         self.last_queue_update = time.time()

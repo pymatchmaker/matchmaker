@@ -18,7 +18,6 @@ from matchmaker.utils.audio import (
     get_device_index_from_name,
 )
 from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.processor import DummyProcessor
 from matchmaker.utils.stream import Stream
 
 CHANNELS = 1
@@ -120,6 +119,23 @@ class AudioStream(Stream):
         else:
             self.run = self.run_online
 
+    def __enter__(self) -> None:
+        self.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> Optional[bool]:
+        self.stop()
+        if exc_type is not None:  # pragma: no cover
+            # Returning True will suppress the exception
+            # False means the exception will propagate
+            return False
+        return True
+
     def _process_frame(
         self,
         data: Union[bytes, np.ndarray],
@@ -160,8 +176,6 @@ class AudioStream(Stream):
         This property only makes sense in the context of live
         inputs.
         """
-        # return time.time() - self.init_time if self.init_time else None
-
         return self.audio_stream.get_time() - self.init_time if self.init_time else None
 
     def start_listening(self) -> None:
@@ -179,23 +193,6 @@ class AudioStream(Stream):
             self.audio_stream.close()
             self.audio_interface.terminate()
         self.listen = False
-
-    def __enter__(self) -> None:
-        self.start()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: Optional[Type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[TracebackType],
-    ) -> Optional[bool]:
-        self.stop()
-        if exc_type is not None:  # pragma: no cover
-            # Returning True will suppress the exception
-            # False means the exception will propagate
-            return False
-        return True
 
     def run_offline(self) -> None:
         """Offline method for computing features"""
