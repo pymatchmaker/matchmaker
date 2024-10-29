@@ -101,7 +101,7 @@ class AudioStream(Stream):
             default_index = get_default_input_device_index()
             if default_index is not None:
                 self.input_device_index = default_index
-            else:
+            else:  # pragma: no cover
                 raise ValueError("No audio devices found!")
 
         self.sample_rate = sample_rate
