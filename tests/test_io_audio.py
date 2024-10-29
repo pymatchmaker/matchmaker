@@ -21,6 +21,7 @@ from matchmaker.features.audio import (
 from matchmaker.io.audio import AudioStream
 from matchmaker.utils.audio import check_input_audio_devices, get_audio_devices
 from matchmaker.utils.misc import RECVQueue
+from matchmaker.utils.processor import DummyProcessor
 
 HAS_AUDIO_INPUT = check_input_audio_devices()
 
@@ -58,7 +59,7 @@ class TestAudioStream(unittest.TestCase):
 
         elif processor_name == "dummy":
             # Test default dummy processor
-            processor = None
+            processor = DummyProcessor()
 
         self.stream = AudioStream(
             file_path=file_path,

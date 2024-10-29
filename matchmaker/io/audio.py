@@ -56,10 +56,9 @@ class AudioStream(Stream):
         device_name_or_index: Optional[Union[str, int]] = None,
     ):
         if processor is None:
-            processor = DummyProcessor()
-            # processor = ChromagramProcessor(
-            #     sample_rate=sample_rate, hop_length=hop_length
-            # )
+            processor = ChromagramProcessor(
+                sample_rate=sample_rate, hop_length=hop_length
+            )
 
         Stream.__init__(
             self,
