@@ -52,7 +52,6 @@ class AudioStream(Stream):
         file_path: Optional[str] = None,
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
-        include_ftime: bool = True,
         queue: Optional[RECVQueue] = None,
         device_name_or_index: Optional[Union[str, int]] = None,
     ):
@@ -114,7 +113,6 @@ class AudioStream(Stream):
         self.audio_interface = None
         self.audio_stream: Optional[pyaudio.Stream] = None
         self.last_chunk = None
-        self.include_ftime = include_ftime
         self.f_time = 0
         self.prev_time = None
 
