@@ -15,7 +15,6 @@ import partitura as pt
 
 from matchmaker import EXAMPLE_PERFORMANCE
 from matchmaker.features.midi import (
-    CumSumPianoRollProcessor,
     PianoRollProcessor,
     PitchIOIProcessor,
 )
@@ -150,8 +149,6 @@ class TestMidiStream(unittest.TestCase):
             processor = PitchIOIProcessor()
         elif processor == "pianoroll":
             processor = PianoRollProcessor()
-        elif processor == "cumsumpianoroll":
-            processor = CumSumPianoRollProcessor()
 
         self.stream = MidiStream(
             processor=processor,
@@ -400,9 +397,7 @@ class TestMidiStream(unittest.TestCase):
             polling_period=polling_period,
         )
 
-        perf_length = (
-            note_array["onset_sec"] + note_array["duration_sec"]
-        ).max()
+        perf_length = (note_array["onset_sec"] + note_array["duration_sec"]).max()
 
         expected_frames = int(np.ceil(perf_length / polling_period))
         n_outputs = 0

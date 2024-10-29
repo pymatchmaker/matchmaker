@@ -345,7 +345,6 @@ class TestPianoRollProcessor(unittest.TestCase):
                         self.assertTrue(np.argmax(out) in note_array["pitch"])
 
 
-
 class TestPitchClassPianoRollProcessor(unittest.TestCase):
 
     @patch("sys.stdout", new_callable=StringIO)
@@ -367,8 +366,7 @@ class TestPitchClassPianoRollProcessor(unittest.TestCase):
 
         perf = PerformedPart.from_note_array(note_array)
 
-        feature_processor = PitchClassPianoRollProcessor(
-        )
+        feature_processor = PitchClassPianoRollProcessor()
         feature_processor_vel = PitchClassPianoRollProcessor(
             use_velocity=True,
         )
@@ -431,7 +429,6 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
                 "pitch_ioi",
                 "pianoroll",
                 "pitch_class_pianoroll",
-                "cumsum_pianoroll",
             ]
 
             feature_kwargs = [
@@ -439,7 +436,6 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
                 dict(piano_range=True),  # PitchIOIProcessor
                 dict(piano_range=True),  # PianoRollProcessor
                 dict(use_velocity=False),  # PitchClassPianoRollProcessor
-                dict(piano_range=False),  # CumSumPianoRollProcessor
             ]
 
             for p_name, p_kwargs in zip(features_list, feature_kwargs):
@@ -475,7 +471,6 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
                 "pitch_ioi",
                 "pianoroll",
                 "pitch_class_pianoroll",
-                "cumsum_pianoroll",
             ]
 
             for p_name in features_list:

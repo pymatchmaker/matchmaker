@@ -285,70 +285,6 @@ class PitchClassPianoRollProcessor(Processor):
         self.active_notes = dict()
 
 
-class CumSumPianoRollProcessor(Processor):
-    """
-    A class to convert a MIDI file time slice to a cumulative sum piano roll
-    representation.
-
-    Parameters
-    ----------
-    use_velocity : bool
-        If True, the velocity of the note is used as the value in the piano
-        roll. Otherwise, the value is 1.
-    piano_range : bool
-        If True, the piano roll will only contain the notes in the piano.
-        Otherwise, the piano roll will contain all 128 MIDI notes.
-    dtype : type
-        The data type of the piano roll. Default is float.
-    """
-
-    def __init__(
-        self,
-        use_velocity: bool = False,
-        piano_range: bool = False,
-        dtype: type = float,
-    ) -> None:
-        Processor.__init__(self)
-        self.active_notes: Dict = dict()
-        self.piano_roll_slices: List[np.ndarray] = []
-        self.use_velocity: bool = use_velocity
-        self.piano_range: bool = piano_range
-        self.dtype: type = dtype
-
-    def __call__(
-        self,
-        frame: InputMIDIFrame,
-    ) -> np.ndarray:
-        # initialize piano roll
-        piano_roll_slice = np.zeros(128, dtype=self.dtype)
-        data, f_time = frame
-        for msg, m_time in data:
-            if msg.type in ("note_on", "note_off"):
-                if msg.type == "note_on" and msg.velocity > 0:
-                    self.active_notes[msg.note] = (msg.velocity, m_time)
-                else:
-                    try:
-                        del self.active_notes[msg.note]
-                    except KeyError:
-                        pass
-
-        for note, (vel, m_time) in self.active_notes.items():
-            if self.use_velocity:
-                piano_roll_slice[note] = vel
-            else:
-                piano_roll_slice[note] = 1
-
-        if self.piano_range:
-            piano_roll_slice = piano_roll_slice[21:109]
-        self.piano_roll_slices.append(piano_roll_slice)
-
-        return piano_roll_slice
-
-    def reset(self) -> None:
-        self.piano_roll_slices = []
-        self.active_notes = dict()
-
-
 def compute_features_from_symbolic(
     ref_info: Union[ScoreLike, PerformanceLike, NDArray, str],
     processor_name: str,
@@ -362,7 +298,6 @@ def compute_features_from_symbolic(
         "pitch_ioi": PitchIOIProcessor,
         "pianoroll": PianoRollProcessor,
         "pitch_class_pianoroll": PitchClassPianoRollProcessor,
-        "cumsum_pianoroll": CumSumPianoRollProcessor,
     }
 
     if processor_kwargs is None:

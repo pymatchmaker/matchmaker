@@ -70,7 +70,7 @@ def get_default_input_device_index() -> int:
     int
         Index of the default input device
     """
-    if not check_input_audio_devices():
+    if not check_input_audio_devices():  # pragma: no cover
         raise ValueError("No audio devices found.")
 
     p = pyaudio.PyAudio()

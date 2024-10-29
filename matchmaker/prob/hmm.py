@@ -515,9 +515,7 @@ def compute_bernoulli_pitch_probabilities(
     """
 
     # Compute Bernoulli probability:
-    pitch_prob = (pitch_profiles**pitch_obs) * (
-        (1 - pitch_profiles) ** (1 - pitch_obs)
-    )
+    pitch_prob = (pitch_profiles**pitch_obs) * ((1 - pitch_profiles) ** (1 - pitch_obs))
 
     obs_prob = np.prod(pitch_prob, 1)
 

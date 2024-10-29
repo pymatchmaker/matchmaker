@@ -11,6 +11,7 @@ import partitura as pt
 from numpy.typing import NDArray
 from partitura.performance import Performance, PerformanceLike, PerformedPart
 
+
 class Buffer(object):
     """
     A Buffer for MIDI input
@@ -48,7 +49,7 @@ class Buffer(object):
 
     def __iter__(self):
         return self
-    
+
     def __next__(self):
         # Logic to return the next item
         if self.index < len(self.frame):
@@ -58,7 +59,6 @@ class Buffer(object):
         else:
             # Raises StopIteration when the iteration is complete
             raise StopIteration
-
 
     def append(self, input: mido.Message, time: float) -> None:
         self.frame.append((input, time))
@@ -93,7 +93,8 @@ class Buffer(object):
 
     def __str__(self) -> str:
         return str(self.frame)
-        
+
+
 def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
     """
     Get a list of MIDI messages and message times from
@@ -124,7 +125,9 @@ def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
     return message_array, message_times_array
 
 
-def midi_messages_from_performance(perf: Union[PerformanceLike, str], print_type=False) -> Tuple[NDArray, NDArray]:
+def midi_messages_from_performance(
+    perf: Union[PerformanceLike, str]
+) -> Tuple[NDArray, NDArray]:
     """
     Get a list of MIDI messages and message times from
     a PerformedPart or a Performance object.
@@ -254,7 +257,7 @@ def midi_messages_to_framed_midi(
     frames = []
 
     for cursor, s_time in enumerate(start_times):
-        
+
         buffer = Buffer(polling_period)
         if cursor == 0:
             # do not leave messages starting at 0 behind!
@@ -267,13 +270,12 @@ def midi_messages_to_framed_midi(
                 )
             )[0]
 
-
         buffer.frame = list(
-                zip(
-                    midi_msgs[idxs],
-                    msg_times[idxs],
-                )
+            zip(
+                midi_msgs[idxs],
+                msg_times[idxs],
             )
+        )
         buffer.start = s_time
         frames.append(buffer)
 
