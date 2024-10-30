@@ -11,10 +11,6 @@ We aim to provide efficient reference implementations of score followers for use
 
 ## Setup
 
-### Install from PyPI
-
-TBD!!
-
 
 ### Install from source using conda
 
@@ -119,8 +115,8 @@ with AudioStream(processor=feature_processor) as stream:
 Matchmaker currently supports the following alignment methods:
 
 - `"dixon"`: On-line time warping algorithm by S. Dixon (2005).
-- `"arzt"`: On-line time warping algorithm by Arzt et al. (2010).
-- `"hmm"`: Hidden Markov Model-based score follower by Duan et al. (2011).
+- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010))
+- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020).
 
 ## Features
 
