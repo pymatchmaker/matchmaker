@@ -11,10 +11,6 @@ We aim to provide efficient reference implementations of score followers for use
 
 ## Setup
 
-### Install from PyPI
-
-TBD!!
-
 
 ### Install from source using conda
 
@@ -35,10 +31,124 @@ conda env create -f environment.yml
 pip install -e .
 ```
 
-## Example Usage
+If you have a ImportError with 'Fluidsynth' by `pyfluidsynth` library on MacOS, please refer to the following [link](https://stackoverflow.com/a/75339618).
 
-TBD
+## Usage Examples
+
+### Quickstart for live streaming
+
+To get started quickly, you can use the `Matchmaker` class, which provides a simple interface for running the alignment process. You can use a `musicxml` or `midi` file as the score file. Specify `"audio"` or `"midi"` as the `input_type` argument, and the default device for that input type will be automatically set up. For options regarding the `method`, please refer to the [Alignment Methods](#alignment-methods) section.
+
+```python
+from matchmaker import Matchmaker
+
+mm = Matchmaker(
+    score_file="path/to/score",
+    input_type="audio",
+    method="dixon",
+)
+for current_position in mm.run():
+    print(current_position)  # beat position in the score
+```
+
+The returned value is the current position in the score, represented in beats defined by `partitura` library's note array system.
+Specifically, each position is calculated for every frame input and interpolated within the score's `onset_beat` array.
+Please refer to [here](https://partitura.readthedocs.io/en/latest/Tutorial/notebook.html) for more information about the `onset_beat` concept.
+
+### Testing with the performance file
+
+You can simulate the real-time alignment by putting a specific performance file as input, rather than running it as a live stream.
+The type of performance file can be either audio file or midi file, depending on the `input_type`.
+
+```python
+from matchmaker import Matchmaker
+
+mm = Matchmaker(
+    score_file="path/to/score",
+    performance_file="path/to/performance.mid",
+    input_type="midi",
+    feature_type="mel",
+    method="hmm",
+)
+for current_position in mm.run():
+    print(current_position)  # beat position in the score
+```
+
+### Testing with Specific Input Device
+
+To use a specific audio or MIDI device that is not the default device, you can pass the device name or index.
+
+```python
+from matchmaker import Matchmaker
+
+mm = Matchmaker(
+    score_file="path/to/score",
+    input_type="audio",
+    feature_type="chroma",
+    method="arzt",
+    device_name_or_index="MacBookPro Microphone",
+)
+for current_position in mm.run():
+    print(current_position)  # beat position in the score
+```
+
+### Customized Example
+If you want to use a different alignment method or custom method, you can do so by importing the specific class and passing the necessary parameters.
+In order to define a custom alignment class, you need to inherit from the Base `OnlineAlignment` class and implement the `run` method. Note that the returned value from the `OnlineAlignment` class should be the current frame number in the reference features, not in beats.
+
+```python
+from matchmaker.dp import OnlineTimeWarpingDixon
+from matchmaker.io.audio import AudioStream
+from matchmaker.features import ChromagramProcessor
+
+feature_processor = ChromagramProcessor()
+reference_features = feature_processor('path/to/score/audio.wav')
+
+with AudioStream(processor=feature_processor) as stream:
+    score_follower = OnlineTimeWarpingDixon(reference_features, stream.queue)
+    for current_frame in score_follower.run():
+        print(current_frame)  # frame number in the reference features
+```
+
+## Alignment Methods
+
+Matchmaker currently supports the following alignment methods:
+
+- `"dixon"`: On-line time warping algorithm by S. Dixon (2005).
+- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010))
+- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020).
+
+## Features
+
+Matchmaker currently supports the following feature types:
+
+- For audio:
+  - `"chroma"`: Chroma features. Default feature type for audio input.
+  - `"mfcc"`: Mel-frequency cepstral coefficients.
+  - `"mel"`: Mel-Spectrogram.
+  - `"logspectral"`: Log-spectral features used in Dixon (2005).
+- For MIDI:
+  - `pianoroll`: Piano-roll features. Default feature type for MIDI input.
+  - `"pitch"`: Pitch features for MIDI input.
+  - `"pitchclass"`: Pitch class features for MIDI input.
+  - `"cumsum"`: Cumulative sum of the piano roll representation.
+
+## Configurations
+
+Initialization parameters for the `Matchmaker` class:
+
+- `score_file` (str): Path to the score file.
+- `input_type` (str): Type of input data. Options: `"audio"`, `"midi"`.
+- `feature_type` (str): Type of feature to use. Options: `"chroma"`, `"mfcc"`, `"cqt"`, `"spectrogram"`, `"onset"`.
+- `method` (str): Alignment method to use. Options: `"dixon"`, `"arzt"`, `"hmm"`.
+- `sample_rate` (int): Sample rate of the input audio data.
+- `frame_rate` (int): Frame rate of the input audio/MIDI data.
+- `device_name_or_index` (str or int): The audio/MIDI device name or index you want to use. If `None`, the default device will be used.
 
 ## Acknowledgments
 
 This work has been supported by the Austrian Science Fund (FWF), grant agreement PAT 8820923 ("*Rach3: A Computational Approach to Study Piano Rehearsals*"). Additionally, this work was supported by the National Research Foundation of Korea (NRF) grant funded by the Korea government (MSIT) (No. NRF-2023R1A2C3007605).
+
+## License
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
