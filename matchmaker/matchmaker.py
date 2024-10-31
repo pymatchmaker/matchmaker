@@ -5,7 +5,7 @@ import numpy as np
 import partitura
 from partitura.io.exportaudio import save_wav_fluidsynth
 from partitura.io.exportmidi import get_ppq
-from partitura.score import ScoreLike
+from partitura.score import Part
 
 from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
 from matchmaker.features.audio import (
@@ -55,20 +55,22 @@ class Matchmaker:
         sample_rate: int = SAMPLE_RATE,
         frame_rate: int = FRAME_RATE,
     ):
+        self.score_file = score_file
+        self.performance_file = performance_file
         self.feature_type = feature_type
         self.frame_rate = frame_rate
-        self.score_data: Optional[ScoreLike] = None
-        self.live_input = False
-        self.device_index = None
+        self.score_part: Optional[Part] = None
+        self.device_name_or_index = device_name_or_index
         self.processor = None
         self.stream = None
         self.score_follower = None
+        self.reference_features = None
 
         # setup score file
         if score_file is None:
             raise ValueError("Score file is required")
 
-        self.score_data = partitura.load_score(score_file)
+        self.score_part = partitura.load_score_as_part(score_file)
 
         # setup feature processor
         if feature_type == "chroma":
@@ -90,26 +92,32 @@ class Matchmaker:
         if input_type == "audio":
             self.stream = AudioStream(
                 processor=self.processor,
-                device_name_or_index=device_name_or_index,
-                file_path=performance_file,
+                device_name_or_index=self.device_name_or_index,
+                file_path=self.performance_file,
             )
         elif input_type == "midi":
             self.strema = MidiStream(
-                processor=self.processor, file_path=performance_file
+                processor=self.processor,
+                device_name_or_index=self.device_name_or_index,
+                file_path=self.performance_file,
             )
         else:
             raise ValueError("Invalid input type")
 
         # setup score follower
-        if method == "dixon":
+        if method == "dixon" or (method is None and input_type == "audio"):
             self.score_follower = OnlineTimeWarpingDixon
         elif method == "arzt":
             self.score_follower = OnlineTimeWarpingArzt
-        elif method == "hmm":
+        elif method == "hmm" or (method is None and input_type == "midi"):
             self.score_follower = PitchIOIHMM
+        else:
+            raise ValueError("Invalid method")
+
+        self.reference_features = self.preprocess_score()
 
     def preprocess_score(self):
-        score_audio = save_wav_fluidsynth(self.score_data)
+        score_audio = save_wav_fluidsynth(self.score_part, bpm=120)
         reference_features = self.processor(score_audio)
         return reference_features
 
@@ -126,10 +134,10 @@ class Matchmaker:
         current_frame : int
             Current frame number
         """
-        tick = get_ppq(self.score_data.parts[0])
+        tick = get_ppq(self.score_part)
         timeline_time = (current_frame / frame_rate) * tick * 2
         beat_position = np.round(
-            self.score_data.parts[0].beat_map(timeline_time),
+            self.score_part.beat_map(timeline_time),
             decimals=2,
         )
         return beat_position
@@ -143,11 +151,9 @@ class Matchmaker:
         float
             Beat position in the score (interpolated)
         """
-        reference_features = self.preprocess_score()
-
         with self.stream as stream:
             for current_frame in self.score_follower(
-                reference_features=reference_features, queue=stream.queue
+                reference_features=self.reference_features, queue=stream.queue
             ).run():
                 position_in_beat = self.convert_frame_to_beat(current_frame)
                 yield position_in_beat
