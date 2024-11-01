@@ -118,7 +118,12 @@ class Matchmaker:
         self.reference_features = self.preprocess_score()
 
     def preprocess_score(self):
-        score_audio = save_wav_fluidsynth(self.score_part, bpm=DEFAULT_TEMPO)
+        beat_type = self.score_part.time_sigs[0].beat_type
+        musical_beats = self.score_part.time_sigs[0].musical_beats
+        score_audio = save_wav_fluidsynth(
+            self.score_part,
+            bpm=DEFAULT_TEMPO * (beat_type / musical_beats),
+        )
         reference_features = self.processor(score_audio.astype(np.float32))
         return reference_features
 
