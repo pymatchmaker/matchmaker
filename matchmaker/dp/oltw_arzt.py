@@ -4,7 +4,7 @@
 On-line Dynamic Time Warping
 """
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
 from numpy.typing import NDArray
@@ -157,7 +157,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.positions: List[int] = []
         self._warping_path: List = []
         self.global_cost_matrix: NDArray[np.float32] = (
-            np.ones((reference_features.shape[0] + 1, 2), dtype=np.float32) * np.infty
+            np.ones((reference_features.shape[0] + 1, 2), dtype=np.float32) * np.inf
         ).astype(np.float32)
         self.input_index: int = 0
         self.go_backwards: bool = False
@@ -174,7 +174,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.step(input)
         return self.current_position
 
-    def run(self) -> None:
+    def run(self) -> Generator[int, None, NDArray[np.float32]]:
         self.reset()
         while self.is_still_following():
             features, f_time = self.queue.get()
@@ -184,6 +184,8 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
                 else features
             )
             self.step(features)
+
+            yield self.current_position
 
         return self.warping_path
 
@@ -197,7 +199,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self._warping_path: List = []
         self.global_cost_matrix = (
             np.ones((self.reference_features.shape[0] + 1, 2), dtype=np.float32)
-            * np.infty
+            * np.inf
         )
         self.input_index = 0
         self.update_window_index = False
@@ -218,7 +220,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         """
         Update the current position and the warping path.
         """
-        min_costs = np.infty
+        min_costs = np.inf
         min_index = max(self.window_index - self.step_size, 0)
 
         window_start, window_end = self.get_window()

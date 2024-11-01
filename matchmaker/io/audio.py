@@ -188,7 +188,7 @@ class AudioStream(Stream):
 
     def stop_listening(self) -> None:
         print("* Stop listening to audio stream....")
-        if not self.mock:
+        if not self.mock and self.audio_stream:
             self.audio_stream.stop_stream()
             self.audio_stream.close()
             self.audio_interface.terminate()

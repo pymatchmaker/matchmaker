@@ -20,6 +20,7 @@ from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
 
 PathLike = Union[str, bytes, os.PathLike]
+DEFAULT_TEMPO = 120
 
 
 class Matchmaker:
@@ -117,8 +118,8 @@ class Matchmaker:
         self.reference_features = self.preprocess_score()
 
     def preprocess_score(self):
-        score_audio = save_wav_fluidsynth(self.score_part, bpm=120)
-        reference_features = self.processor(score_audio)
+        score_audio = save_wav_fluidsynth(self.score_part, bpm=DEFAULT_TEMPO)
+        reference_features = self.processor(score_audio.astype(np.float32))
         return reference_features
 
     def convert_frame_to_beat(
@@ -135,7 +136,7 @@ class Matchmaker:
             Current frame number
         """
         tick = get_ppq(self.score_part)
-        timeline_time = (current_frame / frame_rate) * tick * 2
+        timeline_time = (current_frame / frame_rate) * tick * (DEFAULT_TEMPO / 60)
         beat_position = np.round(
             self.score_part.beat_map(timeline_time),
             decimals=2,
