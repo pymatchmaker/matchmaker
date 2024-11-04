@@ -45,7 +45,6 @@ class ChromagramProcessor(Processor):
     def __call__(
         self,
         data: InputAudioFrame,
-        kwargs: Dict = {},
     ) -> Tuple[Optional[np.ndarray], Dict]:
         if isinstance(data, tuple):
             y, f_time = data
@@ -83,7 +82,6 @@ class ChromagramIOIProcessor(Processor):
     def __call__(
         self,
         data: InputAudioFrame,
-        kwargs: Dict = {},
     ) -> Tuple[Optional[np.ndarray], Dict]:
 
         y, f_time = data
@@ -125,7 +123,6 @@ class MFCCProcessor(Processor):
     def __call__(
         self,
         y: InputAudioSeries,
-        kwargs: Dict = {},
     ) -> Tuple[Optional[np.ndarray], Dict]:
         mfcc = librosa.feature.mfcc(
             y=y,
@@ -157,7 +154,6 @@ class MelSpectrogramProcessor(Processor):
     def __call__(
         self,
         y: InputAudioSeries,
-        kwargs: Dict = {},
     ) -> Tuple[Optional[np.ndarray], Dict]:
         mel_spectrogram = librosa.feature.melspectrogram(
             y=y,
@@ -187,7 +183,6 @@ class LogSpectralEnergyProcessor(Processor):
     def __call__(
         self,
         y: InputAudioSeries,
-        kwargs: Dict = {},
     ):
         stft_result = librosa.stft(
             y=y,

@@ -26,7 +26,7 @@ from matchmaker.utils.misc import (
 DEFAULT_LOCAL_COST: str = "Manhattan"
 WINDOW_SIZE: int = 5
 STEP_SIZE: int = 5
-START_WINDOW_SIZE: int = 1
+START_WINDOW_SIZE: Union[float, int] = 0.25
 FRAME_RATE: int = 50
 
 
@@ -151,7 +151,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.N_ref: int = self.reference_features.shape[0]
         self.window_size: int = window_size * frame_rate
         self.step_size: int = step_size
-        self.start_window_size: int = start_window_size * frame_rate
+        self.start_window_size: int = int(np.round(start_window_size * frame_rate))
         self.init_position: int = current_position
         self.current_position: int = current_position
         self.positions: List[int] = []
