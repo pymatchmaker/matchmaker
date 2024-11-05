@@ -8,6 +8,7 @@ from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Iterable, List, Union
 
+import mido
 import numpy as np
 
 
@@ -132,13 +133,48 @@ def get_window_indices(indices: np.ndarray, context: int) -> np.ndarray:
     return out_array.astype(int)
 
 
-def is_audio_file(file_path):
+def is_audio_file(file_path) -> bool:
     audio_extensions = {".wav", ".mp3", ".flac", ".aac", ".ogg", ".m4a"}
     ext = Path(file_path).suffix
     return ext.lower() in audio_extensions
 
 
-def is_midi_file(file_path):
+def is_midi_file(file_path) -> bool:
     midi_extensions = {".mid", ".midi"}
     ext = Path(file_path).suffix
     return ext.lower() in midi_extensions
+
+
+def get_available_midi_port(port=None):
+    """
+    Get the available MIDI port. If a port is specified, check if it is available.
+
+    Parameters
+    ----------
+    port : str, optional
+        Name of the MIDI port (default is None).
+
+    Returns
+    -------
+    str
+        Name of the available MIDI port.
+
+    Raises
+    ------
+    RuntimeError
+        If no MIDI input ports are available.
+    ValueError
+        If the specified MIDI port is not available.
+    """
+    input_names = mido.get_input_names()
+    if not input_names:
+        raise RuntimeError("No MIDI input ports available")
+
+    if port is None:
+        return input_names[0]
+    elif port in input_names:
+        return port
+    else:
+        raise ValueError(
+            f"Specified MIDI port '{port}' is not available. Available ports: {input_names}"
+        )

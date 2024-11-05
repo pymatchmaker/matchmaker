@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
 from numpy.typing import NDArray
+import progressbar
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.dp.dtw_loop import oltw_arzt_loop, reset_cost_matrix
@@ -176,6 +177,10 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
 
     def run(self, verbose: bool = True) -> Generator[int, None, NDArray[np.float32]]:
         self.reset()
+
+        if verbose:
+            pbar = progressbar.ProgressBar(max_value=self.N_ref, redirect_stdout=True)
+
         while self.is_still_following():
             features, f_time = self.queue.get()
             self.input_features = (
@@ -185,7 +190,13 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             )
             self.step(features)
 
+            if verbose:
+                pbar.update(int(self.current_position))
+
             yield self.current_position
+
+        if verbose:
+            pbar.finish()
 
         return self.warping_path
 

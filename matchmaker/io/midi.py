@@ -14,7 +14,7 @@ from mido.ports import BaseInput as MidiInputPort
 from partitura.performance import Performance, PerformanceLike, PerformedPart
 
 from matchmaker.io.mediator import CeusMediator
-from matchmaker.utils.misc import RECVQueue
+from matchmaker.utils.misc import RECVQueue, get_available_midi_port
 from matchmaker.utils.processor import DummyProcessor, Processor
 from matchmaker.utils.stream import Stream
 from matchmaker.utils.symbolic import (
@@ -65,7 +65,6 @@ class MidiStream(Stream):
     first_message: bool
     mediator: CeusMediator
     is_windowed: bool
-    # mock_stream: bool
     polling_period: Optional[float]
     midi_messages: List[Tuple[mido.Message, float]]
 
@@ -93,6 +92,8 @@ class MidiStream(Stream):
             # Do not open a MIDI port for running
             # stream offline
             port = None
+        else:
+            port = get_available_midi_port(port)
         self.file_path = file_path
         self.midi_in = port
         self.init_time = init_time

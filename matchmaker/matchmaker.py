@@ -96,7 +96,7 @@ class Matchmaker:
         else:
             raise ValueError("Invalid feature type")
 
-        # check performance file
+        # validate performance file and input_type
         if self.performance_file is not None:
             # check performance file type matches input type
             if input_type == "audio" and not is_audio_file(self.performance_file):
@@ -129,12 +129,12 @@ class Matchmaker:
         self.reference_features = self.preprocess_score()
 
         # setup score follower
-        if method == "dixon" or (method is None and input_type == "audio"):
-            self.score_follower = OnlineTimeWarpingDixon(
+        if method == "arzt" or (method is None and input_type == "audio"):
+            self.score_follower = OnlineTimeWarpingArzt(
                 reference_features=self.reference_features, queue=self.stream.queue
             )
-        elif method == "arzt":
-            self.score_follower = OnlineTimeWarpingArzt(
+        elif method == "dixon":
+            self.score_follower = OnlineTimeWarpingDixon(
                 reference_features=self.reference_features, queue=self.stream.queue
             )
         elif method == "hmm" or (method is None and input_type == "midi"):
@@ -181,9 +181,15 @@ class Matchmaker:
         ------
         float
             Beat position in the score (interpolated)
+
+        Returns
+        -------
+        list
+            Alignment results with warping path
         """
         with self.stream:
             for current_frame in self.score_follower.run(verbose=verbose):
                 position_in_beat = self.convert_frame_to_beat(current_frame)
                 yield position_in_beat
+
             return self.score_follower.warping_path

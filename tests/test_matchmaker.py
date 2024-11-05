@@ -26,9 +26,9 @@ class TestMatchmaker(unittest.TestCase):
 
         # Then: the Matchmaker instance should be correctly initialized
         self.assertIsInstance(mm.stream, AudioStream)
-        self.assertIsInstance(mm.score_follower, OnlineTimeWarpingDixon)
+        self.assertIsInstance(mm.score_follower, OnlineTimeWarpingArzt)
 
-    def test_matchmaker_audio_alignment(self):
+    def test_matchmaker_audio_run(self):
         # Given: a Matchmaker instance with audio input
         mm = Matchmaker(
             score_file=self.score_file,
@@ -38,20 +38,21 @@ class TestMatchmaker(unittest.TestCase):
         )
 
         # When & Then: running the alignment process, the yielded result should be a float values
-        for position_in_beat in mm.run():
+        for position_in_beat in mm.run(verbose=False):
             self.assertIsInstance(position_in_beat, float)
 
-    def test_matchmaker_audio_with_result(self):
+    def test_matchmaker_audio_run_with_result(self):
         # Given: a Matchmaker instance with audio input
         mm = Matchmaker(
             score_file=self.score_file,
             performance_file=self.performance_file_audio,
             wait=False,
             input_type="audio",
+            method="dixon",
         )
 
-        # When: running the alignment process (get the result)
-        alignment_results = list(mm.run())
+        # When: running the alignment process (get the returned result)
+        alignment_results = list(mm.run(verbose=False))
 
         # Then: the yielded result should be a float values
         for position_in_beat in alignment_results:
@@ -60,7 +61,7 @@ class TestMatchmaker(unittest.TestCase):
         # And: the alignment result should be a list
         self.assertIsInstance(alignment_results, list)
 
-    def test_audio_dixon(self):
+    def test_matchmaker_audio_dixon_init(self):
         # Given: a Matchmaker instance with audio input and Dixon method
         mm = Matchmaker(
             score_file=self.score_file,
@@ -74,7 +75,7 @@ class TestMatchmaker(unittest.TestCase):
         self.assertIsInstance(mm.stream, AudioStream)
         self.assertIsInstance(mm.score_follower, OnlineTimeWarpingDixon)
 
-    def test_audio_arzt(self):
+    def test_matchmaker_audio_arzt_init(self):
         # Given: a Matchmaker instance with audio input and Dixon method
         mm = Matchmaker(
             score_file=self.score_file,
@@ -88,7 +89,7 @@ class TestMatchmaker(unittest.TestCase):
         self.assertIsInstance(mm.stream, AudioStream)
         self.assertIsInstance(mm.score_follower, OnlineTimeWarpingArzt)
 
-    def test_invalid_input_type(self):
+    def test_matchmaker_invalid_input_type(self):
         # Test Matchmaker with invalid input type
         with self.assertRaises(ValueError):
             Matchmaker(
@@ -97,7 +98,7 @@ class TestMatchmaker(unittest.TestCase):
                 input_type="midi",
             )
 
-    def test_invalid_method(self):
+    def test_matchmaker_invalid_method(self):
         # Test Matchmaker with invalid method
         with self.assertRaises(ValueError):
             Matchmaker(
