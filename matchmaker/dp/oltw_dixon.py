@@ -388,3 +388,5 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
 
         if verbose:
             pbar.finish()
+
+        return self.wp

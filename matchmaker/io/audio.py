@@ -53,6 +53,7 @@ class AudioStream(Stream):
         hop_length: int = HOP_LENGTH,
         queue: Optional[RECVQueue] = None,
         device_name_or_index: Optional[Union[str, int]] = None,
+        wait: bool = True,
     ):
         if processor is None:
             processor = ChromagramProcessor(
@@ -113,6 +114,7 @@ class AudioStream(Stream):
         self.last_chunk = None
         self.f_time = 0
         self.prev_time = None
+        self.wait = True  # only for offline mode making it same time as online
 
         if self.mock:
             self.run = self.run_offline
@@ -197,8 +199,9 @@ class AudioStream(Stream):
     def run_offline(self) -> None:
         """Offline method for computing features"""
         self.start_listening()
-        self.init_time = 0
+        self.init_time = time.time()
         duration = int(librosa.get_duration(path=self.file_path))
+        time_interval = self.hop_length / self.sample_rate
         audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
             (
@@ -209,13 +212,17 @@ class AudioStream(Stream):
         trimmed_audio = padded_audio[  # trim to multiple of chunk_size
             : len(padded_audio) - (len(padded_audio) % self.hop_length)
         ]
-        # self.start_listening()
         while trimmed_audio.any():
+            start_time = time.time()
             target_audio = trimmed_audio[: self.hop_length]
             f_time = time.time()
             self.last_time = f_time
             self._process_feature(target_audio, f_time)
             trimmed_audio = trimmed_audio[self.hop_length :]
+            elapsed_time = time.time() - start_time
+
+            if self.wait:
+                time.sleep(max(time_interval - elapsed_time, 0))
 
     def run_online(self) -> None:
         self.audio_interface = pyaudio.PyAudio()

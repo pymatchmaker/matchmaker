@@ -4,6 +4,7 @@
 Miscellaneous utilities
 """
 import numbers
+from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Iterable, List, Union
 
@@ -129,3 +130,15 @@ def get_window_indices(indices: np.ndarray, context: int) -> np.ndarray:
     out_array = indices + range_array
 
     return out_array.astype(int)
+
+
+def is_audio_file(file_path):
+    audio_extensions = {".wav", ".mp3", ".flac", ".aac", ".ogg", ".m4a"}
+    ext = Path(file_path).suffix
+    return ext.lower() in audio_extensions
+
+
+def is_midi_file(file_path):
+    midi_extensions = {".mid", ".midi"}
+    ext = Path(file_path).suffix
+    return ext.lower() in midi_extensions

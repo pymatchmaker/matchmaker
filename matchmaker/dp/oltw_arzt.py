@@ -174,7 +174,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.step(input)
         return self.current_position
 
-    def run(self) -> Generator[int, None, NDArray[np.float32]]:
+    def run(self, verbose: bool = True) -> Generator[int, None, NDArray[np.float32]]:
         self.reset()
         while self.is_still_following():
             features, f_time = self.queue.get()

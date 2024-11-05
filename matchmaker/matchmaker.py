@@ -18,6 +18,7 @@ from matchmaker.features.audio import (
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
+from matchmaker.utils.misc import is_audio_file, is_midi_file
 
 PathLike = Union[str, bytes, os.PathLike]
 DEFAULT_TEMPO = 120
@@ -33,6 +34,8 @@ class Matchmaker:
         Path to the score file
     performance_file : Union[str, bytes, os.PathLike, None]
         Path to the performance file. If None, live input is used.
+    wait : bool (default: True)
+        only for offline option. For debugging or fast testing, set to False
     input_type : str
         Type of input to use: audio or midi
     feature_type : str
@@ -49,7 +52,8 @@ class Matchmaker:
         self,
         score_file: PathLike,
         performance_file: Union[PathLike, None] = None,
-        input_type: str = "audio",  # audio or midi
+        wait: bool = True,  # only for offline option. For debugging or fast testing, set to False
+        input_type: str = "audio",  # 'audio' or 'midi'
         feature_type: str = "chroma",
         method: str = None,
         device_name_or_index: Union[str, int] = None,
@@ -71,7 +75,10 @@ class Matchmaker:
         if score_file is None:
             raise ValueError("Score file is required")
 
-        self.score_part = partitura.load_score_as_part(score_file)
+        try:
+            self.score_part = partitura.load_score_as_part(score_file)
+        except Exception as e:
+            raise ValueError(f"Invalid score file: {e}")
 
         # setup feature processor
         if feature_type == "chroma":
@@ -89,33 +96,51 @@ class Matchmaker:
         else:
             raise ValueError("Invalid feature type")
 
+        # check performance file
+        if self.performance_file is not None:
+            # check performance file type matches input type
+            if input_type == "audio" and not is_audio_file(self.performance_file):
+                raise ValueError(
+                    f"Invalid performance file. Expected audio file, but got {self.performance_file}"
+                )
+            elif input_type == "midi" and not is_midi_file(self.performance_file):
+                raise ValueError(
+                    f"Invalid performance file. Expected MIDI file, but got {self.performance_file}"
+                )
+
         # setup stream device
         if input_type == "audio":
             self.stream = AudioStream(
                 processor=self.processor,
                 device_name_or_index=self.device_name_or_index,
                 file_path=self.performance_file,
+                wait=wait,
             )
         elif input_type == "midi":
-            self.strema = MidiStream(
+            self.stream = MidiStream(
                 processor=self.processor,
-                device_name_or_index=self.device_name_or_index,
+                port=self.device_name_or_index,
                 file_path=self.performance_file,
             )
         else:
             raise ValueError("Invalid input type")
 
+        # preprocess score
+        self.reference_features = self.preprocess_score()
+
         # setup score follower
         if method == "dixon" or (method is None and input_type == "audio"):
-            self.score_follower = OnlineTimeWarpingDixon
+            self.score_follower = OnlineTimeWarpingDixon(
+                reference_features=self.reference_features, queue=self.stream.queue
+            )
         elif method == "arzt":
-            self.score_follower = OnlineTimeWarpingArzt
+            self.score_follower = OnlineTimeWarpingArzt(
+                reference_features=self.reference_features, queue=self.stream.queue
+            )
         elif method == "hmm" or (method is None and input_type == "midi"):
             self.score_follower = PitchIOIHMM
         else:
             raise ValueError("Invalid method")
-
-        self.reference_features = self.preprocess_score()
 
     def preprocess_score(self):
         beat_type = self.score_part.time_sigs[0].beat_type
@@ -148,7 +173,7 @@ class Matchmaker:
         )
         return beat_position
 
-    def run(self):
+    def run(self, verbose: bool = True):
         """
         Run the score following process
 
@@ -157,9 +182,8 @@ class Matchmaker:
         float
             Beat position in the score (interpolated)
         """
-        with self.stream as stream:
-            for current_frame in self.score_follower(
-                reference_features=self.reference_features, queue=stream.queue
-            ).run():
+        with self.stream:
+            for current_frame in self.score_follower.run(verbose=verbose):
                 position_in_beat = self.convert_frame_to_beat(current_frame)
                 yield position_in_beat
+            return self.score_follower.warping_path
