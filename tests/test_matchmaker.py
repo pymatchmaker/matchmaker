@@ -108,6 +108,19 @@ class TestMatchmaker(unittest.TestCase):
                 method="invalid",
             )
 
+    def test_matchmaker_midi_init(self):
+        # Given: a Matchmaker instance with audio input
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_midi,
+            wait=False,
+            input_type="midi",
+        )
+
+        # Then: the Matchmaker instance should be correctly initialized
+        self.assertIsInstance(mm.stream, MidiStream)
+        self.assertIsInstance(mm.score_follower, PitchIOIHMM)
+
 
 if __name__ == "__main__":
     unittest.main()

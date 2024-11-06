@@ -15,6 +15,7 @@ from matchmaker.features.audio import (
     MelSpectrogramProcessor,
     MFCCProcessor,
 )
+from matchmaker.features.midi import PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
@@ -93,6 +94,10 @@ class Matchmaker:
             self.processor = MelSpectrogramProcessor(
                 sample_rate=sample_rate,
             )
+        elif feature_type == "pitchclass":
+            self.processor = PitchIOIProcessor()
+        elif feature_type == "pianoroll":
+            self.processor = PitchIOIProcessor(piano_range=True)
         else:
             raise ValueError("Invalid feature type")
 
@@ -138,7 +143,10 @@ class Matchmaker:
                 reference_features=self.reference_features, queue=self.stream.queue
             )
         elif method == "hmm" or (method is None and input_type == "midi"):
-            self.score_follower = PitchIOIHMM
+            self.score_follower = PitchIOIHMM(
+                reference_features=self.reference_features,
+                queue=self.stream.queue,
+            )
         else:
             raise ValueError("Invalid method")
 

@@ -697,8 +697,9 @@ class PitchIOIHMM(BaseHMM):
 
     def __init__(
         self,
-        score_onsets: np.ndarray,
-        tempo_model: TempoModel,
+        reference_features: np.ndarray,
+        queue: RECVQueue,
+        tempo_model: TempoModel = None,
         transition_model: Optional[TransitionModel] = None,
         observation_model: Optional[PitchIOIObservationModel] = None,
         transition_matrix: Optional[NDArrayFloat] = None,
@@ -790,12 +791,13 @@ class PitchIOIHMM(BaseHMM):
             )
 
         self.perf_onset = None
+        self.queue = queue
 
         BaseHMM.__init__(
             self,
             observation_model=observation_model,
             transition_model=transition_model,
-            state_space=score_onsets,
+            state_space=reference_features,
             tempo_model=tempo_model,
             has_insertions=has_insertions,
         )
@@ -854,3 +856,23 @@ class PitchIOIHMM(BaseHMM):
     @current_state.setter
     def current_state(self, state):
         self.observation_model.current_state = state
+
+    def run(self, verbose: bool = True):
+        prev_state = self.current_state
+        same_state_counter = 0
+        while self.is_still_following():
+            target_feature, f_time = self.queue.get()
+
+            current_state = self(target_feature)
+
+            if current_state == prev_state:
+                if same_state_counter < self.patience:
+                    same_state_counter += 1
+                else:
+                    break
+            else:
+                same_state_counter = 0
+
+            yield current_state
+
+        return self.warping_path
