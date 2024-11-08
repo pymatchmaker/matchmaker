@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import progressbar
 import scipy.spatial.distance as sp_dist
 from hiddenmarkov import (
     ConstantTransitionModel,
@@ -908,10 +909,17 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
     def run(self, verbose: bool = True):
         prev_state = self.current_state
         same_state_counter = 0
-        while self.is_still_following():
-            target_feature, f_time = self.queue.get()
 
-            current_state = self(target_feature)
+        if verbose:
+            pbar = progressbar.ProgressBar(
+                max_value=self.n_states, redirect_stdout=True
+            )
+
+        while self.is_still_following():
+            queue_input = self.queue.get()
+            print(f"queue input: {queue_input}")
+
+            current_state = self(queue_input)
 
             if current_state == prev_state:
                 if same_state_counter < self.patience:
@@ -921,6 +929,10 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             else:
                 same_state_counter = 0
 
+            if verbose:
+                pbar.update(int(current_state))
             yield current_state
 
+        if verbose:
+            pbar.finish()
         return self.warping_path

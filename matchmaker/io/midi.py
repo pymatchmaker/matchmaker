@@ -140,10 +140,11 @@ class MidiStream(Stream):
         # the data is the Buffer instance
         output = self.processor((data.frame[:], data.time))
         # output = self.pipeline((frame.frame[:], frame.time))
-        if self.return_midi_messages:
-            self.queue.put((data.frame, output))
-        else:
-            self.queue.put(output)
+        if output is not None:
+            if self.return_midi_messages:
+                self.queue.put((data.frame, output))
+            else:
+                self.queue.put(output)
 
     def run_online_single(self):
         self.start_listening()

@@ -55,7 +55,7 @@ class Matchmaker:
         performance_file: Union[PathLike, None] = None,
         wait: bool = True,  # only for offline option. For debugging or fast testing, set to False
         input_type: str = "audio",  # 'audio' or 'midi'
-        feature_type: str = "chroma",
+        feature_type: str = None,
         method: str = None,
         device_name_or_index: Union[str, int] = None,
         sample_rate: int = SAMPLE_RATE,
@@ -83,6 +83,9 @@ class Matchmaker:
             raise ValueError(f"Invalid score file: {e}")
 
         # setup feature processor
+        if feature_type is None:
+            feature_type = "chroma" if input_type == "audio" else "pitchclass"
+
         if feature_type == "chroma":
             self.processor = ChromagramProcessor(
                 sample_rate=sample_rate,
