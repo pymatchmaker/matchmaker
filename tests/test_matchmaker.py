@@ -137,25 +137,6 @@ class TestMatchmaker(unittest.TestCase):
             print(f"Position in beat: {position_in_beat}")
             self.assertIsInstance(position_in_beat, float)
 
-    # def test_matchmaker_midi_run_with_result(self):
-    #     # Given: a Matchmaker instance with midi input
-    #     mm = Matchmaker(
-    #         score_file=self.score_file,
-    #         performance_file=self.performance_file_midi,
-    #         input_type="midi",
-    #     )
-
-    #     # When: running the alignment process (get the returned result)
-    #     alignment_results = list(mm.run(verbose=True))
-
-    #     # Then: the yielded result should be a float values
-    #     for position_in_beat in alignment_results:
-    #         print(position_in_beat)
-    #         self.assertIsInstance(position_in_beat, float)
-
-    #     # And: the alignment result should be a list
-    #     self.assertIsInstance(alignment_results, list)
-
 
 if __name__ == "__main__":
     unittest.main()

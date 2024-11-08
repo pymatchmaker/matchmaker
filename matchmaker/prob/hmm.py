@@ -87,7 +87,7 @@ class BaseHMM(HiddenMarkovModel):
         self._warping_path = []
         self.queue = queue
         self.patience = patience
-        self.current_state = None
+        self.current_state = 0
 
     @property
     def warping_path(self) -> NDArrayInt:
@@ -796,7 +796,6 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             )
 
         self.perf_onset = None
-        self.queue = queue
 
         BaseHMM.__init__(
             self,
@@ -805,6 +804,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             state_space=reference_features,
             tempo_model=tempo_model,
             has_insertions=has_insertions,
+            queue=queue,
         )
 
     def __call__(self, input, *args, **kwargs):
