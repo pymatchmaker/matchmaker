@@ -19,7 +19,7 @@ N_MELS = 128
 N_MFCC = 13
 DCT_TYPE = 2
 NORM = np.inf
-FEATURES = ["chroma"]
+FEATURES = "chroma"
 
 # Type hint for Input Audio frame.
 InputAudioSeries = np.ndarray
@@ -227,11 +227,14 @@ class LogSpectralEnergyProcessor(Processor):
 
 
 def compute_features_from_audio(
-    audio_path: str,
-    features=FEATURES,
+    ref_info: Union[np.ndarray, str],
+    processor_name=FEATURES,
     sample_rate=SAMPLE_RATE,
     hop_length=HOP_LENGTH,
-) -> Tuple[List[Callable], np.ndarray]:
+) -> np.ndarray:
+    """
+    Compute features from an audio file.
+    """
     processor_mapping = {
         "chroma": ChromagramProcessor,
         "mel": MelSpectrogramProcessor,
@@ -239,21 +242,18 @@ def compute_features_from_audio(
         "deep_chroma": DeepChromaProcessor,
         "log_spectral": LogSpectralEnergyProcessor,
     }
-    feature_processors = [
-        processor_mapping[name](sample_rate=sample_rate, hop_length=hop_length)
-        for name in features
-    ]
-    score_y, sr = librosa.load(audio_path, sr=sample_rate)
-    score_y = np.pad(score_y, (hop_length, 0), "constant")
-    stacked_features = None
-    for feature_processor in feature_processors:
-        if hasattr(feature_processor, "process_offline"):
-            feature_processor.process_offline = True
-        feature = feature_processor(score_y)
-        stacked_features = (
-            feature
-            if stacked_features is None
-            else np.concatenate((stacked_features, feature), axis=1)
-        )
 
-    return feature_processors, stacked_features
+    feature_processor = processor_mapping[processor_name](
+        sample_rate=sample_rate,
+        hop_length=hop_length,
+    )
+
+    if isinstance(ref_info, str):
+        score_y, _ = librosa.load(ref_info, sr=sample_rate)
+    elif isinstance(ref_info, np.ndarray):
+        score_y = ref_info
+
+    score_y = np.pad(score_y, (hop_length, 0), "constant")
+    features = feature_processor(score_y)
+
+    return features

@@ -3,6 +3,7 @@
 """
 Tests for the features/audio.py module
 """
+import os
 import tempfile
 import unittest
 import librosa
@@ -22,6 +23,8 @@ HOP_LENGTH = SAMPLE_RATE // 30
 N_CHROMA = 12
 N_MFCC = 13
 N_MELS = 128
+
+CURRENT_PATH = os.path.abspath(os.path.dirname(__file__))
 
 
 def create_sample_audio_waveform(freq: float = 440.0) -> np.ndarray:
@@ -166,6 +169,28 @@ class TestAudioProcessors(unittest.TestCase):
         self.assertIsInstance(log_spectral_output, np.ndarray)
         self.assertGreater(log_spectral_output.shape[1], 0)
         self.assertEqual(log_spectral_output.shape[0], 30 - 1)
+
+
+class TestComputeFeaturesFromAudio(unittest.TestCase):
+
+    def test_compute_features_from_audio_input_str(self):
+
+        features = compute_features_from_audio(
+            ref_info=os.path.join(CURRENT_PATH, "resources", "Bach-fugue_bwv_858.mp3")
+        )
+
+        self.assertIsInstance(features, np.ndarray)
+
+    def test_compute_features_from_np_array(self):
+
+        sample_audio = create_sample_audio_waveform(440)
+
+        features = compute_features_from_audio(
+            ref_info=sample_audio,
+            sample_rate=SAMPLE_RATE,
+        )
+
+        self.assertIsInstance(features, np.ndarray)
 
 
 if __name__ == "__main__":
