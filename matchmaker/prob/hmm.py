@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import progressbar
 import scipy.spatial.distance as sp_dist
 from hiddenmarkov import (
     ConstantTransitionModel,
@@ -26,14 +27,14 @@ from matchmaker.utils.misc import (
     RECVQueue,
     get_window_indices,
 )
-from matchmaker.utils.tempo_models import TempoModel
+from matchmaker.utils.tempo_models import KalmanTempoModel, TempoModel
 
 # Alias for typing arrays
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]
 
 
-class BaseHMM(OnlineAlignment, HiddenMarkovModel):
+class BaseHMM(HiddenMarkovModel):
     """
     Base class for Hidden Markov Model alignment methods.
 
@@ -80,18 +81,13 @@ class BaseHMM(OnlineAlignment, HiddenMarkovModel):
             transition_model=transition_model,
             state_space=state_space,
         )
-        OnlineAlignment.__init__(
-            self,
-            reference_features=observation_model,
-        )
-
         self.tempo_model = tempo_model
         self.has_insertions = has_insertions
         self.input_index = 0
         self._warping_path = []
         self.queue = queue
         self.patience = patience
-        self.current_state = None
+        self.current_state = 0
 
     @property
     def warping_path(self) -> NDArrayInt:
@@ -666,7 +662,7 @@ class BernoulliGaussianPitchIOIObservationModel(PitchIOIObservationModel):
         )
 
 
-class PitchIOIHMM(BaseHMM):
+class PitchIOIHMM(OnlineAlignment, BaseHMM):
     """
     Implements the behavior of a HiddenMarkovModel, specifically designed for
     the task of score following.
@@ -697,8 +693,9 @@ class PitchIOIHMM(BaseHMM):
 
     def __init__(
         self,
-        score_onsets: np.ndarray,
-        tempo_model: TempoModel,
+        reference_features: np.ndarray,  # snote_array
+        queue: RECVQueue,
+        tempo_model: TempoModel = None,
         transition_model: Optional[TransitionModel] = None,
         observation_model: Optional[PitchIOIObservationModel] = None,
         transition_matrix: Optional[NDArrayFloat] = None,
@@ -739,6 +736,15 @@ class PitchIOIHMM(BaseHMM):
             be uniform.
             Default = None.
         """
+        OnlineAlignment.__init__(
+            self,
+            reference_features=reference_features,
+        )
+
+        observation_model, transition_matrix, initial_probabilities, tempo_model = (
+            self._build_hmm_modules()
+        )
+
         if transition_model is not None and transition_matrix is not None:
             warnings.warn(
                 "Both `transition_model` and `transition_matrix` were "
@@ -795,9 +801,10 @@ class PitchIOIHMM(BaseHMM):
             self,
             observation_model=observation_model,
             transition_model=transition_model,
-            state_space=score_onsets,
+            state_space=reference_features,
             tempo_model=tempo_model,
             has_insertions=has_insertions,
+            queue=queue,
         )
 
     def __call__(self, input, *args, **kwargs):
@@ -854,3 +861,78 @@ class PitchIOIHMM(BaseHMM):
     @current_state.setter
     def current_state(self, state):
         self.observation_model.current_state = state
+
+    def _build_hmm_modules(self):
+        snote_array = self.reference_features
+        unique_sonsets = np.unique(snote_array["onset_beat"])
+        unique_sonset_idxs = [
+            np.where(snote_array["onset_beat"] == ui)[0] for ui in unique_sonsets
+        ]
+        chord_pitches = [snote_array["pitch"][uix] for uix in unique_sonset_idxs]
+        pitch_profiles = compute_discrete_pitch_profiles(
+            chord_pitches=chord_pitches,
+            piano_range=True,
+            inserted_states=True,
+        )
+        ioi_matrix = compute_ioi_matrix(
+            unique_onsets=unique_sonsets,
+            inserted_states=True,
+        )
+
+        # observation model
+        observation_model = BernoulliGaussianPitchIOIObservationModel(
+            pitch_profiles=pitch_profiles,
+            ioi_matrix=ioi_matrix,
+            ioi_precision=1,
+        )
+
+        # tempo model
+        tempo_model = KalmanTempoModel(
+            init_score_onset=unique_sonsets.min(),
+            init_beat_period=60 / 100,
+        )
+        transition_matrix = gumbel_transition_matrix(
+            n_states=len(ioi_matrix[0]),
+            inserted_states=True,
+        )
+        initial_probabilities = gumbel_init_dist(
+            n_states=len(ioi_matrix[0]),
+        )
+
+        return (
+            observation_model,
+            transition_matrix,
+            initial_probabilities,
+            tempo_model,
+        )
+
+    def run(self, verbose: bool = True):
+        prev_state = self.current_state
+        same_state_counter = 0
+
+        if verbose:
+            pbar = progressbar.ProgressBar(
+                max_value=self.n_states, redirect_stdout=True
+            )
+
+        while self.is_still_following():
+            queue_input = self.queue.get()
+            print(f"queue input: {queue_input}")
+
+            current_state = self(queue_input)
+
+            if current_state == prev_state:
+                if same_state_counter < self.patience:
+                    same_state_counter += 1
+                else:
+                    break
+            else:
+                same_state_counter = 0
+
+            if verbose:
+                pbar.update(int(current_state))
+            yield current_state
+
+        if verbose:
+            pbar.finish()
+        return self.warping_path

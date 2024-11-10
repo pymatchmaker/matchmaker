@@ -235,7 +235,7 @@ class TestPitchIOIHMM(unittest.TestCase):
         hmm = PitchIOIHMM(
             observation_model=observation_model,
             transition_matrix=transition_matrix,
-            score_onsets=unique_sonsets,
+            reference_features=unique_sonsets,
             initial_probabilities=initial_probabilities,
             has_insertions=False,
             tempo_model=tempo_model,
@@ -301,7 +301,7 @@ class TestPitchIOIHMM(unittest.TestCase):
         hmm = PitchIOIHMM(
             observation_model=observation_model,
             transition_matrix=transition_matrix,
-            score_onsets=state_space,
+            reference_features=state_space,
             initial_probabilities=initial_probabilities,
             has_insertions=True,
             tempo_model=tempo_model,

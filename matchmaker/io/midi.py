@@ -11,16 +11,16 @@ from typing import Callable, List, Optional, Tuple, Type, Union
 import mido
 import partitura as pt
 from mido.ports import BaseInput as MidiInputPort
-from partitura.performance import Performance, PerformanceLike, PerformedPart
 
+from matchmaker.features.midi import PitchIOIProcessor
 from matchmaker.io.mediator import CeusMediator
 from matchmaker.utils.misc import RECVQueue, get_available_midi_port
-from matchmaker.utils.processor import DummyProcessor, Processor
+from matchmaker.utils.processor import Processor
 from matchmaker.utils.stream import Stream
 from matchmaker.utils.symbolic import (
+    Buffer,
     framed_midi_messages_from_performance,
     midi_messages_from_performance,
-    Buffer,
 )
 
 # Default polling period (in seconds)
@@ -80,22 +80,15 @@ class MidiStream(Stream):
         mediator: Optional[CeusMediator] = None,
     ):
         if processor is None:
-            processor = DummyProcessor()
+            processor = PitchIOIProcessor()
 
         Stream.__init__(
             self,
             processor=processor,
             mock=file_path is not None,
         )
-
-        if file_path is not None:
-            # Do not open a MIDI port for running
-            # stream offline
-            port = None
-        else:
-            port = get_available_midi_port(port)
         self.file_path = file_path
-        self.midi_in = port
+        self.midi_in = get_available_midi_port(port) if file_path is None else None
         self.init_time = init_time
         self.listen = False
         self.queue = queue or RECVQueue()
@@ -147,10 +140,11 @@ class MidiStream(Stream):
         # the data is the Buffer instance
         output = self.processor((data.frame[:], data.time))
         # output = self.pipeline((frame.frame[:], frame.time))
-        if self.return_midi_messages:
-            self.queue.put((data.frame, output))
-        else:
-            self.queue.put(output)
+        if output is not None:
+            if self.return_midi_messages:
+                self.queue.put((data.frame, output))
+            else:
+                self.queue.put(output)
 
     def run_online_single(self):
         self.start_listening()
