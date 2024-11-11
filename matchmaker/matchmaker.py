@@ -15,7 +15,7 @@ from matchmaker.features.audio import (
     MelSpectrogramProcessor,
     MFCCProcessor,
 )
-from matchmaker.features.midi import PitchIOIProcessor
+from matchmaker.features.midi import PitchIOIProcessor, PianoRollProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
@@ -25,7 +25,7 @@ PathLike = Union[str, bytes, os.PathLike]
 DEFAULT_TEMPO = 120
 
 
-class Matchmaker:
+class Matchmaker(object):
     """
     A class to perform online score following with I/O support for audio and MIDI
 
@@ -101,7 +101,7 @@ class Matchmaker:
         elif feature_type == "pitchclass":
             self.processor = PitchIOIProcessor()
         elif feature_type == "pianoroll":
-            self.processor = PitchIOIProcessor(piano_range=True)
+            self.processor = PianoRollProcessor(piano_range=True)
         else:
             raise ValueError("Invalid feature type")
 

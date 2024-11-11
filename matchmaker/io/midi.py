@@ -73,7 +73,7 @@ class MidiStream(Stream):
         processor: Optional[Union[Callable, Processor]] = None,
         file_path: Optional[str] = None,
         polling_period: Optional[float] = POLLING_PERIOD,
-        port: Optional[MidiInputPort] = None,
+        port: Optional[Union[MidiInputPort, str]] = None,
         queue: RECVQueue = None,
         init_time: Optional[float] = None,
         return_midi_messages: bool = False,
@@ -88,7 +88,13 @@ class MidiStream(Stream):
             mock=file_path is not None,
         )
         self.file_path = file_path
-        self.midi_in = get_available_midi_port(port) if file_path is None else None
+
+        if isinstance(port, str) and file_path is None:
+            port_name = get_available_midi_port(port) if file_path is None else None
+            self.midi_in = mido.open_input(port_name)
+        else:
+            self.midi_in = port if file_path is None else None 
+
         self.init_time = init_time
         self.listen = False
         self.queue = queue or RECVQueue()
@@ -139,12 +145,12 @@ class MidiStream(Stream):
     ) -> None:
         # the data is the Buffer instance
         output = self.processor((data.frame[:], data.time))
-        # output = self.pipeline((frame.frame[:], frame.time))
-        if output is not None:
-            if self.return_midi_messages:
-                self.queue.put((data.frame, output))
-            else:
-                self.queue.put(output)
+
+        # if output is not None:
+        if self.return_midi_messages:
+            self.queue.put((data.frame, output))
+        else:
+            self.queue.put(output)
 
     def run_online_single(self):
         self.start_listening()
@@ -276,6 +282,9 @@ class MidiStream(Stream):
         self.listen = False
         # reset init time
         self.init_time = None
+
+        if self.midi_in is not None:
+            self.midi_in.close()
 
     def __enter__(self) -> None:
         self.start()

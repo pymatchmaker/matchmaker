@@ -10,6 +10,7 @@ from typing import Any, Iterable, List, Union
 
 import mido
 import numpy as np
+from mido.ports import BaseInput as MidiInputPort
 
 
 class MatchmakerInvalidParameterTypeError(Exception):
@@ -145,7 +146,7 @@ def is_midi_file(file_path) -> bool:
     return ext.lower() in midi_extensions
 
 
-def get_available_midi_port(port=None):
+def get_available_midi_port(port: str=None) -> MidiInputPort:
     """
     Get the available MIDI port. If a port is specified, check if it is available.
 
@@ -156,8 +157,8 @@ def get_available_midi_port(port=None):
 
     Returns
     -------
-    str
-        Name of the available MIDI port.
+    MidiInputPort
+        Available MIDI input port
 
     Raises
     ------
