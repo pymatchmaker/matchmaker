@@ -14,7 +14,7 @@ from mido.ports import BaseInput as MidiInputPort
 
 from matchmaker.features.midi import PitchIOIProcessor
 from matchmaker.io.mediator import CeusMediator
-from matchmaker.utils.misc import RECVQueue,
+from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import Processor
 from matchmaker.utils.stream import Stream
 from matchmaker.utils.symbolic import (
