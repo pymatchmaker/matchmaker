@@ -58,7 +58,7 @@ def setup_midi_player(use_example: bool = False):
     # Open virtual MIDI port
     # the input uses the "created" virtual
     # port
-    panic_button()
+    # panic_button()
     port = mido.open_input("port1", virtual=True)
     outport = mido.open_output("port1")
     queue = RECVQueue()
@@ -141,6 +141,7 @@ class TestMidiStream(unittest.TestCase):
         mediator: Optional[CeusMediator] = None,
         queue: Optional[RECVQueue] = None,
         return_midi_messages: bool = False,
+        virtual_port: bool=False,
     ) -> None:
         """Setup a MidiStream for testing"""
 
@@ -159,6 +160,7 @@ class TestMidiStream(unittest.TestCase):
             mediator=mediator,
             queue=queue,
             return_midi_messages=return_midi_messages,
+            virtual_port=virtual_port,
         )
 
     def test_init(self):
@@ -199,11 +201,31 @@ class TestMidiStream(unittest.TestCase):
                             if port is not None:
                                 port.close()
 
-    def test_init_exceptions(self):
+    def test_init_port_selection(self):
 
+        # Raise an error if port is incorrect
         with self.assertRaises(ValueError):
-
             self.setup(port="wrong_port")
+
+        # test virtual
+        self.setup(port="virtual", virtual_port=True,)
+
+        self.assertIsInstance(self.stream, MidiStream)
+
+        self.stream.midi_in.close()
+
+        port = mido.open_input("virtual", virtual=True)
+        self.setup(port=port)
+        self.assertEqual(port, self.stream.midi_in)
+
+        port.close()
+
+        self.setup(file_path="test.mid")
+        self.assertTrue(self.midi_in is None)
+
+
+
+        
 
     # @patch("sys.stdout", new_callable=StringIO)
     def test_run_online(self, mock_stdout=None):

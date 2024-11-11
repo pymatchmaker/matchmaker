@@ -79,6 +79,7 @@ class MidiStream(Stream):
         init_time: Optional[float] = None,
         return_midi_messages: bool = False,
         mediator: Optional[CeusMediator] = None,
+        virtual_port: bool = False,
     ):
         if processor is None:
             processor = PitchIOIProcessor()
@@ -90,11 +91,13 @@ class MidiStream(Stream):
         )
         self.file_path = file_path
 
-        if isinstance(port, str) and file_path is None:
-            port_name = get_available_midi_port(port) if file_path is None else None
-            self.midi_in = mido.open_input(port_name)
+        if isinstance(port, str) or port is None and file_path is None:
+            port_name = get_available_midi_port(port, is_virtual=virtual_port)
+            self.midi_in = mido.open_input(port_name, virtual=virtual_port)
+        elif isinstance(port, MidiInputPort) and file_path is None:
+            self.midi_in = port
         else:
-            self.midi_in = port if file_path is None else None 
+            self.midi_in = None
 
         self.init_time = init_time
         self.listen = False

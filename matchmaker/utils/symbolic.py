@@ -408,7 +408,7 @@ def get_midi_devices() -> List[MidiDeviceInfo]:
     return midi_devices
 
 
-def get_available_midi_port(port: str = None) -> str:
+def get_available_midi_port(port: str = None, is_virtual: bool = False) -> str:
     """
     Get the available MIDI port. If a port is specified, check if it is available.
 
@@ -429,13 +429,18 @@ def get_available_midi_port(port: str = None) -> str:
     ValueError
         If the specified MIDI port is not available.
     """
+
+    if port is None and is_virtual:
+        raise ValueError(
+            "Cannot open unspecified virtual port!"
+        )
     input_names = mido.get_input_names()
-    if not input_names:
+    if not input_names and not is_virtual:
         raise RuntimeError("No MIDI input ports available")
 
-    if port is None:
+    if port is None and not is_virtual:
         return input_names[0]
-    elif port in input_names:
+    elif port in input_names or is_virtual:
         return port
     else:
         raise ValueError(
