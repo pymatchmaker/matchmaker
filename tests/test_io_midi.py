@@ -25,7 +25,7 @@ from matchmaker.io.midi import (
 )
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import DummyProcessor
-from matchmaker.utils.symbolic import midi_messages_from_midi
+from matchmaker.utils.symbolic import midi_messages_from_midi, panic_button
 
 RNG = np.random.RandomState(1984)
 
@@ -58,6 +58,7 @@ def setup_midi_player(use_example: bool = False):
     # Open virtual MIDI port
     # the input uses the "created" virtual
     # port
+    panic_button()
     port = mido.open_input("port1", virtual=True)
     outport = mido.open_output("port1")
     queue = RECVQueue()
@@ -88,8 +89,8 @@ def setup_midi_player(use_example: bool = False):
         # normalize the random performance to last 1 second
         # (makes the tests a bit faster ;)
         max_duration = (note_array["onset_sec"] + note_array["duration_sec"]).max()
-        note_array["onset_sec"] /= max_duration
-        note_array["duration_sec"] /= max_duration
+        note_array["onset_sec"] /= (max_duration * 2)
+        note_array["duration_sec"] /= (max_duration * 2)
 
         # Generate temporary midi file
         tmp_file = NamedTemporaryFile(delete=True)
@@ -198,7 +199,13 @@ class TestMidiStream(unittest.TestCase):
                             if port is not None:
                                 port.close()
 
-    @patch("sys.stdout", new_callable=StringIO)
+    def test_init_exceptions(self):
+
+        with self.assertRaises(ValueError):
+
+            self.setup(port="wrong_port")
+
+    # @patch("sys.stdout", new_callable=StringIO)
     def test_run_online(self, mock_stdout=None):
         """
         Test running an instance of a MidiStream class
@@ -255,7 +262,7 @@ class TestMidiStream(unittest.TestCase):
                         midi_player.join()
                         port.close()
 
-    @patch("sys.stdout", new_callable=StringIO)
+    # @patch("sys.stdout", new_callable=StringIO)
     def test_run_online_context_manager(self, mock_stdout=None):
         """
         Test running an instance of a MidiStream class
@@ -302,7 +309,7 @@ class TestMidiStream(unittest.TestCase):
             midi_player.join()
             port.close()
 
-    @patch("sys.stdout", new_callable=StringIO)
+    # @patch("sys.stdout", new_callable=StringIO)
     def test_run_offline_single(self, mock_stdout=None):
         """
         Test run_offline_single method.
@@ -328,7 +335,7 @@ class TestMidiStream(unittest.TestCase):
             outputs = list(self.stream.queue.queue)
             self.assertTrue(len(outputs) == len(valid_messages))
 
-    @patch("sys.stdout", new_callable=StringIO)
+    # @patch("sys.stdout", new_callable=StringIO)
     def test_run_offline_windowed(self, mock_stdout=None):
         """
         Test run_offline_windowed method.
@@ -359,7 +366,7 @@ class TestMidiStream(unittest.TestCase):
 
             self.assertTrue(len(outputs) == expected_frames)
 
-    @patch("sys.stdout", new_callable=StringIO)
+    # @patch("sys.stdout", new_callable=StringIO)
     def test_clear_queue(self, mock_stdout=None):
         """
         Test clear_queue method
@@ -379,7 +386,7 @@ class TestMidiStream(unittest.TestCase):
         outputs = list(self.stream.queue.queue)
         self.assertTrue(len(outputs) == 0)
 
-    @patch("sys.stdout", new_callable=StringIO)
+    # @patch("sys.stdout", new_callable=StringIO)
     def test_online_windowed_input(self, mock_stdout=None):
         port, queue, midi_player, note_array, _ = setup_midi_player()
 

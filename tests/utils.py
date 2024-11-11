@@ -6,6 +6,7 @@ Utilities for tests
 import numbers
 import tempfile
 import threading
+import wave
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 import mido
@@ -17,6 +18,7 @@ from partitura.performance import PerformanceLike
 from matchmaker.io.audio import HOP_LENGTH, SAMPLE_RATE, AudioStream
 from matchmaker.io.midi import POLLING_PERIOD, MidiStream
 from matchmaker.utils.misc import RECVQueue
+
 
 # Random number generator
 RNG = np.random.RandomState(1984)
@@ -342,3 +344,32 @@ def process_audio_offline(
         temp_file.close()
 
     return outputs
+
+
+def generate_sine_wave(
+    frequency=440,
+    duration=0.5,
+    sample_rate=44100,
+    amplitude=0.5,
+):
+    # Generate the time axis
+    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+
+    # Generate the sine wave signal
+    sine_wave = amplitude * np.sin(2 * np.pi * frequency * t)
+
+    # Convert the signal to 16-bit PCM format
+    pcm_data = (sine_wave * 32767).astype(np.int16)
+
+    # Create a temporary file
+    temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    file_path = temp_file.name
+
+    # Save the sine wave to a WAV file
+    with wave.open(file_path, "wb") as wave_file:
+        wave_file.setnchannels(1)  # Mono
+        wave_file.setsampwidth(2)  # 16-bit PCM
+        wave_file.setframerate(sample_rate)
+        wave_file.writeframes(pcm_data.tobytes())
+
+    return file_path

@@ -441,3 +441,16 @@ def get_available_midi_port(port: str = None) -> str:
         raise ValueError(
             f"Specified MIDI port '{port}' is not available. Available ports: {input_names}"
         )
+
+
+def panic_button() -> None:
+    """
+    Reset all output ports
+    """
+    output_ports = mido.get_output_names()
+
+    for pn in output_ports:
+        with mido.open_output(pn) as outport:
+            print(f"Resetting port {pn}")
+            outport.reset()
+        outport.close()

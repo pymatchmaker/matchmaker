@@ -114,7 +114,7 @@ class AudioStream(Stream):
         self.last_chunk = None
         self.f_time = 0
         self.prev_time = None
-        self.wait = True  # only for offline mode making it same time as online
+        self.wait = wait  # only for offline mode making it same time as online
 
         if self.mock:
             self.run = self.run_offline
@@ -178,7 +178,11 @@ class AudioStream(Stream):
         This property only makes sense in the context of live
         inputs.
         """
-        return self.audio_stream.get_time() - self.init_time if self.init_time else None
+        return (
+            self.audio_stream.get_time() - self.init_time
+            if (self.init_time is not None and self.audio_stream is not None)
+            else None
+        )
 
     def start_listening(self) -> None:
         self.listen = True
