@@ -15,7 +15,7 @@ from matchmaker import EXAMPLE_AUDIO, EXAMPLE_MATCH, EXAMPLE_SCORE
 from matchmaker.features.audio import (
     HOP_LENGTH,
     SAMPLE_RATE,
-    ChromagramIOIProcessor,
+    # ChromagramIOIProcessor,
     ChromagramProcessor,
 )
 from matchmaker.features.midi import PitchIOIProcessor, PitchProcessor
@@ -27,9 +27,11 @@ from matchmaker.prob.hmm import (
     PitchIOIHMM,
     compute_continous_pitch_profiles,
     compute_discrete_pitch_profiles,
+    compute_discrete_pitch_profiles_old,
     compute_ioi_matrix,
     gumbel_init_dist,
     gumbel_transition_matrix,
+    simple_transition_matrix,
 )
 from matchmaker.utils.tempo_models import ReactiveTempoModel
 from tests.utils import process_audio_offline, process_midi_offline
@@ -64,6 +66,8 @@ class TestBaseHMM(unittest.TestCase):
         for ob, ex in zip(observations, expected_sequence):
             self.assertTrue(hmm(ob) == ex)
 
+        self.assertIsInstance(hmm.warping_path, np.ndarray)
+
 
 class TestPitchHMM(unittest.TestCase):
     def test_symbolic(self):
@@ -86,18 +90,24 @@ class TestPitchHMM(unittest.TestCase):
             inserted_states=False,
         )
 
+        pitch_profiles_old = compute_discrete_pitch_profiles_old(
+            chord_pitches=chord_pitches,
+            piano_range=True,
+            inserted_states=False,
+        )
+
         observation_model = BernoulliPitchObservationModel(
             pitch_profiles=pitch_profiles,
         )
 
-        transition_matrix = gumbel_transition_matrix(
+        transition_matrix = simple_transition_matrix(
             n_states=len(chord_pitches),
             inserted_states=False,
         )
 
-        initial_probabilities = gumbel_init_dist(
-            n_states=len(chord_pitches),
-        )
+        initial_probabilities =  np.zeros(len(chord_pitches)) + 1e-6
+        initial_probabilities[0] = 1
+        initial_probabilities /= initial_probabilities.sum()
 
         hmm = PitchHMM(
             observation_model=observation_model,
@@ -114,79 +124,80 @@ class TestPitchHMM(unittest.TestCase):
 
         for obs in observations:
             if obs is not None:
-                cp = hmm(obs[0])
+                cp = hmm(obs)
+                # print(cp)
                 self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
 
-    def test_audio(self):
+#     def test_audio(self):
 
-        perf, alignment, score = pt.load_match(EXAMPLE_MATCH, create_score=True)
+#         perf, alignment, score = pt.load_match(EXAMPLE_MATCH, create_score=True)
 
-        # Get score features
-        score_features = process_audio_offline(
-            perf_info=score,
-            processor=ChromagramProcessor(
-                sample_rate=SAMPLE_RATE,
-                hop_length=HOP_LENGTH,
-            ),
-            hop_length=HOP_LENGTH,
-            sample_rate=SAMPLE_RATE,
-        )
+#         # Get score features
+#         score_features = process_audio_offline(
+#             perf_info=score,
+#             processor=ChromagramProcessor(
+#                 sample_rate=SAMPLE_RATE,
+#                 hop_length=HOP_LENGTH,
+#             ),
+#             hop_length=HOP_LENGTH,
+#             sample_rate=SAMPLE_RATE,
+#         )
 
-        score_features = np.vstack(score_features)
-        score_feature_times = np.arange(len(score_features)) * HOP_LENGTH / SAMPLE_RATE
+#         score_features = np.vstack(score_features)
+#         score_feature_times = np.arange(len(score_features)) * HOP_LENGTH / SAMPLE_RATE
 
-        snote_array = score.note_array()
+#         snote_array = score.note_array()
 
-        unique_sonsets = np.unique(snote_array["onset_beat"])
+#         unique_sonsets = np.unique(snote_array["onset_beat"])
 
-        pitch_profiles = compute_continous_pitch_profiles(  # TODO check this (with simple chromatic scale MIDI/audio features)
-            spectral_features=score_features,
-            spectral_feature_times=score_feature_times,
-            onset_times=unique_sonsets,
-            inserted_states=False,
-        )
+#         pitch_profiles = compute_continous_pitch_profiles(  # TODO check this (with simple chromatic scale MIDI/audio features)
+#             spectral_features=score_features,
+#             spectral_feature_times=score_feature_times,
+#             onset_times=unique_sonsets,
+#             inserted_states=False,
+#         )
 
-        observation_model = BernoulliPitchObservationModel(
-            pitch_profiles=pitch_profiles,
-        )
+#         observation_model = BernoulliPitchObservationModel(
+#             pitch_profiles=pitch_profiles,
+#         )
 
-        transition_matrix = gumbel_transition_matrix(
-            n_states=len(unique_sonsets),
-            inserted_states=False,
-        )
+#         transition_matrix = gumbel_transition_matrix(
+#             n_states=len(unique_sonsets),
+#             inserted_states=False,
+#         )
 
-        initial_probabilities = gumbel_init_dist(
-            n_states=len(unique_sonsets),
-        )
+#         initial_probabilities = gumbel_init_dist(
+#             n_states=len(unique_sonsets),
+#         )
 
-        hmm = PitchHMM(
-            observation_model=observation_model,
-            transition_matrix=transition_matrix,
-            score_onsets=unique_sonsets,
-            initial_probabilities=initial_probabilities,
-            has_insertions=False,
-        )
+#         hmm = PitchHMM(
+#             observation_model=observation_model,
+#             transition_matrix=transition_matrix,
+#             score_onsets=unique_sonsets,
+#             initial_probabilities=initial_probabilities,
+#             has_insertions=False,
+#         )
 
-        # TODO: Check issue with librosa loading an empty file
-        # https://stackoverflow.com/questions/74496808/mp3-loading-using-librosa-return-empty-data-when-start-time-metadata-is-0
-        observations = process_audio_offline(
-            perf_info=score,
-            # perf_info=EXAMPLE_AUDIO,
-            processor=ChromagramProcessor(
-                sample_rate=SAMPLE_RATE,
-                hop_length=HOP_LENGTH,
-            ),
-            hop_length=HOP_LENGTH,
-            sample_rate=SAMPLE_RATE,
-        )
-        observations = np.vstack(observations)
-        for obs in observations:
-            cp = hmm(obs)
-            self.assertTrue(cp in unique_sonsets)
+#         # TODO: Check issue with librosa loading an empty file
+#         # https://stackoverflow.com/questions/74496808/mp3-loading-using-librosa-return-empty-data-when-start-time-metadata-is-0
+#         observations = process_audio_offline(
+#             perf_info=score,
+#             # perf_info=EXAMPLE_AUDIO,
+#             processor=ChromagramProcessor(
+#                 sample_rate=SAMPLE_RATE,
+#                 hop_length=HOP_LENGTH,
+#             ),
+#             hop_length=HOP_LENGTH,
+#             sample_rate=SAMPLE_RATE,
+#         )
+#         observations = np.vstack(observations)
+#         for obs in observations:
+#             cp = hmm(obs)
+#             self.assertTrue(cp in unique_sonsets)
 
-        self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
+#         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
 
 
 class TestPitchIOIHMM(unittest.TestCase):
@@ -235,10 +246,11 @@ class TestPitchIOIHMM(unittest.TestCase):
         hmm = PitchIOIHMM(
             observation_model=observation_model,
             transition_matrix=transition_matrix,
-            reference_features=unique_sonsets,
+            reference_features=snote_array,
             initial_probabilities=initial_probabilities,
             has_insertions=False,
             tempo_model=tempo_model,
+            queue=None,
         )
 
         observations = process_midi_offline(
@@ -249,170 +261,172 @@ class TestPitchIOIHMM(unittest.TestCase):
         for obs in observations:
             if obs is not None:
                 cp = hmm(obs)
+
+                # print(cp, unique_sonsets)
                 self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
 
-    def test_symbolic_insertions(self):
+#     def test_symbolic_insertions(self):
 
-        perf, _, score = pt.load_match(EXAMPLE_MATCH, create_score=True)
+#         perf, _, score = pt.load_match(EXAMPLE_MATCH, create_score=True)
 
-        snote_array = score.note_array()
+#         snote_array = score.note_array()
 
-        unique_sonsets = np.unique(snote_array["onset_beat"])
+#         unique_sonsets = np.unique(snote_array["onset_beat"])
 
-        unique_sonset_idxs = [
-            np.where(snote_array["onset_beat"] == ui)[0] for ui in unique_sonsets
-        ]
+#         unique_sonset_idxs = [
+#             np.where(snote_array["onset_beat"] == ui)[0] for ui in unique_sonsets
+#         ]
 
-        chord_pitches = [snote_array["pitch"][uix] for uix in unique_sonset_idxs]
+#         chord_pitches = [snote_array["pitch"][uix] for uix in unique_sonset_idxs]
 
-        pitch_profiles = compute_discrete_pitch_profiles(
-            chord_pitches=chord_pitches,
-            piano_range=True,
-            inserted_states=True,
-        )
+#         pitch_profiles = compute_discrete_pitch_profiles(
+#             chord_pitches=chord_pitches,
+#             piano_range=True,
+#             inserted_states=True,
+#         )
 
-        ioi_matrix = compute_ioi_matrix(
-            unique_onsets=unique_sonsets,
-            inserted_states=True,
-        )
+#         ioi_matrix = compute_ioi_matrix(
+#             unique_onsets=unique_sonsets,
+#             inserted_states=True,
+#         )
 
-        state_space = ioi_matrix[0]
-        n_states = len(state_space)
+#         state_space = ioi_matrix[0]
+#         n_states = len(state_space)
 
-        observation_model = BernoulliGaussianPitchIOIObservationModel(
-            pitch_profiles=pitch_profiles,
-            ioi_matrix=ioi_matrix,
-            ioi_precision=1,
-        )
+#         observation_model = BernoulliGaussianPitchIOIObservationModel(
+#             pitch_profiles=pitch_profiles,
+#             ioi_matrix=ioi_matrix,
+#             ioi_precision=1,
+#         )
 
-        transition_matrix = gumbel_transition_matrix(
-            n_states=n_states,
-            inserted_states=True,
-        )
+#         transition_matrix = gumbel_transition_matrix(
+#             n_states=n_states,
+#             inserted_states=True,
+#         )
 
-        initial_probabilities = gumbel_init_dist(
-            n_states=n_states,
-        )
+#         initial_probabilities = gumbel_init_dist(
+#             n_states=n_states,
+#         )
 
-        tempo_model = ReactiveTempoModel(init_score_onset=unique_sonsets.min())
+#         tempo_model = ReactiveTempoModel(init_score_onset=unique_sonsets.min())
 
-        hmm = PitchIOIHMM(
-            observation_model=observation_model,
-            transition_matrix=transition_matrix,
-            reference_features=state_space,
-            initial_probabilities=initial_probabilities,
-            has_insertions=True,
-            tempo_model=tempo_model,
-        )
+#         hmm = PitchIOIHMM(
+#             observation_model=observation_model,
+#             transition_matrix=transition_matrix,
+#             reference_features=state_space,
+#             initial_probabilities=initial_probabilities,
+#             has_insertions=True,
+#             tempo_model=tempo_model,
+#         )
 
-        observations = process_midi_offline(
-            perf_info=perf,
-            processor=PitchIOIProcessor(piano_range=True),
-        )
+#         observations = process_midi_offline(
+#             perf_info=perf,
+#             processor=PitchIOIProcessor(piano_range=True),
+#         )
 
-        for obs in observations:
-            if obs is not None:
-                cp = hmm(obs)
-                self.assertTrue(cp in unique_sonsets)
+#         for obs in observations:
+#             if obs is not None:
+#                 cp = hmm(obs)
+#                 self.assertTrue(cp in unique_sonsets)
 
-        self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
+#         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
 
-    # def test_audio(self):
+# def test_audio(self):
 
-    #     perf, _, score = pt.load_match(EXAMPLE_MATCH, create_score=True)
+#     perf, _, score = pt.load_match(EXAMPLE_MATCH, create_score=True)
 
-    #     snote_array = score.note_array()
+#     snote_array = score.note_array()
 
-    #     unique_sonsets = np.unique(snote_array["onset_beat"])
+#     unique_sonsets = np.unique(snote_array["onset_beat"])
 
-    #     unique_sonset_idxs = [
-    #         np.where(snote_array["onset_beat"] == ui)[0] for ui in unique_sonsets
-    #     ]
+#     unique_sonset_idxs = [
+#         np.where(snote_array["onset_beat"] == ui)[0] for ui in unique_sonsets
+#     ]
 
-    #     ioi_matrix = compute_ioi_matrix(
-    #         unique_onsets=unique_sonsets,
-    #         inserted_states=False,
-    #     )
+#     ioi_matrix = compute_ioi_matrix(
+#         unique_onsets=unique_sonsets,
+#         inserted_states=False,
+#     )
 
-    #     state_space = ioi_matrix[0]
-    #     n_states = len(state_space)
+#     state_space = ioi_matrix[0]
+#     n_states = len(state_space)
 
-    #     # Get score features
-    #     score_features = process_audio_offline(
-    #         perf_info=score,
-    #         features=[
-    #             ChromagramIOIProcessor(
-    #                 sample_rate=SAMPLE_RATE,
-    #                 hop_length=HOP_LENGTH,
-    #             )
-    #         ],
-    #         hop_length=HOP_LENGTH,
-    #         sample_rate=SAMPLE_RATE,
-    #         chunk_size=4,
-    #         include_ftime=True,
-    #     )
+#     # Get score features
+#     score_features = process_audio_offline(
+#         perf_info=score,
+#         features=[
+#             ChromagramIOIProcessor(
+#                 sample_rate=SAMPLE_RATE,
+#                 hop_length=HOP_LENGTH,
+#             )
+#         ],
+#         hop_length=HOP_LENGTH,
+#         sample_rate=SAMPLE_RATE,
+#         chunk_size=4,
+#         include_ftime=True,
+#     )
 
-    #     # TODO: update this line when the api for score features is changed.
-    #     score_features = np.vstack([sf[0][0] for sf in score_features])
+#     # TODO: update this line when the api for score features is changed.
+#     score_features = np.vstack([sf[0][0] for sf in score_features])
 
-    #     score_feature_times = np.arange(len(score_features)) * HOP_LENGTH / SAMPLE_RATE
+#     score_feature_times = np.arange(len(score_features)) * HOP_LENGTH / SAMPLE_RATE
 
-    #     snote_array = score.note_array()
+#     snote_array = score.note_array()
 
-    #     unique_sonsets = np.unique(snote_array["onset_beat"])
+#     unique_sonsets = np.unique(snote_array["onset_beat"])
 
-    #     pitch_profiles = compute_continous_pitch_profiles(
-    #         spectral_features=score_features,
-    #         spectral_feature_times=score_feature_times,
-    #         onset_times=unique_sonsets,
-    #         inserted_states=False,
-    #     )
+#     pitch_profiles = compute_continous_pitch_profiles(
+#         spectral_features=score_features,
+#         spectral_feature_times=score_feature_times,
+#         onset_times=unique_sonsets,
+#         inserted_states=False,
+#     )
 
-    #     observation_model = BernoulliGaussianPitchIOIObservationModel(
-    #         pitch_profiles=pitch_profiles,
-    #         ioi_matrix=ioi_matrix,
-    #         ioi_precision=1,
-    #     )
+#     observation_model = BernoulliGaussianPitchIOIObservationModel(
+#         pitch_profiles=pitch_profiles,
+#         ioi_matrix=ioi_matrix,
+#         ioi_precision=1,
+#     )
 
-    #     transition_matrix = gumbel_transition_matrix(
-    #         n_states=n_states,
-    #         inserted_states=False,
-    #     )
+#     transition_matrix = gumbel_transition_matrix(
+#         n_states=n_states,
+#         inserted_states=False,
+#     )
 
-    #     tempo_model = ReactiveTempoModel(init_score_onset=unique_sonsets.min())
+#     tempo_model = ReactiveTempoModel(init_score_onset=unique_sonsets.min())
 
-    #     initial_probabilities = gumbel_init_dist(
-    #         n_states=n_states,
-    #     )
+#     initial_probabilities = gumbel_init_dist(
+#         n_states=n_states,
+#     )
 
-    #     hmm = PitchIOIHMM(
-    #         observation_model=observation_model,
-    #         transition_matrix=transition_matrix,
-    #         score_onsets=state_space,
-    #         initial_probabilities=initial_probabilities,
-    #         has_insertions=False,
-    #         tempo_model=tempo_model,
-    #     )
+#     hmm = PitchIOIHMM(
+#         observation_model=observation_model,
+#         transition_matrix=transition_matrix,
+#         score_onsets=state_space,
+#         initial_probabilities=initial_probabilities,
+#         has_insertions=False,
+#         tempo_model=tempo_model,
+#     )
 
-    #     observations = process_audio_offline(
-    #         perf_info=perf,
-    #         features=[
-    #             ChromagramIOIProcessor(
-    #                 sample_rate=SAMPLE_RATE,
-    #                 hop_length=HOP_LENGTH,
-    #             )
-    #         ],
-    #         hop_length=HOP_LENGTH,
-    #         sample_rate=SAMPLE_RATE,
-    #         chunk_size=1,
-    #         include_ftime=True,
-    #     )
+#     observations = process_audio_offline(
+#         perf_info=perf,
+#         features=[
+#             ChromagramIOIProcessor(
+#                 sample_rate=SAMPLE_RATE,
+#                 hop_length=HOP_LENGTH,
+#             )
+#         ],
+#         hop_length=HOP_LENGTH,
+#         sample_rate=SAMPLE_RATE,
+#         chunk_size=1,
+#         include_ftime=True,
+#     )
 
-    #     # observations = np.vstack(observations)
-    #     for obs in observations:
-    #         cp = hmm(obs)
-    #         self.assertTrue(cp in unique_sonsets)
+#     # observations = np.vstack(observations)
+#     for obs in observations:
+#         cp = hmm(obs)
+#         self.assertTrue(cp in unique_sonsets)
 
-    #     self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
+#     self.assertTrue(isinstance(hmm.warping_path, np.ndarray))

@@ -146,36 +146,25 @@ def is_midi_file(file_path) -> bool:
     return ext.lower() in midi_extensions
 
 
-def get_available_midi_port(port: str=None) -> MidiInputPort:
+def interleave_with_constant(
+    array: np.array,
+    constant_row: float = 0,
+) -> np.ndarray:
     """
-    Get the available MIDI port. If a port is specified, check if it is available.
+    Interleave a matrix with rows of a constant value.
 
     Parameters
-    ----------
-    port : str, optional
-        Name of the MIDI port (default is None).
-
-    Returns
-    -------
-    MidiInputPort
-        Available MIDI input port
-
-    Raises
-    ------
-    RuntimeError
-        If no MIDI input ports are available.
-    ValueError
-        If the specified MIDI port is not available.
+    -----------
+    array : np.ndarray
     """
-    input_names = mido.get_input_names()
-    if not input_names:
-        raise RuntimeError("No MIDI input ports available")
+    # Determine the shape of the input array
+    num_rows, num_cols = array.shape
 
-    if port is None:
-        return input_names[0]
-    elif port in input_names:
-        return port
-    else:
-        raise ValueError(
-            f"Specified MIDI port '{port}' is not available. Available ports: {input_names}"
-        )
+    # Create an output array with interleaved rows (double the number of rows)
+    interleaved_array = np.zeros((num_rows * 2, num_cols), dtype=array.dtype)
+
+    # Set the odd rows to the original array and even rows to the constant_row
+    interleaved_array[0::2] = array
+    interleaved_array[1::2] = constant_row
+
+    return interleaved_array

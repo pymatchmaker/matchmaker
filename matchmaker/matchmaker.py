@@ -99,7 +99,7 @@ class Matchmaker(object):
                 sample_rate=sample_rate,
             )
         elif feature_type == "pitchclass":
-            self.processor = PitchIOIProcessor()
+            self.processor = PitchIOIProcessor(piano_range=True)
         elif feature_type == "pianoroll":
             self.processor = PianoRollProcessor(piano_range=True)
         else:
@@ -204,7 +204,10 @@ class Matchmaker(object):
         """
         with self.stream:
             for current_frame in self.score_follower.run(verbose=verbose):
-                position_in_beat = self.convert_frame_to_beat(current_frame)
-                yield position_in_beat
+                if self.input_type == "audio":
+                    position_in_beat = self.convert_frame_to_beat(current_frame)
+                    yield position_in_beat
+                else:
+                    yield float(self.score_follower.state_space[current_frame])
 
             return self.score_follower.warping_path

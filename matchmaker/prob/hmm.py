@@ -7,7 +7,6 @@ import time
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import matplotlib.pyplot as plt
 import numpy as np
 import progressbar
 import scipy.spatial.distance as sp_dist
@@ -20,12 +19,14 @@ from hiddenmarkov import (
 from numpy.typing import NDArray
 from scipy.sparse import lil_matrix
 from scipy.stats import gumbel_l, norm
+from scipy.signal import convolve
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.utils.misc import (
     MatchmakerMissingParameterError,
     RECVQueue,
     get_window_indices,
+    interleave_with_constant,
 )
 from matchmaker.utils.tempo_models import KalmanTempoModel, TempoModel
 
@@ -99,6 +100,7 @@ class BaseHMM(HiddenMarkovModel):
             observation=input,
             log_probabilities=False,
         )
+
         self._warping_path.append((current_state, self.input_index))
         self.input_index += 1
         self.current_state = current_state
@@ -123,12 +125,14 @@ class BaseHMM(HiddenMarkovModel):
                 else:
                     same_state_counter = 0
 
+                yield current_state
+
             return self.warping_path
 
     def is_still_following(self) -> bool:
         if self.current_state is not None:
 
-            return self.current_state <= self.n_states
+            return self.current_state <= self.n_states - 1
 
         return False
 
@@ -272,6 +276,25 @@ def kalman_transition_matrix(n_states: int, transition_variance: float) -> NDArr
     return transition_matrix
 
 
+def simple_transition_matrix(
+    n_states: int,
+    inserted_states: bool = False,
+    trans_prob=0.7,
+) -> NDArrayFloat:
+
+    # Initialize a matrix of zeros
+    matrix = np.zeros((n_states, n_states))
+
+    # Set the main diagonal to `1 - trans_prob`
+    np.fill_diagonal(matrix, 1 - trans_prob)
+
+    # Set the diagonal above the main diagonal to `trans_prob`
+    if n_states > 1:
+        np.fill_diagonal(matrix[:, 1:], trans_prob)
+
+    return matrix
+
+
 def gumbel_transition_matrix(  # TODO check works for audio (parameter)
     n_states: int,
     mp_trans_state: int = 1,
@@ -403,7 +426,77 @@ def compute_continous_pitch_profiles(  # TODO check separately
     return pitch_profiles
 
 
+def compute_chord_matrix(chord_pitches: List[NDArrayInt]) -> NDArrayFloat:
+    num_rows = len(chord_pitches)
+    matrix = np.zeros((num_rows, 128), dtype=float)
+
+    # Flatten the chord pitches and create corresponding row indices
+    row_indices = np.repeat(np.arange(num_rows), [len(p) for p in chord_pitches])
+    col_indices = np.concatenate(chord_pitches)
+
+    # Set the specified indices to 1
+    matrix[row_indices, col_indices] = 1
+
+    return matrix
+
+
 def compute_discrete_pitch_profiles(
+    chord_pitches: NDArrayFloat,
+    profile: NDArrayFloat = np.array([0.02, 0.02, 1, 0.02, 0.02]),
+    eps: float = 0.01,
+    piano_range: bool = False,
+    normalize: bool = True,
+    inserted_states: bool = True,
+) -> NDArrayFloat:
+    """
+    Pre-compute the pitch profiles used in calculating the pitch
+    observation probabilities.
+
+    Parameters
+    ----------
+    chord_pitches : numpy array
+        A 2D array of size (n_chords, 128) with the pitch of each chord.
+
+    profile : numpy array
+        The probability "gain" of how probable are the closest pitches to
+        the one in question.
+
+    eps : float
+        The epsilon value to be added to each pre-computed pitch profile.
+
+    piano_range : boolean
+        Indicates whether the possible MIDI pitches are to be restricted
+        within the range of a piano.
+
+    normalize : boolean
+        Indicates whether the pitch profiles are to be normalized.
+
+    Returns
+    -------
+    pitch_profiles : numpy array
+        The pre-computed pitch profiles.
+    """
+
+    chord_matrix = compute_chord_matrix(chord_pitches=chord_pitches)
+
+    pitch_profiles = convolve(chord_matrix, profile[None, :], mode="same")
+
+    if inserted_states:
+        pitch_profiles = interleave_with_constant(array=pitch_profiles)
+        pitch_profiles = pitch_profiles[:-1]
+    # Add extra value
+    pitch_profiles += eps
+
+    # Check whether to trim and normalize:
+    if piano_range:
+        pitch_profiles = pitch_profiles[:, 21:109]
+    if normalize:
+        pitch_profiles /= pitch_profiles.sum(1, keepdims=True)
+
+    return pitch_profiles
+
+
+def compute_discrete_pitch_profiles_old(
     chord_pitches: NDArrayFloat,
     profile: NDArrayFloat = np.array([0.02, 0.02, 1, 0.02, 0.02], dtype=np.float32),
     eps: float = 0.01,
@@ -694,7 +787,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
     def __init__(
         self,
         reference_features: np.ndarray,  # snote_array
-        queue: RECVQueue,
+        queue: Optional[RECVQueue] = None,
         tempo_model: TempoModel = None,
         transition_model: Optional[TransitionModel] = None,
         observation_model: Optional[PitchIOIObservationModel] = None,
@@ -706,6 +799,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
         ioi_prob_args: Optional[Dict[str, Any]] = None,
         initial_probabilities: Optional[np.ndarray] = None,
         has_insertions: bool = True,
+        piano_range: bool = True,
     ) -> None:
         """
         Initialize the object.
@@ -741,8 +835,11 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             reference_features=reference_features,
         )
 
-        observation_model, transition_matrix, initial_probabilities, tempo_model = (
-            self._build_hmm_modules()
+        observation_model, transition_matrix, initial_probabilities, tempo_model, unique_onsets = (
+            self._build_hmm_modules(
+                inserted_states=has_insertions,
+                piano_range=piano_range,
+            )
         )
 
         if transition_model is not None and transition_matrix is not None:
@@ -801,7 +898,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             self,
             observation_model=observation_model,
             transition_model=transition_model,
-            state_space=reference_features,
+            state_space=unique_onsets,
             tempo_model=tempo_model,
             has_insertions=has_insertions,
             queue=queue,
@@ -811,6 +908,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
 
         frame_index = args[0] if args else None
         pitch_obs, ioi_obs = input
+
         if self.perf_onset is None:
             self.perf_onset = 0
         else:
@@ -852,7 +950,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
 
         self.current_state = current_state
 
-        return self.state_space[self.current_state]
+        return self.current_state
 
     @property
     def current_state(self):
@@ -862,7 +960,11 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
     def current_state(self, state):
         self.observation_model.current_state = state
 
-    def _build_hmm_modules(self):
+    def _build_hmm_modules(
+        self,
+        piano_range: bool = True,
+        inserted_states: bool = True,
+    ):
         snote_array = self.reference_features
         unique_sonsets = np.unique(snote_array["onset_beat"])
         unique_sonset_idxs = [
@@ -871,12 +973,12 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
         chord_pitches = [snote_array["pitch"][uix] for uix in unique_sonset_idxs]
         pitch_profiles = compute_discrete_pitch_profiles(
             chord_pitches=chord_pitches,
-            piano_range=True,
-            inserted_states=True,
+            piano_range=piano_range,
+            inserted_states=inserted_states,
         )
         ioi_matrix = compute_ioi_matrix(
             unique_onsets=unique_sonsets,
-            inserted_states=True,
+            inserted_states=inserted_states,
         )
 
         # observation model
@@ -885,6 +987,15 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             ioi_matrix=ioi_matrix,
             ioi_precision=1,
         )
+
+        if inserted_states:
+            unique_onsets_s = np.insert(
+            unique_sonsets,
+            np.arange(1, len(unique_sonsets)),
+            (unique_sonsets[:-1] + 0.5 * np.diff(unique_sonsets)),
+        )
+        else:
+            unique_onsets_s = unique_sonsets
 
         # tempo model
         tempo_model = KalmanTempoModel(
@@ -904,35 +1015,41 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             transition_matrix,
             initial_probabilities,
             tempo_model,
+            unique_onsets_s,
         )
 
     def run(self, verbose: bool = True):
         prev_state = self.current_state
         same_state_counter = 0
-
+        empty_counter = 0
         if verbose:
             pbar = progressbar.ProgressBar(
-                max_value=self.n_states, redirect_stdout=True
+                maxval=self.n_states, # redirect_stdout=True
             )
+            pbar.start()
 
         while self.is_still_following():
             queue_input = self.queue.get()
-            print(f"queue input: {queue_input}")
-
-            current_state = self(queue_input)
-
-            if current_state == prev_state:
-                if same_state_counter < self.patience:
-                    same_state_counter += 1
+            if queue_input is not None:
+                current_state = self(queue_input)
+                empty_counter = 0
+                if current_state == prev_state:
+                    if same_state_counter < self.patience:
+                        same_state_counter += 1
+                    else:
+                        break
                 else:
-                    break
-            else:
-                same_state_counter = 0
+                    same_state_counter = 0
+
+                if verbose:
+                    pbar.update(int(current_state))
+                yield current_state
+
+            # else:
+            #     empty_counter += 1
+            #     if empty_counter > self.patience * 100:
+            #         break
 
             if verbose:
-                pbar.update(int(current_state))
-            yield current_state
-
-        if verbose:
-            pbar.finish()
+                pbar.finish()
         return self.warping_path

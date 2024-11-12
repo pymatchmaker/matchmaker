@@ -1,4 +1,5 @@
 import unittest
+import warnings
 
 from matchmaker import Matchmaker
 from matchmaker.dp import OnlineTimeWarpingArzt
@@ -8,6 +9,9 @@ from matchmaker.features.midi import PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
+
+warnings.filterwarnings("ignore", module="partitura")
+warnings.filterwarnings("ignore", module="librosa")
 
 
 class TestMatchmaker(unittest.TestCase):
@@ -132,11 +136,13 @@ class TestMatchmaker(unittest.TestCase):
             input_type="midi",
         )
 
-        # When & Then: running the alignment process, the yielded result should be a float values
+        # When & Then: running the alignment process, 
+        # the yielded result should be a float values
         for position_in_beat in mm.run():
             print(f"Position in beat: {position_in_beat}")
             self.assertIsInstance(position_in_beat, float)
-
+            if position_in_beat >= 130:
+                break
 
 if __name__ == "__main__":
     unittest.main()

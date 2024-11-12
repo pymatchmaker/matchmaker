@@ -221,7 +221,7 @@ class TestMidiStream(unittest.TestCase):
         port.close()
 
         self.setup(file_path="test.mid")
-        self.assertTrue(self.midi_in is None)
+        self.assertTrue(self.stream.midi_in is None)
 
 
 
