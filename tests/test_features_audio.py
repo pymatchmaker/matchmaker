@@ -6,17 +6,19 @@ Tests for the features/audio.py module
 import os
 import tempfile
 import unittest
+
 import librosa
 import numpy as np
+from partitura.utils.music import midi_pitch_to_frequency, note_name_to_midi_pitch
+
 from matchmaker.features.audio import (
-    ChromagramProcessor,
     ChromagramIOIProcessor,
-    MFCCProcessor,
-    MelSpectrogramProcessor,
+    ChromagramProcessor,
     LogSpectralEnergyProcessor,
+    MelSpectrogramProcessor,
+    MFCCProcessor,
     compute_features_from_audio,
 )
-from partitura.utils.music import midi_pitch_to_frequency, note_name_to_midi_pitch
 
 SAMPLE_RATE = 44100
 HOP_LENGTH = SAMPLE_RATE // 30

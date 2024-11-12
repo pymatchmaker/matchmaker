@@ -13,9 +13,8 @@ from partitura.musicanalysis.performance_codec import get_time_maps_from_alignme
 
 from matchmaker import EXAMPLE_AUDIO, EXAMPLE_MATCH, EXAMPLE_SCORE
 from matchmaker.features.audio import (
-    HOP_LENGTH,
+    HOP_LENGTH,  # ChromagramIOIProcessor,
     SAMPLE_RATE,
-    # ChromagramIOIProcessor,
     ChromagramProcessor,
 )
 from matchmaker.features.midi import PitchIOIProcessor, PitchProcessor
@@ -105,7 +104,7 @@ class TestPitchHMM(unittest.TestCase):
             inserted_states=False,
         )
 
-        initial_probabilities =  np.zeros(len(chord_pitches)) + 1e-6
+        initial_probabilities = np.zeros(len(chord_pitches)) + 1e-6
         initial_probabilities[0] = 1
         initial_probabilities /= initial_probabilities.sum()
 
@@ -129,6 +128,7 @@ class TestPitchHMM(unittest.TestCase):
                 self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
+
 
 #     def test_audio(self):
 
@@ -266,6 +266,7 @@ class TestPitchIOIHMM(unittest.TestCase):
                 self.assertTrue(cp in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
+
 
 #     def test_symbolic_insertions(self):
 

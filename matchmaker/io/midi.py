@@ -20,8 +20,8 @@ from matchmaker.utils.stream import Stream
 from matchmaker.utils.symbolic import (
     Buffer,
     framed_midi_messages_from_performance,
+    get_available_midi_port,
     midi_messages_from_performance,
-    get_available_midi_port
 )
 
 # Default polling period (in seconds)

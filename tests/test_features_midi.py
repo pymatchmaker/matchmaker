@@ -3,8 +3,8 @@
 """
 Tests for the features/midi.py module
 """
-from io import StringIO
 import unittest
+from io import StringIO
 from unittest.mock import patch
 
 import numpy as np

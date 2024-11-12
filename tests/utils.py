@@ -19,7 +19,6 @@ from matchmaker.io.audio import HOP_LENGTH, SAMPLE_RATE, AudioStream
 from matchmaker.io.midi import POLLING_PERIOD, MidiStream
 from matchmaker.utils.misc import RECVQueue
 
-
 # Random number generator
 RNG = np.random.RandomState(1984)
 

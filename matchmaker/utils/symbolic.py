@@ -8,9 +8,9 @@ from typing import List, Optional, Tuple, Union
 import mido
 import numpy as np
 import partitura as pt
+from mido.ports import BaseInput as MidiInputPort
 from numpy.typing import NDArray
 from partitura.performance import Performance, PerformanceLike, PerformedPart
-from mido.ports import BaseInput as MidiInputPort
 
 
 class Buffer(object):
@@ -431,9 +431,7 @@ def get_available_midi_port(port: str = None, is_virtual: bool = False) -> str:
     """
 
     if port is None and is_virtual:
-        raise ValueError(
-            "Cannot open unspecified virtual port!"
-        )
+        raise ValueError("Cannot open unspecified virtual port!")
     input_names = mido.get_input_names()
     if not input_names and not is_virtual:
         raise RuntimeError("No MIDI input ports available")

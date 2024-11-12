@@ -3,10 +3,10 @@
 """
 Tests for the io/midi.py module
 """
-from io import StringIO
 import time
-from typing import Optional
 import unittest
+from io import StringIO
+from typing import Optional
 from unittest.mock import patch
 
 import mido
@@ -14,15 +14,9 @@ import numpy as np
 import partitura as pt
 
 from matchmaker import EXAMPLE_PERFORMANCE
-from matchmaker.features.midi import (
-    PianoRollProcessor,
-    PitchIOIProcessor,
-)
+from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.mediator import CeusMediator
-from matchmaker.io.midi import (
-    MidiStream,
-    Buffer,
-)
+from matchmaker.io.midi import Buffer, MidiStream
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import DummyProcessor
 from matchmaker.utils.symbolic import midi_messages_from_midi, panic_button
@@ -58,7 +52,7 @@ def setup_midi_player(use_example: bool = False):
     # Open virtual MIDI port
     # the input uses the "created" virtual
     # port
-    # panic_button()
+    # panic_button()
     port = mido.open_input("port1", virtual=True)
     outport = mido.open_output("port1")
     queue = RECVQueue()
@@ -89,8 +83,8 @@ def setup_midi_player(use_example: bool = False):
         # normalize the random performance to last 1 second
         # (makes the tests a bit faster ;)
         max_duration = (note_array["onset_sec"] + note_array["duration_sec"]).max()
-        note_array["onset_sec"] /= (max_duration * 2)
-        note_array["duration_sec"] /= (max_duration * 2)
+        note_array["onset_sec"] /= max_duration * 2
+        note_array["duration_sec"] /= max_duration * 2
 
         # Generate temporary midi file
         tmp_file = NamedTemporaryFile(delete=True)
@@ -141,7 +135,7 @@ class TestMidiStream(unittest.TestCase):
         mediator: Optional[CeusMediator] = None,
         queue: Optional[RECVQueue] = None,
         return_midi_messages: bool = False,
-        virtual_port: bool=False,
+        virtual_port: bool = False,
     ) -> None:
         """Setup a MidiStream for testing"""
 
@@ -208,7 +202,10 @@ class TestMidiStream(unittest.TestCase):
             self.setup(port="wrong_port")
 
         # test virtual
-        self.setup(port="virtual", virtual_port=True,)
+        self.setup(
+            port="virtual",
+            virtual_port=True,
+        )
 
         self.assertIsInstance(self.stream, MidiStream)
 
@@ -222,10 +219,6 @@ class TestMidiStream(unittest.TestCase):
 
         self.setup(file_path="test.mid")
         self.assertTrue(self.stream.midi_in is None)
-
-
-
-        
 
     # @patch("sys.stdout", new_callable=StringIO)
     def test_run_online(self, mock_stdout=None):
@@ -435,7 +428,6 @@ class TestMidiStream(unittest.TestCase):
                 if output is not None:
                     n_outputs += 1
                     # print(output, n_outputs)
-
 
         # Test whether the number of expected frames is within
         # 2 frames of the number of expected frames (due to rounding)

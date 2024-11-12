@@ -14,9 +14,9 @@ from partitura.utils.music import generate_random_performance_note_array
 
 import matchmaker
 from matchmaker.utils.symbolic import (
+    Buffer,
     framed_midi_messages_from_midi,
     midi_messages_from_midi,
-    Buffer,
     midi_messages_from_performance,
 )
 

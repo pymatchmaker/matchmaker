@@ -136,13 +136,14 @@ class TestMatchmaker(unittest.TestCase):
             input_type="midi",
         )
 
-        # When & Then: running the alignment process, 
+        # When & Then: running the alignment process,
         # the yielded result should be a float values
         for position_in_beat in mm.run():
             print(f"Position in beat: {position_in_beat}")
             self.assertIsInstance(position_in_beat, float)
             if position_in_beat >= 130:
                 break
+
 
 if __name__ == "__main__":
     unittest.main()

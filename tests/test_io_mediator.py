@@ -5,7 +5,8 @@ Tests for the matchmaker.io.mediator module
 """
 import unittest
 from collections import namedtuple
-from matchmaker.io.mediator import ThreadMediator, CeusMediator
+
+from matchmaker.io.mediator import CeusMediator, ThreadMediator
 
 
 class TestThreadMediator(unittest.TestCase):

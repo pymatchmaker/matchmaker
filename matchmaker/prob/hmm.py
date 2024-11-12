@@ -17,9 +17,9 @@ from hiddenmarkov import (
     TransitionModel,
 )
 from numpy.typing import NDArray
+from scipy.signal import convolve
 from scipy.sparse import lil_matrix
 from scipy.stats import gumbel_l, norm
-from scipy.signal import convolve
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.utils.misc import (
@@ -835,11 +835,15 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             reference_features=reference_features,
         )
 
-        observation_model, transition_matrix, initial_probabilities, tempo_model, unique_onsets = (
-            self._build_hmm_modules(
-                inserted_states=has_insertions,
-                piano_range=piano_range,
-            )
+        (
+            observation_model,
+            transition_matrix,
+            initial_probabilities,
+            tempo_model,
+            unique_onsets,
+        ) = self._build_hmm_modules(
+            inserted_states=has_insertions,
+            piano_range=piano_range,
         )
 
         if transition_model is not None and transition_matrix is not None:
@@ -990,10 +994,10 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
 
         if inserted_states:
             unique_onsets_s = np.insert(
-            unique_sonsets,
-            np.arange(1, len(unique_sonsets)),
-            (unique_sonsets[:-1] + 0.5 * np.diff(unique_sonsets)),
-        )
+                unique_sonsets,
+                np.arange(1, len(unique_sonsets)),
+                (unique_sonsets[:-1] + 0.5 * np.diff(unique_sonsets)),
+            )
         else:
             unique_onsets_s = unique_sonsets
 
@@ -1024,7 +1028,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
         empty_counter = 0
         if verbose:
             pbar = progressbar.ProgressBar(
-                maxval=self.n_states, # redirect_stdout=True
+                maxval=self.n_states,  # redirect_stdout=True
             )
             pbar.start()
 
@@ -1044,7 +1048,6 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
                 if verbose:
                     pbar.update(int(current_state))
                 yield current_state
-
 
             if verbose:
                 pbar.finish()
