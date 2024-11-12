@@ -105,7 +105,7 @@ class BaseHMM(HiddenMarkovModel):
         self.input_index += 1
         self.current_state = current_state
 
-        return self.state_space[current_state]
+        return current_state
 
     def run(self) -> NDArrayInt:
         if self.queue is not None:
