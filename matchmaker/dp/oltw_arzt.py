@@ -7,8 +7,8 @@ import time
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
-from numpy.typing import NDArray
 import progressbar
+from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.dp.dtw_loop import oltw_arzt_loop, reset_cost_matrix

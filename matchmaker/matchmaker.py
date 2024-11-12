@@ -15,6 +15,7 @@ from matchmaker.features.audio import (
     MelSpectrogramProcessor,
     MFCCProcessor,
 )
+from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
@@ -24,7 +25,7 @@ PathLike = Union[str, bytes, os.PathLike]
 DEFAULT_TEMPO = 120
 
 
-class Matchmaker:
+class Matchmaker(object):
     """
     A class to perform online score following with I/O support for audio and MIDI
 
@@ -54,7 +55,7 @@ class Matchmaker:
         performance_file: Union[PathLike, None] = None,
         wait: bool = True,  # only for offline option. For debugging or fast testing, set to False
         input_type: str = "audio",  # 'audio' or 'midi'
-        feature_type: str = "chroma",
+        feature_type: str = None,
         method: str = None,
         device_name_or_index: Union[str, int] = None,
         sample_rate: int = SAMPLE_RATE,
@@ -62,6 +63,7 @@ class Matchmaker:
     ):
         self.score_file = score_file
         self.performance_file = performance_file
+        self.input_type = input_type
         self.feature_type = feature_type
         self.frame_rate = frame_rate
         self.score_part: Optional[Part] = None
@@ -81,6 +83,9 @@ class Matchmaker:
             raise ValueError(f"Invalid score file: {e}")
 
         # setup feature processor
+        if feature_type is None:
+            feature_type = "chroma" if input_type == "audio" else "pitchclass"
+
         if feature_type == "chroma":
             self.processor = ChromagramProcessor(
                 sample_rate=sample_rate,
@@ -93,30 +98,34 @@ class Matchmaker:
             self.processor = MelSpectrogramProcessor(
                 sample_rate=sample_rate,
             )
+        elif feature_type == "pitchclass":
+            self.processor = PitchIOIProcessor(piano_range=True)
+        elif feature_type == "pianoroll":
+            self.processor = PianoRollProcessor(piano_range=True)
         else:
             raise ValueError("Invalid feature type")
 
         # validate performance file and input_type
         if self.performance_file is not None:
             # check performance file type matches input type
-            if input_type == "audio" and not is_audio_file(self.performance_file):
+            if self.input_type == "audio" and not is_audio_file(self.performance_file):
                 raise ValueError(
                     f"Invalid performance file. Expected audio file, but got {self.performance_file}"
                 )
-            elif input_type == "midi" and not is_midi_file(self.performance_file):
+            elif self.input_type == "midi" and not is_midi_file(self.performance_file):
                 raise ValueError(
                     f"Invalid performance file. Expected MIDI file, but got {self.performance_file}"
                 )
 
         # setup stream device
-        if input_type == "audio":
+        if self.input_type == "audio":
             self.stream = AudioStream(
                 processor=self.processor,
                 device_name_or_index=self.device_name_or_index,
                 file_path=self.performance_file,
                 wait=wait,
             )
-        elif input_type == "midi":
+        elif self.input_type == "midi":
             self.stream = MidiStream(
                 processor=self.processor,
                 port=self.device_name_or_index,
@@ -129,7 +138,7 @@ class Matchmaker:
         self.reference_features = self.preprocess_score()
 
         # setup score follower
-        if method == "arzt" or (method is None and input_type == "audio"):
+        if method == "arzt" or (method is None and self.input_type == "audio"):
             self.score_follower = OnlineTimeWarpingArzt(
                 reference_features=self.reference_features, queue=self.stream.queue
             )
@@ -137,20 +146,26 @@ class Matchmaker:
             self.score_follower = OnlineTimeWarpingDixon(
                 reference_features=self.reference_features, queue=self.stream.queue
             )
-        elif method == "hmm" or (method is None and input_type == "midi"):
-            self.score_follower = PitchIOIHMM
+        elif method == "hmm" or (method is None and self.input_type == "midi"):
+            self.score_follower = PitchIOIHMM(
+                reference_features=self.reference_features,
+                queue=self.stream.queue,
+            )
         else:
             raise ValueError("Invalid method")
 
     def preprocess_score(self):
-        beat_type = self.score_part.time_sigs[0].beat_type
-        musical_beats = self.score_part.time_sigs[0].musical_beats
-        score_audio = save_wav_fluidsynth(
-            self.score_part,
-            bpm=DEFAULT_TEMPO * (beat_type / musical_beats),
-        )
-        reference_features = self.processor(score_audio.astype(np.float32))
-        return reference_features
+        if self.input_type == "audio":
+            beat_type = self.score_part.time_sigs[0].beat_type
+            musical_beats = self.score_part.time_sigs[0].musical_beats
+            score_audio = save_wav_fluidsynth(
+                self.score_part,
+                bpm=DEFAULT_TEMPO * (beat_type / musical_beats),
+            )
+            reference_features = self.processor(score_audio.astype(np.float32))
+            return reference_features
+        else:
+            return self.score_part.note_array()
 
     def convert_frame_to_beat(
         self, current_frame: int, frame_rate: int = FRAME_RATE
@@ -189,7 +204,10 @@ class Matchmaker:
         """
         with self.stream:
             for current_frame in self.score_follower.run(verbose=verbose):
-                position_in_beat = self.convert_frame_to_beat(current_frame)
-                yield position_in_beat
+                if self.input_type == "audio":
+                    position_in_beat = self.convert_frame_to_beat(current_frame)
+                    yield position_in_beat
+                else:
+                    yield float(self.score_follower.state_space[current_frame])
 
             return self.score_follower.warping_path

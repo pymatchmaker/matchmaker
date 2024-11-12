@@ -346,5 +346,5 @@ def compute_features_from_symbolic(
     return outputs
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     pass

@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple, Union
 import mido
 import numpy as np
 import partitura as pt
+from mido.ports import BaseInput as MidiInputPort
 from numpy.typing import NDArray
 from partitura.performance import Performance, PerformanceLike, PerformedPart
 
@@ -330,3 +331,129 @@ def framed_midi_messages_from_performance(
     )
 
     return frames_array, frame_times
+
+
+class MidiDeviceInfo(object):
+    """Info about a MIDI device
+
+    See `matchmaker.utils.audio.AudioDeviceInfo`
+
+    Parameters
+    ----------
+    name : str
+        Name of the MIDI device
+    device_index : int
+        Index of the MIDI device (this is to have a similar interface as audio
+        devices)
+    has_input: bool
+        Whether the MIDI device has inputs
+    has_output: bool
+        Whether the MIDI device has outputs.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        device_index: int,
+        has_input: bool,
+        has_output: bool,
+    ) -> None:
+
+        self.name = name
+        self.device_index = device_index
+        self.has_input = has_input
+        self.has_output = has_output
+
+    def __str__(self) -> str:
+
+        out_str = (
+            f"MIDI Device {self.device_index}: {self.name}\n"
+            f"  - Input: {self.has_input}\n"
+            f"  - Output: {self.has_output}\n"
+        )
+
+        return out_str
+
+
+def get_midi_devices() -> List[MidiDeviceInfo]:
+    """Get list of MIDI devices
+    Returns
+    -------
+    midi_devices : List[MidiDeviceInfo]
+        List of available MIDI devices
+    """
+
+    available_in_ports = mido.get_input_names()
+
+    available_out_ports = mido.get_output_names()
+
+    all_devices = list(set(available_in_ports + available_out_ports))
+    all_devices.sort()
+
+    midi_devices = []
+    for i, device in enumerate(all_devices):
+
+        has_input = device in available_in_ports
+        has_output = device in available_out_ports
+
+        midi_device = MidiDeviceInfo(
+            name=device,
+            device_index=i,
+            has_input=has_input,
+            has_output=has_output,
+        )
+
+        midi_devices.append(midi_device)
+
+    return midi_devices
+
+
+def get_available_midi_port(port: str = None, is_virtual: bool = False) -> str:
+    """
+    Get the available MIDI port. If a port is specified, check if it is available.
+
+    Parameters
+    ----------
+    port : str, optional
+        Name of the MIDI port (default is None).
+
+    Returns
+    -------
+    MidiInputPort
+        Available MIDI input port
+
+    Raises
+    ------
+    RuntimeError
+        If no MIDI input ports are available.
+    ValueError
+        If the specified MIDI port is not available.
+    """
+
+    if port is None and is_virtual:
+        raise ValueError("Cannot open unspecified virtual port!")
+    input_names = mido.get_input_names()
+    if not input_names and not is_virtual:
+        raise RuntimeError("No MIDI input ports available")
+
+    if port is None and not is_virtual:
+        return input_names[0]
+    elif port in input_names or is_virtual:
+        return port
+    else:
+        raise ValueError(
+            f"Specified MIDI port '{port}' is not available. Available ports: {input_names}"
+        )
+
+
+def panic_button() -> None:
+    """
+    Reset all output ports
+    """
+    output_ports = mido.get_output_names()
+
+    for pn in output_ports:
+        with mido.open_output(pn) as outport:
+            print(f"Resetting port {pn}")
+            outport.reset()
+        outport.close()

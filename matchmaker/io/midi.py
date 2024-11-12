@@ -11,16 +11,17 @@ from typing import Callable, List, Optional, Tuple, Type, Union
 import mido
 import partitura as pt
 from mido.ports import BaseInput as MidiInputPort
-from partitura.performance import Performance, PerformanceLike, PerformedPart
 
+from matchmaker.features.midi import PitchIOIProcessor
 from matchmaker.io.mediator import CeusMediator
-from matchmaker.utils.misc import RECVQueue, get_available_midi_port
-from matchmaker.utils.processor import DummyProcessor, Processor
+from matchmaker.utils.misc import RECVQueue
+from matchmaker.utils.processor import Processor
 from matchmaker.utils.stream import Stream
 from matchmaker.utils.symbolic import (
-    framed_midi_messages_from_performance,
-    midi_messages_from_performance,
     Buffer,
+    framed_midi_messages_from_performance,
+    get_available_midi_port,
+    midi_messages_from_performance,
 )
 
 # Default polling period (in seconds)
@@ -73,29 +74,31 @@ class MidiStream(Stream):
         processor: Optional[Union[Callable, Processor]] = None,
         file_path: Optional[str] = None,
         polling_period: Optional[float] = POLLING_PERIOD,
-        port: Optional[MidiInputPort] = None,
+        port: Optional[Union[MidiInputPort, str]] = None,
         queue: RECVQueue = None,
         init_time: Optional[float] = None,
         return_midi_messages: bool = False,
         mediator: Optional[CeusMediator] = None,
+        virtual_port: bool = False,
     ):
         if processor is None:
-            processor = DummyProcessor()
+            processor = PitchIOIProcessor()
 
         Stream.__init__(
             self,
             processor=processor,
             mock=file_path is not None,
         )
-
-        if file_path is not None:
-            # Do not open a MIDI port for running
-            # stream offline
-            port = None
-        else:
-            port = get_available_midi_port(port)
         self.file_path = file_path
-        self.midi_in = port
+
+        if isinstance(port, str) or port is None and file_path is None:
+            port_name = get_available_midi_port(port, is_virtual=virtual_port)
+            self.midi_in = mido.open_input(port_name, virtual=virtual_port)
+        elif isinstance(port, MidiInputPort) and file_path is None:
+            self.midi_in = port
+        else:
+            self.midi_in = None
+
         self.init_time = init_time
         self.listen = False
         self.queue = queue or RECVQueue()
@@ -146,7 +149,8 @@ class MidiStream(Stream):
     ) -> None:
         # the data is the Buffer instance
         output = self.processor((data.frame[:], data.time))
-        # output = self.pipeline((frame.frame[:], frame.time))
+
+        # if output is not None:
         if self.return_midi_messages:
             self.queue.put((data.frame, output))
         else:
@@ -282,6 +286,9 @@ class MidiStream(Stream):
         self.listen = False
         # reset init time
         self.init_time = None
+
+        if self.midi_in is not None:
+            self.midi_in.close()
 
     def __enter__(self) -> None:
         self.start()

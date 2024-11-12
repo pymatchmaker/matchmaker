@@ -8,9 +8,7 @@ Unlike offline alignment methods, for which state-of-the-art implementations are
   
 We aim to provide efficient reference implementations of score followers for use in real-time applications which can be easily integrated into existing projects.
 
-
 ## Setup
-
 
 ### Install from source using conda
 
@@ -92,7 +90,8 @@ for current_position in mm.run():
     print(current_position)  # beat position in the score
 ```
 
-### Customized Example
+### Custom Example
+
 If you want to use a different alignment method or custom method, you can do so by importing the specific class and passing the necessary parameters.
 In order to define a custom alignment class, you need to inherit from the Base `OnlineAlignment` class and implement the `run` method. Note that the returned value from the `OnlineAlignment` class should be the current frame number in the reference features, not in beats.
 
@@ -145,10 +144,24 @@ Initialization parameters for the `Matchmaker` class:
 - `frame_rate` (int): Frame rate of the input audio/MIDI data.
 - `device_name_or_index` (str or int): The audio/MIDI device name or index you want to use. If `None`, the default device will be used.
 
+## Citing Matchmaker
+
+If you find Matchmaker useful, we would appreciate if you could cite us!
+
+```
+@inproceedings{matchmaker_lbd,
+  title={{Matchmaker: A Python library for Real-time Music Alignment}},
+  author={Park, Jiyun and Cancino-Chac\'{o}n, Carlos and Kwon, Taegyun and Nam, Juhan},
+  booktitle={{Proceedings of the Late Breaking/Demo Session at the 25th International Society for Music Information Retrieval Conference}},
+  address={San Francisco, USA.},
+  year={2024}
+}
+```
+
 ## Acknowledgments
 
 This work has been supported by the Austrian Science Fund (FWF), grant agreement PAT 8820923 ("*Rach3: A Computational Approach to Study Piano Rehearsals*"). Additionally, this work was supported by the National Research Foundation of Korea (NRF) grant funded by the Korea government (MSIT) (No. NRF-2023R1A2C3007605).
 
 ## License
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.

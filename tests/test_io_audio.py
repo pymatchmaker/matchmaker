@@ -3,6 +3,7 @@
 """
 This module contains tests for the matchmaker.io module.
 """
+import os
 import time
 import unittest
 from io import StringIO
@@ -22,6 +23,7 @@ from matchmaker.io.audio import AudioStream
 from matchmaker.utils.audio import check_input_audio_devices, get_audio_devices
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import DummyProcessor
+from tests.utils import generate_sine_wave
 
 HAS_AUDIO_INPUT = check_input_audio_devices()
 
@@ -38,6 +40,7 @@ class TestAudioStream(unittest.TestCase):
         self,
         processor_name: str = "dummy",
         file_path: Optional[str] = None,
+        wait: bool = False,
     ):
 
         if processor_name == "chroma":
@@ -66,6 +69,7 @@ class TestAudioStream(unittest.TestCase):
             sample_rate=SAMPLE_RATE,
             hop_length=HOP_LENGTH,
             processor=processor,
+            wait=wait,
         )
 
     def teardown(self):
@@ -214,8 +218,8 @@ class TestAudioStream(unittest.TestCase):
             self.assertTrue(features_checked)
 
     @patch("sys.stdout", new_callable=StringIO)
-    def test_offline_input(self, mock_stdout):
-
+    def test_offline_input(self, mock_stdout=None):
+        print("clear queue")
         processed_frames = []
         for processor in [
             "chroma",
@@ -223,9 +227,10 @@ class TestAudioStream(unittest.TestCase):
             # "mfcc",
             "dummy",
         ]:
+            file_path = generate_sine_wave()
             self.setup(
                 processor_name=processor,
-                file_path=librosa.ex("pistachio"),
+                file_path=file_path,
             )
 
             self.stream.start()
@@ -239,17 +244,22 @@ class TestAudioStream(unittest.TestCase):
 
             processed_frames.append(len(outputs))
 
+            os.unlink(file_path)
+
         processed_frames = np.array(processed_frames)
 
         self.assertTrue(np.all(processed_frames == processed_frames[0]))
 
+    @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)
-    def test_clear_queue(self, mock_stdout):
+    def test_clear_queue(self, mock_stdout=None):
 
+        file_path = generate_sine_wave(duration=0.2)
         processor = "dummy"
         self.setup(
             processor_name=processor,
-            file_path=librosa.ex("pistachio"),
+            file_path=file_path,
+            wait=True,
         )
 
         self.stream.start()
@@ -257,9 +267,11 @@ class TestAudioStream(unittest.TestCase):
 
         self.stream.clear_queue()
         outputs = list(self.stream.queue.queue)
+        os.unlink(file_path)
 
         self.assertTrue(len(outputs) == 0)
 
+    @unittest.skipIf(*SKIP_REASON)
     def test_process_frame(self):
 
         self.setup(
