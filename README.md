@@ -130,7 +130,6 @@ Matchmaker currently supports the following feature types:
   - `pianoroll`: Piano-roll features. Default feature type for MIDI input.
   - `"pitch"`: Pitch features for MIDI input.
   - `"pitchclass"`: Pitch class features for MIDI input.
-  - `"cumsum"`: Cumulative sum of the piano roll representation.
 
 ## Configurations
 
