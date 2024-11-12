@@ -1045,10 +1045,6 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
                     pbar.update(int(current_state))
                 yield current_state
 
-            # else:
-            #     empty_counter += 1
-            #     if empty_counter > self.patience * 100:
-            #         break
 
             if verbose:
                 pbar.finish()
