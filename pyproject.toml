@@ -3,7 +3,7 @@ requires = ["setuptools>=42", "wheel", "Cython>=3.0.0", "numpy>=1.26.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "matchmaker"
+name = "pymatchmaker"
 version = "0.1.0"
 description = "A package for real-time music alignment"
 readme = "README.md"
