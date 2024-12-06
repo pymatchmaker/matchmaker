@@ -353,6 +353,24 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         return self.ref_pointer <= (self.N_ref - self.frame_per_seg)
 
     def run(self, verbose=True):
+        """Run the online alignment process.
+
+        Parameters
+        ----------
+        verbose : bool, optional
+            Whether to show progress bar, by default True
+
+        Yields
+        ------
+        int
+            Current position in the reference sequence
+
+        Returns
+        -------
+        NDArray[np.float32]
+            The warping path as a 2D array where each column contains
+            (reference_position, input_position)
+        """
         self.ref_pointer += self.w
         self.get_new_input()
         self.init_path_cost()

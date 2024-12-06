@@ -176,6 +176,24 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         return self.current_position
 
     def run(self, verbose: bool = True) -> Generator[int, None, NDArray[np.float32]]:
+        """Run the online alignment process.
+
+        Parameters
+        ----------
+        verbose : bool, optional
+            Whether to show progress bar, by default True
+
+        Yields
+        ------
+        int
+            Current position in the reference sequence
+
+        Returns
+        -------
+        NDArray[np.float32]
+            The warping path as a 2D array where each column contains
+            (reference_position, input_position)
+        """
         self.reset()
 
         if verbose:

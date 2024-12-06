@@ -10,7 +10,12 @@ from . import dp, features, io, prob, utils
 from .matchmaker import *
 
 # define a version variable
-__version__ = pkg_resources.get_distribution("matchmaker").version
+try:
+    import pkg_resources
+
+    __version__ = pkg_resources.get_distribution("pymatchmaker").version
+except:
+    __version__ = "0.1.0"
 
 EXAMPLE_SCORE = pkg_resources.resource_filename(
     "matchmaker",

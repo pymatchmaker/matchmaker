@@ -24,8 +24,7 @@ CHANNELS = 1
 
 
 class AudioStream(Stream):
-    """
-    A class to process an audio stream in real-time
+    """A class to process an audio stream in real-time
 
     Parameters
     ----------
@@ -193,6 +192,12 @@ class AudioStream(Stream):
             print("* Start listening to audio stream....")
 
     def stop_listening(self) -> None:
+        """Stop listening to the audio stream.
+
+        This method stops the audio stream and cleans up resources.
+        For real-time mode, it stops and closes the audio stream,
+        and terminates the audio interface.
+        """
         print("* Stop listening to audio stream....")
         if not self.mock and self.audio_stream:
             self.audio_stream.stop_stream()
@@ -201,7 +206,17 @@ class AudioStream(Stream):
         self.listen = False
 
     def run_offline(self) -> None:
-        """Offline method for computing features"""
+        """Process audio file in offline mode.
+
+        This method simulates real-time processing by reading chunks from
+        an audio file at regular intervals. The processing speed can be
+        controlled using the `wait` parameter.
+
+        Note
+        ----
+        The audio file is processed in chunks of size `hop_length`,
+        and features are extracted for each chunk.
+        """
         self.start_listening()
         self.init_time = time.time()
         duration = int(librosa.get_duration(path=self.file_path))
@@ -229,6 +244,17 @@ class AudioStream(Stream):
                 time.sleep(max(time_interval - elapsed_time, 0))
 
     def run_online(self) -> None:
+        """Process audio in real-time from input device.
+
+        This method sets up and starts real-time audio processing from
+        the specified input device. It initializes the PyAudio interface
+        and opens an audio stream with the configured parameters.
+
+        Note
+        ----
+        The audio is processed in chunks of size `hop_length`,
+        and features are extracted in real-time.
+        """
         self.audio_interface = pyaudio.PyAudio()
         self.audio_stream = self.audio_interface.open(
             format=self.format,

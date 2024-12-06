@@ -264,10 +264,7 @@ class MidiStream(Stream):
         # return time.time() - self.init_time if self.init_time is not None else None
 
     def start_listening(self):
-        """
-        Start listening to midi input (open input port and
-        get starting time)
-        """
+        """Start listening to midi input (open input port and get starting time)"""
         self.listen = True
         if self.mock:
             print("* Mock listening to stream....")
@@ -277,9 +274,7 @@ class MidiStream(Stream):
         self.current_time
 
     def stop_listening(self):
-        """
-        Stop listening to MIDI input
-        """
+        """Stop listening to MIDI input"""
         if self.listen:
             print("* Stop listening to MIDI stream....")
         # break while loop in self.run

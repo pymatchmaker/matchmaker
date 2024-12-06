@@ -3,15 +3,37 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-pymatchmaker documentation
-==========================
+Welcome to Matchmaker's Documentation
+======================================
 
-Add your content using ``reStructuredText`` syntax. See the
-`reStructuredText <https://www.sphinx-doc.org/en/master/usage/restructuredtext/index.html>`_
-documentation for details.
-
+.. include:: ../../README.md
+   :parser: myst_parser.sphinx_
 
 .. toctree::
    :maxdepth: 2
-   :caption: Contents:
+   :caption: Contents
 
+   install
+
+.. toctree::
+   :maxdepth: 1
+   :caption: API Reference
+
+   modules/matchmaker
+   modules/matchmaker.dp
+   modules/matchmaker.prob
+   modules/matchmaker.io
+
+Indices and tables
+------------------
+
+* :ref:`genindex`
+* :ref:`modindex`
+* :ref:`search`
+
+Acknowledgements
+----------------
+This work has been supported by the Austrian Science Fund (FWF), 
+grant agreement PAT 8820923 ("Rach3: A Computational Approach to Study Piano Rehearsals"). 
+Additionally, this work was supported by the National Research Foundation of Korea (NRF) grant 
+funded by the Korea government (MSIT) (No. NRF-2023R1A2C3007605).
