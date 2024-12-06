@@ -203,6 +203,7 @@ def jiang_transition_matrix_from_sequence(sequence, frame_rate, sigma):
     Args:
         sequence (list): List of note indices representing the sequence from score.
             ex. [0, 0, 1, 1, 2, 2, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 7, 8, 8, 9, 9, 9]
+
         frame_rate (float): Frame rate in Hz.
         sigma (float): Standard deviation for note duration.
 

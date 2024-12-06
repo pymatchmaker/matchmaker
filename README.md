@@ -10,6 +10,12 @@ We aim to provide efficient reference implementations of score followers for use
 
 ## Setup
 
+### Install from PyPI
+
+```bash
+pip install pymatchmaker
+```
+
 ### Install from source using conda
 
 Setting up the code as described here requires [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html). Follow the instructions for your OS.
@@ -18,7 +24,7 @@ To setup the experiments, use the following script.
 
 ```bash
 # Clone matchmaker
-git clone https://github.com/CarlosCancino-Chacon/matchmaker.git
+git clone https://github.com/pymatchmaker/matchmaker.git
 
 cd matchmaker
 
@@ -65,7 +71,7 @@ mm = Matchmaker(
     score_file="path/to/score",
     performance_file="path/to/performance.mid",
     input_type="midi",
-    feature_type="mel",
+    feature_type="pitchclass",
     method="hmm",
 )
 for current_position in mm.run():
