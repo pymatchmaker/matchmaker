@@ -19,9 +19,12 @@ dependencies:
   - pip:
     - pyaudio==0.2.14
     - fastdtw==0.3.4
+    - madmom==0.16.1
     - mido==1.3.0
-    - python-rtmidi==1.5.8
-    - git+https://github.com/CPJKU/madmom.git
-    - pyyaml==6.0.1
+    - myst-parser>=3.0.1Ø
     - partitura>=1.3.0
+    - python-rtmidi==1.5.8
+    - pyyaml==6.0.1
     - python-hiddenmarkov==0.1.3
+    - Sphinx>=7.4.7
+    - sphinx-rtd-theme>=3.0.2
