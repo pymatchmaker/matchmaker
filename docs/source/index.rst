@@ -3,20 +3,23 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Welcome to Matchmaker's Documentation
+Welcome to Matchmaker's Documentation!
 ======================================
 
 .. include:: ../../README.md
    :parser: myst_parser.sphinx_
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 0
    :caption: Contents
 
+   introduction
    install
+   usage
+   citation
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 0
    :caption: API Reference
 
    modules/matchmaker
