@@ -8,7 +8,19 @@ Unlike offline alignment methods, for which state-of-the-art implementations are
   
 We aim to provide efficient reference implementations of score followers for use in real-time applications which can be easily integrated into existing projects.
 
+The full documentation for matchmaker is available online at [readthedocs.org](https://matchmaker.readthedocs.io).
+
+
 ## Setup
+
+### Prerequisites
+
+- Available Python version: 3.9, 3.10, 3.11, 3.12 (3.12 recommended)
+- [Fluidsynth](https://www.fluidsynth.org/)
+- [PortAudio](http://www.portaudio.com/)
+
+Please ensure that you've installed the above packages before proceeding.
+You should not install `fluidsynth` using `pip install fluidsynth` as it is not compatible with `matchmaker`.
 
 ### Install from PyPI
 
@@ -18,6 +30,7 @@ pip install pymatchmaker
 
 ### Install from source using conda
 
+Please refer to the [requirements.txt](requirements.txt) file for the minimum required versions of the packages.
 Setting up the code as described here requires [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html). Follow the instructions for your OS.
 
 To setup the experiments, use the following script.
@@ -29,10 +42,14 @@ git clone https://github.com/pymatchmaker/matchmaker.git
 cd matchmaker
 
 # Create the conda environment
-conda env create -f environment.yml
+conda create -n matchmaker python=3.12
+conda activate matchmaker
 
 # Install matchmaker
 pip install -e .
+
+# Install matchmaker with dev tools
+pip install -e .[dev]
 ```
 
 If you have a ImportError with 'Fluidsynth' by `pyfluidsynth` library on MacOS, please refer to the following [link](https://stackoverflow.com/a/75339618).
@@ -41,7 +58,7 @@ If you have a ImportError with 'Fluidsynth' by `pyfluidsynth` library on MacOS, 
 
 ### Quickstart for live streaming
 
-To get started quickly, you can use the `Matchmaker` class, which provides a simple interface for running the alignment process. You can use a `musicxml` or `midi` file as the score file. Specify `"audio"` or `"midi"` as the `input_type` argument, and the default device for that input type will be automatically set up. For options regarding the `method`, please refer to the [Alignment Methods](#alignment-methods) section.
+To get started quickly, you can use the `Matchmaker` class, which provides a simple interface for running the alignment process. You can use a `musicxml` or `midi` file as the score file. Specify `"audio"` or `"midi"` as the `input_type` argument, and the default device for that input type will be automatically set up. 
 
 ```python
 from matchmaker import Matchmaker
@@ -49,7 +66,6 @@ from matchmaker import Matchmaker
 mm = Matchmaker(
     score_file="path/to/score",
     input_type="audio",
-    method="dixon",
 )
 for current_position in mm.run():
     print(current_position)  # beat position in the score
@@ -71,11 +87,9 @@ mm = Matchmaker(
     score_file="path/to/score",
     performance_file="path/to/performance.mid",
     input_type="midi",
-    feature_type="pitchclass",
-    method="hmm",
 )
 for current_position in mm.run():
-    print(current_position)  # beat position in the score
+    print(current_position)
 ```
 
 ### Testing with Specific Input Device
@@ -88,13 +102,30 @@ from matchmaker import Matchmaker
 mm = Matchmaker(
     score_file="path/to/score",
     input_type="audio",
-    feature_type="chroma",
-    method="arzt",
     device_name_or_index="MacBookPro Microphone",
 )
 for current_position in mm.run():
-    print(current_position)  # beat position in the score
+    print(current_position)
 ```
+
+### Testing with Different Methods or Features
+
+For testing with Audio input, you can specify the alignment method as follows:
+
+```python
+from matchmaker import Matchmaker
+
+mm = Matchmaker(
+    score_file="path/to/score",
+    input_type="audio",
+    method="dixon",  # or "arzt" (default)
+)
+for current_position in mm.run():
+    print(current_position)
+```
+
+For options regarding the `method`, please refer to the [Alignment Methods](#alignment-methods) section.
+For options regarding the `feature_type`, please refer to the [Features](#features) section.
 
 ### Custom Example
 
@@ -119,9 +150,9 @@ with AudioStream(processor=feature_processor) as stream:
 
 Matchmaker currently supports the following alignment methods:
 
-- `"dixon"`: On-line time warping algorithm by S. Dixon (2005).
-- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010))
-- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020).
+- `"dixon"`: On-line time warping algorithm by S. Dixon (2005). Supports audio input only.
+- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010)). Supports audio input only.
+- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020). Supports MIDI input only.
 
 ## Features
 

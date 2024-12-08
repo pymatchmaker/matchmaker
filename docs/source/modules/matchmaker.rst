@@ -1,5 +1,5 @@
-matchmaker.Matchmaker
-=====================
+matchmaker
+===========
 
 .. autoclass:: matchmaker.Matchmaker
    :members: run

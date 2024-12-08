@@ -3,11 +3,12 @@
 """
 Features from audio files
 """
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import librosa
 import numpy as np
-from madmom.audio.chroma import DeepChromaProcessor
+
+# from madmom.audio.chroma import DeepChromaProcessor
 
 from matchmaker.utils.processor import Processor
 
@@ -239,8 +240,8 @@ def compute_features_from_audio(
         "chroma": ChromagramProcessor,
         "mel": MelSpectrogramProcessor,
         "mfcc": MFCCProcessor,
-        "deep_chroma": DeepChromaProcessor,
         "log_spectral": LogSpectralEnergyProcessor,
+        # "deep_chroma": DeepChromaProcessor,
     }
 
     feature_processor = processor_mapping[processor_name](
