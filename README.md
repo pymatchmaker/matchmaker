@@ -8,7 +8,7 @@ Unlike offline alignment methods, for which state-of-the-art implementations are
   
 We aim to provide efficient reference implementations of score followers for use in real-time applications which can be easily integrated into existing projects.
 
-The full documentation for matchmaker is available online at [readthedocs.org](https://matchmaker.readthedocs.io).
+The full documentation for matchmaker is available online at [readthedocs.org](https://pymatchmaker.readthedocs.io/).
 
 
 ## Setup
@@ -53,6 +53,8 @@ pip install -e .[dev]
 ```
 
 If you have a ImportError with 'Fluidsynth' by `pyfluidsynth` library on MacOS, please refer to the following [link](https://stackoverflow.com/a/75339618).
+
+Because of the dependency of `partitura`, which uses `MuseScore_General.sf3` (free soundfont provided by MuseScore) as the default soundfont, the soundfont will be installed automatically inside the `partitura` package. This might take a while for the first time.
 
 ## Usage Examples
 
