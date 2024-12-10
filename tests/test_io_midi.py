@@ -3,32 +3,29 @@
 """
 Tests for the io/midi.py module
 """
-import time
+
 import unittest
-from io import StringIO
+from tempfile import NamedTemporaryFile
 from typing import Optional
-from unittest.mock import patch
 
 import mido
 import numpy as np
 import partitura as pt
+from partitura import save_performance_midi
+from partitura.performance import PerformedPart
 
 from matchmaker import EXAMPLE_PERFORMANCE
 from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.mediator import CeusMediator
-from matchmaker.io.midi import Buffer, MidiStream
+from matchmaker.io.midi import MidiStream
+from matchmaker.utils.midi import check_output_midi_devices
 from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.processor import DummyProcessor
-from matchmaker.utils.symbolic import midi_messages_from_midi, panic_button
+from matchmaker.utils.symbolic import midi_messages_from_midi
+from tests.utils import DummyMidiPlayer
 
 RNG = np.random.RandomState(1984)
-
-from tempfile import NamedTemporaryFile
-
-from partitura import save_performance_midi
-from partitura.performance import PerformedPart
-
-from tests.utils import DummyMidiPlayer
+HAS_MIDI_INPUT = check_output_midi_devices()
+SKIP_REASON = (not HAS_MIDI_INPUT, "No input audio devices detected")
 
 
 def setup_midi_player(use_example: bool = False):
@@ -157,6 +154,7 @@ class TestMidiStream(unittest.TestCase):
             virtual_port=virtual_port,
         )
 
+    @unittest.skipIf(*SKIP_REASON)
     def test_init(self):
         """Test that the MidiStream initializes correctly"""
         for processor in [
@@ -195,8 +193,8 @@ class TestMidiStream(unittest.TestCase):
                             if port is not None:
                                 port.close()
 
+    @unittest.skipIf(*SKIP_REASON)
     def test_init_port_selection(self):
-
         # Raise an error if port is incorrect
         with self.assertRaises(ValueError):
             self.setup(port="wrong_port")
@@ -231,7 +229,6 @@ class TestMidiStream(unittest.TestCase):
             for return_midi_messages in [True, False]:
                 for use_mediator in [True, False]:
                     for polling_period in [None, 0.01]:
-
                         port, queue, midi_player, _, mediator = setup_midi_player()
 
                         self.setup(
@@ -303,7 +300,6 @@ class TestMidiStream(unittest.TestCase):
         )
 
         with self.stream as stream:
-
             midi_player.start()
 
             while midi_player.is_playing:
