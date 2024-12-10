@@ -19,8 +19,7 @@ The full documentation for matchmaker is available online at [readthedocs.org](h
 - [Fluidsynth](https://www.fluidsynth.org/)
 - [PortAudio](http://www.portaudio.com/)
 
-Please ensure that you've installed the above packages before proceeding.
-You should not install `fluidsynth` using `pip install fluidsynth` as it is not compatible with `matchmaker`.
+First, install Fluidsynth, and then install the `pyfluidsynth` Python library. Note that `pyfluidsynth` only provides Python bindings for Fluidsynth; it does not install Fluidsynth itself. Be aware that there is also a `fluidsynth` Python library (without the `py-` prefix), but it is not compatible with `matchmaker`.
 
 ### Install from PyPI
 
@@ -152,9 +151,9 @@ with AudioStream(processor=feature_processor) as stream:
 
 Matchmaker currently supports the following alignment methods:
 
-- `"dixon"`: On-line time warping algorithm by S. Dixon (2005). Supports audio input only.
-- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010)). Supports audio input only.
-- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020). Supports MIDI input only.
+- `"dixon"`: On-line time warping algorithm by S. Dixon (2005). Currently supports audio input; MIDI support coming soon.
+- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010)). Currently supports audio input; MIDI support coming soon.
+- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020). Currently supports MIDI input; Audio support coming soon.
 
 ## Features
 
