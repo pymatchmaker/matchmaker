@@ -3,6 +3,7 @@
 """
 This module contains tests for the package initialization.
 """
+
 import unittest
 
 import librosa

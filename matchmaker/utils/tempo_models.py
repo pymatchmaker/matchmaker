@@ -7,10 +7,10 @@ TODO
 ----
 * Adapt models from ACCompanion
 """
-from typing import Callable, Optional, Tuple, Union
+
+from typing import Optional, Tuple
 
 import numpy as np
-from scipy.interpolate import interp1d
 
 
 class TempoModel(object):

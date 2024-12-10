@@ -3,13 +3,13 @@
 """
 This module contains methods to compute features from MIDI signals.
 """
-import os
+
 from typing import Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import partitura as pt
 from numpy.typing import NDArray
-from partitura.performance import Performance, PerformanceLike, PerformedPart
+from partitura.performance import PerformanceLike, PerformedPart
 from partitura.score import Part, Score, ScoreLike, merge_parts
 from partitura.utils.music import performance_from_part
 
@@ -137,7 +137,6 @@ class PitchIOIProcessor(Processor):
                 pitch_obs_list.append(msg.note - self.piano_shift)
 
         if pitch_obs.sum() > 0:
-
             if self.prev_time is None:
                 # There is no IOI for the first observed note
                 ioi_obs = 0.0
@@ -292,7 +291,6 @@ def compute_features_from_symbolic(
     polling_period: Optional[float] = 0.01,
     bpm: Optional[float] = 120,
 ):
-
     processor_mapping = {
         "pitch": PitchProcessor,
         "pitch_ioi": PitchIOIProcessor,
@@ -306,7 +304,6 @@ def compute_features_from_symbolic(
     feature_processor = processor_mapping[processor_name](**processor_kwargs)
 
     if isinstance(ref_info, Score):
-
         ref_info = performance_from_part(
             part=merge_parts(ref_info) if len(ref_info) > 1 else ref_info[0],
             bpm=bpm,
@@ -322,7 +319,6 @@ def compute_features_from_symbolic(
         ref_info = pt.load_performance(ref_info)
 
     elif isinstance(ref_info, np.ndarray):
-
         ref_info = PerformedPart.from_note_array(ref_info)
 
     if polling_period is not None:
@@ -338,7 +334,6 @@ def compute_features_from_symbolic(
 
     outputs = []
     for frame, f_time in zip(frames_array, frame_times):
-
         output = feature_processor((frame, f_time))
 
         outputs.append(output)

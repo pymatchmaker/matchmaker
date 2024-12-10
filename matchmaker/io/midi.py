@@ -9,7 +9,6 @@ from types import TracebackType
 from typing import Callable, List, Optional, Tuple, Type, Union
 
 import mido
-import partitura as pt
 from mido.ports import BaseInput as MidiInputPort
 
 from matchmaker.features.midi import PitchIOIProcessor

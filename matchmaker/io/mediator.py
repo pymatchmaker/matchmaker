@@ -1,14 +1,15 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 """
-This module contains a mediator for filtering out 
-MIDI messages "performed" by an internal process/thread 
-from the input MIDI (from a true/non-internal source). 
-Using the mediator is only necessary for old instruments 
-that do not filter the messages automatically. So far we have only 
-encountered this issue with the Bösendorfer CEUS, and thus 
+This module contains a mediator for filtering out
+MIDI messages "performed" by an internal process/thread
+from the input MIDI (from a true/non-internal source).
+Using the mediator is only necessary for old instruments
+that do not filter the messages automatically. So far we have only
+encountered this issue with the Bösendorfer CEUS, and thus
 the name of the class.
 """
+
 import collections
 import threading
 
@@ -154,7 +155,6 @@ class CeusMediator(ThreadMediator):
         with self._ceus_lock:
             # Check if the entry is in the filter:
             if midi_pitch in self._ceus_filter:
-
                 # Whether to delete the entry:
                 if delete_entry:
                     self.filter_remove_pitch(midi_pitch)

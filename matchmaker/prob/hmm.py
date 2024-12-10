@@ -3,7 +3,7 @@
 """
 This module implements Hidden Markov Models for score following
 """
-import time
+
 import warnings
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -18,7 +18,6 @@ from hiddenmarkov import (
 )
 from numpy.typing import NDArray
 from scipy.signal import convolve
-from scipy.sparse import lil_matrix
 from scipy.stats import gumbel_l, norm
 
 from matchmaker.base import OnlineAlignment
@@ -75,7 +74,6 @@ class BaseHMM(HiddenMarkovModel):
         queue: Optional[RECVQueue] = None,
         patience: int = 10,
     ) -> None:
-
         HiddenMarkovModel.__init__(
             self,
             observation_model=observation_model,
@@ -95,7 +93,6 @@ class BaseHMM(HiddenMarkovModel):
         return (np.array(self._warping_path).T).astype(np.int32)
 
     def __call__(self, input: NDArrayFloat) -> float:
-
         current_state = self.forward_algorithm_step(
             observation=input,
             log_probabilities=False,
@@ -109,7 +106,6 @@ class BaseHMM(HiddenMarkovModel):
 
     def run(self) -> NDArrayInt:
         if self.queue is not None:
-
             prev_state = self.current_state
             same_state_counter = 0
             while self.is_still_following():
@@ -131,7 +127,6 @@ class BaseHMM(HiddenMarkovModel):
 
     def is_still_following(self) -> bool:
         if self.current_state is not None:
-
             return self.current_state <= self.n_states - 1
 
         return False
@@ -155,7 +150,6 @@ class PitchHMM(BaseHMM):
         initial_probabilities: Optional[NDArrayFloat] = None,
         has_insertions: bool = False,
     ) -> None:
-
         transition_model = ConstantTransitionModel(
             transition_probabilities=transition_matrix,
             init_probabilities=initial_probabilities,
@@ -177,7 +171,6 @@ def jiang_transition_matrix(
     p1 = 1  # this should be computed according to the Eq. 12
     for i in range(n_states):
         for j in range(n_states):
-
             if j <= i:
                 transition_matrix[i, j] = 0  # (1 - p1 if we want to go back)
             elif j == i:
@@ -282,7 +275,6 @@ def simple_transition_matrix(
     inserted_states: bool = False,
     trans_prob=0.7,
 ) -> NDArrayFloat:
-
     # Initialize a matrix of zeros
     matrix = np.zeros((n_states, n_states))
 
@@ -399,7 +391,6 @@ def compute_continous_pitch_profiles(  # TODO check separately
     normalize=True,
     inserted_states=True,
 ) -> NDArrayFloat:
-
     onset_idxs_in_features = np.searchsorted(
         a=spectral_feature_times,
         v=onset_times,
@@ -553,7 +544,6 @@ def compute_discrete_pitch_profiles_old(
         # Work on chord states (even indices), not inserted (odd indices):
 
         if not inserted_states or (inserted_states and np.mod(i, 2) == 0):
-
             chord = chord_pitches[i // 2] if inserted_states else chord_pitches[i]
 
             for pitch in chord:
@@ -578,7 +568,6 @@ def compute_discrete_pitch_profiles_old(
 
 
 def compute_ioi_matrix(unique_onsets, inserted_states=False):
-
     # Construct unique onsets with skips:
     if inserted_states:
         unique_onsets_s = np.insert(
@@ -675,7 +664,6 @@ class BernoulliPitchObservationModel(ObservationModel):
         self.pitch_profiles = pitch_profiles
 
     def __call__(self, observation: NDArrayFloat) -> NDArrayFloat:
-
         return compute_bernoulli_pitch_probabilities(
             pitch_obs=observation,
             pitch_profiles=self.pitch_profiles,
@@ -701,7 +689,6 @@ class PitchIOIObservationModel(ObservationModel):
         self.ioi_matrix = ioi_matrix
 
     def __call__(self, observation: Any, *args, **kwargs) -> NDArrayFloat:
-
         pitch_obs, ioi_obs, tempo_est = observation
         ioi_idx = self.current_state if self.current_state is not None else 0
 
@@ -910,7 +897,6 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
         )
 
     def __call__(self, input, *args, **kwargs):
-
         frame_index = args[0] if args else None
         pitch_obs, ioi_obs = input
 
@@ -936,7 +922,6 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             current_state > self.current_state
         ):  # TODO: check if it works for audio (current state moves?) -> transition matrix
             if self.has_insertions and current_state % 2 == 0:
-
                 current_so = self.state_space[current_state]
                 # prev_so = self.state_space[self.current_state]
 
@@ -946,7 +931,6 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
                 )
 
             elif not self.has_insertions:
-
                 current_so = self.state_space[current_state]
                 self.tempo_model.update_beat_period(
                     performed_onset=self.perf_onset,

@@ -26,7 +26,7 @@ cdef class Metric:
 def cdist(float[:, :]  X, float[:, :] Y, Metric local_distance):
     """
     Pairwise distance between the elements of two arrays
-    
+
     Parameters
     ----------
     X : float np.ndarray
@@ -39,7 +39,7 @@ def cdist(float[:, :]  X, float[:, :] Y, Metric local_distance):
         Callable function for computing the local distance between the
         elements of X and Y. See e.g., metrics defined below (`Euclidean`,
         `Cosine`, etc.)
-    
+
     Returns
     -------
     D : np.ndarray
@@ -73,7 +73,7 @@ def vdist(float[:, :]  X, float[:] Y, Metric local_distance):
     for i in range(M):
         D[i] = local_distance.distance(X[i], Y)
     return np.asarray(D)
-    
+
 
 @cython.boundscheck(False)
 @cython.boundscheck(False)

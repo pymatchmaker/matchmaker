@@ -3,6 +3,7 @@
 """
 Input audio stream
 """
+
 import time
 from types import TracebackType
 from typing import Callable, Optional, Tuple, Type, Union
@@ -82,12 +83,10 @@ class AudioStream(Stream):
 
         # Index of the device is given
         elif isinstance(device_name_or_index, int):
-
             self.input_device_index = device_name_or_index
             audio_devices = get_audio_devices()
 
             if device_name_or_index > len(audio_devices):
-
                 print(
                     f"`{device_name_or_index}` is an invalid device index!\n"
                     "The following audio devices are available:\n"
@@ -156,7 +155,6 @@ class AudioStream(Stream):
         target_audio: np.ndarray,
         f_time: float,
     ):
-
         if self.last_chunk is None:  # add zero padding at the first block
             target_audio = np.concatenate(
                 (np.zeros(self.hop_length, dtype=np.float32), target_audio)

@@ -3,6 +3,7 @@
 """
 Tests for matchmaker/utils/partitura.py
 """
+
 import time
 import unittest
 from tempfile import NamedTemporaryFile
@@ -22,7 +23,6 @@ from matchmaker.utils.symbolic import (
 
 
 class TestBuffer(unittest.TestCase):
-
     def setUp(self):
         self.polling_period = 1.0  # 1-second polling period
         self.buffer = Buffer(self.polling_period)
@@ -123,7 +123,6 @@ class TestLoadingMethods(unittest.TestCase):
         self.assertTrue(len(midi_frames) == len(frame_times))
 
         for buffer, ft in zip(midi_frames, frame_times):
-
             self.assertTrue(isinstance(buffer, Buffer))
             if len(buffer) > 0:
                 for msg, t in buffer.frame:
@@ -134,7 +133,6 @@ class TestLoadingMethods(unittest.TestCase):
                     )
 
     def test_midi_messages_from_performance(self):
-
         filename = matchmaker.EXAMPLE_PERFORMANCE
         performance = pt.load_performance_midi(filename)
         performed_part = performance[0]

@@ -3,6 +3,7 @@
 """
 This module contains tests for the utils.processor module.
 """
+
 import unittest
 
 import numpy as np
@@ -30,7 +31,7 @@ class TestProcessorWrapper(unittest.TestCase):
     """
 
     def test_init(self):
-        func = lambda x: 2 * x
+        func = lambda x: 2 * x  # noqa: E731
         processor = ProcessorWrapper(func=func)
         data = RNG.rand(100, 7)
         proc_output = processor(data)
