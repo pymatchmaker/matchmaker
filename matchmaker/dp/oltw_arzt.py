@@ -3,7 +3,7 @@
 """
 On-line Dynamic Time Warping
 """
-import time
+
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
@@ -11,7 +11,7 @@ import progressbar
 from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
-from matchmaker.dp.dtw_loop import oltw_arzt_loop, reset_cost_matrix
+from matchmaker.dp.dtw_loop import oltw_arzt_loop
 from matchmaker.utils import (
     CYTHONIZED_METRICS_W_ARGUMENTS,
     CYTHONIZED_METRICS_WO_ARGUMENTS,
@@ -112,7 +112,6 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
 
         # Set local cost function
         if isinstance(local_cost_fun, str):
-
             if local_cost_fun not in CYTHONIZED_METRICS_WO_ARGUMENTS:
                 raise MatchmakerInvalidOptionError(
                     parameter_name="local_cost_fun",
@@ -123,7 +122,6 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             self.local_cost_fun = getattr(distances, local_cost_fun)()
 
         elif isinstance(local_cost_fun, tuple):
-
             if local_cost_fun[0] not in CYTHONIZED_METRICS_W_ARGUMENTS:
                 raise MatchmakerInvalidOptionError(
                     parameter_name="local_cost_fun",

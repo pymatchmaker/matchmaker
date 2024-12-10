@@ -3,6 +3,7 @@
 """
 Tests for the features/midi.py module
 """
+
 import unittest
 from io import StringIO
 from unittest.mock import patch
@@ -23,10 +24,8 @@ from tests.utils import process_midi_offline
 
 
 class TestPitchProcessor(unittest.TestCase):
-
     @patch("sys.stdout", new_callable=StringIO)
     def test_processor(self, mock_io):
-
         note_array = np.empty(
             13,
             dtype=[
@@ -38,7 +37,6 @@ class TestPitchProcessor(unittest.TestCase):
             ],
         )
         for i, pitch in enumerate(range(60, 73)):
-
             note_array[i] = (pitch, i, 0.5, 64, f"n{i}")
 
         perf = PerformedPart.from_note_array(note_array)
@@ -111,10 +109,8 @@ class TestPitchProcessor(unittest.TestCase):
 
 
 class TestPitchIOIProcessor(unittest.TestCase):
-
     @patch("sys.stdout", new_callable=StringIO)
     def test_processor(self, mock_io):
-
         note_array = np.empty(
             13,
             dtype=[
@@ -126,7 +122,6 @@ class TestPitchIOIProcessor(unittest.TestCase):
             ],
         )
         for i, pitch in enumerate(range(60, 73)):
-
             note_array[i] = (pitch, i, 0.5, 64, f"n{i}")
 
         perf = PerformedPart.from_note_array(note_array)
@@ -170,7 +165,6 @@ class TestPitchIOIProcessor(unittest.TestCase):
             if processor.piano_range and processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-
                         pitch_obs, ioi_obs = out
                         self.assertTrue(len(pitch_obs) == 1)
                         self.assertTrue(pitch_obs == non_none_outputs + 60 - 21)
@@ -196,7 +190,6 @@ class TestPitchIOIProcessor(unittest.TestCase):
             elif not processor.piano_range and processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-
                         pitch_obs, ioi_obs = out
                         self.assertTrue(len(pitch_obs) == 1)
                         self.assertTrue(pitch_obs == non_none_outputs + 60)
@@ -221,7 +214,6 @@ class TestPitchIOIProcessor(unittest.TestCase):
             elif processor.piano_range and not processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-
                         pitch_obs, ioi_obs = out
                         self.assertTrue(len(pitch_obs) == 88)
                         self.assertTrue(
@@ -248,7 +240,6 @@ class TestPitchIOIProcessor(unittest.TestCase):
             elif not processor.piano_range and not processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-
                         pitch_obs, ioi_obs = out
                         self.assertTrue(len(pitch_obs) == 128)
                         self.assertTrue(np.argmax(pitch_obs) == non_none_outputs + 60)
@@ -274,10 +265,8 @@ class TestPitchIOIProcessor(unittest.TestCase):
 
 
 class TestPianoRollProcessor(unittest.TestCase):
-
     @patch("sys.stdout", new_callable=StringIO)
     def test_processor(self, mock_io):
-
         note_array = np.empty(
             13,
             dtype=[
@@ -289,7 +278,6 @@ class TestPianoRollProcessor(unittest.TestCase):
             ],
         )
         for i, pitch in enumerate(range(60, 73)):
-
             note_array[i] = (pitch, i, 0.5, 64, f"n{i}")
 
         perf = PerformedPart.from_note_array(note_array)
@@ -346,10 +334,8 @@ class TestPianoRollProcessor(unittest.TestCase):
 
 
 class TestPitchClassPianoRollProcessor(unittest.TestCase):
-
     @patch("sys.stdout", new_callable=StringIO)
     def test_processor(self, mock_io):
-
         note_array = np.empty(
             13,
             dtype=[
@@ -361,7 +347,6 @@ class TestPitchClassPianoRollProcessor(unittest.TestCase):
             ],
         )
         for i, pitch in enumerate(range(60, 73)):
-
             note_array[i] = (pitch, i, 0.5, 64, f"n{i}")
 
         perf = PerformedPart.from_note_array(note_array)
@@ -406,9 +391,7 @@ class TestPitchClassPianoRollProcessor(unittest.TestCase):
 
 
 class TestComputeFeaturesFromSymbolic(unittest.TestCase):
-
     def test_framed_features(self):
-
         score = pt.load_musicxml(EXAMPLE_SCORE)
         perf = pt.load_performance_midi(EXAMPLE_PERFORMANCE)
         input_types = [
@@ -421,7 +404,6 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
         ]
 
         for ref_info in input_types:
-
             output_length = None
             features_list = [
                 "pitch",
@@ -450,7 +432,6 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
                 self.assertTrue(output_length == len(features))
 
     def test_nonframed_features(self):
-
         score = pt.load_musicxml(EXAMPLE_SCORE)
         perf = pt.load_performance_midi(EXAMPLE_PERFORMANCE)
         input_types = [
@@ -463,7 +444,6 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
         ]
 
         for ref_info in input_types:
-
             output_length = None
             features_list = [
                 "pitch",

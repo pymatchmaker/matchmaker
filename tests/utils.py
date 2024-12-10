@@ -3,6 +3,7 @@
 """
 Utilities for tests
 """
+
 import numbers
 import tempfile
 import threading
@@ -299,7 +300,6 @@ def process_audio_offline(
     sample_rate: int = SAMPLE_RATE,
     hop_length: int = HOP_LENGTH,
 ) -> List[Any]:
-
     queue = RECVQueue()
 
     if isinstance(perf_info, str):

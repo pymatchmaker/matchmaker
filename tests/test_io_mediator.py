@@ -3,6 +3,7 @@
 """
 Tests for the matchmaker.io.mediator module
 """
+
 import unittest
 from collections import namedtuple
 

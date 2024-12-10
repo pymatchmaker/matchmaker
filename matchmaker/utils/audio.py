@@ -3,6 +3,7 @@
 """
 Audio device utilities.
 """
+
 from typing import List
 
 import pyaudio
@@ -24,7 +25,6 @@ class AudioDeviceInfo(object):
         device_info: dict,
         device_index: int,
     ) -> None:
-
         self.device_info = device_info
         self.device_index = device_index
         self.name = device_info["name"]

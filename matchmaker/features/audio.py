@@ -3,13 +3,13 @@
 """
 Features from audio files
 """
+
 from typing import Dict, Optional, Tuple, Union
 
 import librosa
 import numpy as np
 
 # from madmom.audio.chroma import DeepChromaProcessor
-
 from matchmaker.utils.processor import Processor
 
 SAMPLE_RATE = 44100
@@ -84,7 +84,6 @@ class ChromagramIOIProcessor(Processor):
         self,
         data: InputAudioFrame,
     ) -> Tuple[Optional[np.ndarray], Dict]:
-
         y, f_time = data
 
         if self.prev_time is None:

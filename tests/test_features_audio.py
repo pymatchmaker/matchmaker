@@ -3,8 +3,8 @@
 """
 Tests for the features/audio.py module
 """
+
 import os
-import tempfile
 import unittest
 
 import librosa
@@ -40,9 +40,7 @@ def create_sample_audio_waveform(freq: float = 440.0) -> np.ndarray:
 
 
 class TestAudioProcessors(unittest.TestCase):
-
     def test_chromagram_processor(self):
-
         notes = [
             "C4",
             "C#4",
@@ -174,9 +172,7 @@ class TestAudioProcessors(unittest.TestCase):
 
 
 class TestComputeFeaturesFromAudio(unittest.TestCase):
-
     def test_compute_features_from_audio_input_str(self):
-
         features = compute_features_from_audio(
             ref_info=os.path.join(CURRENT_PATH, "resources", "Bach-fugue_bwv_858.mp3")
         )
@@ -184,7 +180,6 @@ class TestComputeFeaturesFromAudio(unittest.TestCase):
         self.assertIsInstance(features, np.ndarray)
 
     def test_compute_features_from_np_array(self):
-
         sample_audio = create_sample_audio_waveform(440)
 
         features = compute_features_from_audio(

@@ -3,6 +3,7 @@
 """
 This module contains tests for the dp.oltw_arzt module.
 """
+
 import unittest
 
 import numpy as np
@@ -81,7 +82,6 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
 
         # Test local_cost_fun as string
         for local_cost_fun in CYTHONIZED_METRICS_WO_ARGUMENTS:
-
             oltw = OnlineTimeWarpingArzt(
                 reference_features=X,
                 window_size=2,
@@ -111,7 +111,6 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
 
         # Test local_cost_fun as tuple
         for local_cost_fun in CYTHONIZED_METRICS_W_ARGUMENTS:
-
             if local_cost_fun == "Lp":
                 for p in RNG.uniform(low=1, high=10, size=10):
                     oltw = OnlineTimeWarpingArzt(
@@ -143,7 +142,6 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
         )
 
         for spdist in SCIPY_DISTANCES:
-
             oltw = OnlineTimeWarpingArzt(
                 reference_features=X,
                 window_size=2,

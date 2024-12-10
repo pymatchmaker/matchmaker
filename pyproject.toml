@@ -46,7 +46,14 @@ dev = [
     "pre-commit>=3.6.0",
     "ipython>=8.12.0",
     "pyclean>=3.0.0",
+    "ruff>=0.8.2",
 ]
 
 [tool.setuptools.packages.find]
 exclude = ["tests", "docs"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.lint]
+ignore = ["F403", "E722", "F401", "F841"]

@@ -36,7 +36,7 @@ Indices and tables
 
 Acknowledgements
 ----------------
-This work has been supported by the Austrian Science Fund (FWF), 
-grant agreement PAT 8820923 ("Rach3: A Computational Approach to Study Piano Rehearsals"). 
-Additionally, this work was supported by the National Research Foundation of Korea (NRF) grant 
+This work has been supported by the Austrian Science Fund (FWF),
+grant agreement PAT 8820923 ("Rach3: A Computational Approach to Study Piano Rehearsals").
+Additionally, this work was supported by the National Research Foundation of Korea (NRF) grant
 funded by the Korea government (MSIT) (No. NRF-2023R1A2C3007605).

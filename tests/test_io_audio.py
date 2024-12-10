@@ -3,6 +3,7 @@
 """
 This module contains tests for the matchmaker.io module.
 """
+
 import os
 import time
 import unittest
@@ -10,7 +11,6 @@ from io import StringIO
 from typing import Optional
 from unittest.mock import patch
 
-import librosa
 import numpy as np
 
 from matchmaker import EXAMPLE_AUDIO
@@ -21,7 +21,6 @@ from matchmaker.features.audio import (
 )
 from matchmaker.io.audio import AudioStream
 from matchmaker.utils.audio import check_input_audio_devices, get_audio_devices
-from matchmaker.utils.misc import RECVQueue
 from matchmaker.utils.processor import DummyProcessor
 from tests.utils import generate_sine_wave
 
@@ -35,14 +34,12 @@ HOP_LENGTH = 256
 
 
 class TestAudioStream(unittest.TestCase):
-
     def setup(
         self,
         processor_name: str = "dummy",
         file_path: Optional[str] = None,
         wait: bool = False,
     ):
-
         if processor_name == "chroma":
             processor = ChromagramProcessor(
                 sample_rate=SAMPLE_RATE,
@@ -98,7 +95,6 @@ class TestAudioStream(unittest.TestCase):
         audio_devices = get_audio_devices()
 
         for ad in audio_devices:
-
             if ad.input_channels > 0:
                 # Set audio device from name
                 stream = AudioStream(
@@ -124,7 +120,6 @@ class TestAudioStream(unittest.TestCase):
     @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)
     def test_live_input(self, mock_stdout):
-
         num_proc_frames = dict(
             chroma=0,
             mel=0,
@@ -137,7 +132,6 @@ class TestAudioStream(unittest.TestCase):
             "mfcc",
             "dummy",
         ]:
-
             self.setup(processor_name=processor)
             self.stream.start()
             init_time = time.time()
@@ -170,7 +164,6 @@ class TestAudioStream(unittest.TestCase):
     @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)
     def test_live_input_context_manager(self, mock_stdout):
-
         num_proc_frames = dict(
             chroma=0,
             mel=0,
@@ -183,11 +176,9 @@ class TestAudioStream(unittest.TestCase):
             # "mfcc",
             "dummy",
         ]:
-
             self.setup(processor_name=processor)
 
             with self.stream as stream:
-
                 init_time = time.time()
                 crit = True
                 # Check that we get output from the queue
@@ -195,7 +186,6 @@ class TestAudioStream(unittest.TestCase):
 
                 p_time = init_time
                 while crit:
-
                     features, f_time = stream.queue.recv()
                     c_time = stream.current_time
                     if features is not None:
@@ -253,7 +243,6 @@ class TestAudioStream(unittest.TestCase):
     @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)
     def test_clear_queue(self, mock_stdout=None):
-
         file_path = generate_sine_wave(duration=0.2)
         processor = "dummy"
         self.setup(
@@ -273,7 +262,6 @@ class TestAudioStream(unittest.TestCase):
 
     @unittest.skipIf(*SKIP_REASON)
     def test_process_frame(self):
-
         self.setup(
             processor_name="dummy",
         )
