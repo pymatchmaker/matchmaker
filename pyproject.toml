@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=75.6", "wheel", "Cython>=3.0.8", "numpy>=1.26.3"]
+requires = ["setuptools>=75.6", "Cython==3.0.8", "numpy==1.26.3", "build", "cibuildwheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -49,4 +49,4 @@ dev = [
 ]
 
 [tool.setuptools.packages.find]
-exclude = ["tests"]
+exclude = ["tests", "docs"]

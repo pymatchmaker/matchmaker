@@ -11,14 +11,16 @@ extensions = [
         "matchmaker.utils.distances",
         ["matchmaker/utils/distances.pyx"],
         include_dirs=[np.get_include()],
+        define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
+        language="c",
     ),
     Extension(
         "matchmaker.dp.dtw_loop",
         ["matchmaker/dp/dtw_loop.pyx"],
         include_dirs=[np.get_include()],
+        define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
+        language="c",
     ),
 ]
 
-setup(
-    ext_modules=extensions,
-)
+setup(ext_modules=extensions)

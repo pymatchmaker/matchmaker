@@ -15,7 +15,7 @@ The full documentation for matchmaker is available online at [readthedocs.org](h
 
 ### Prerequisites
 
-- Available Python version: 3.9, 3.10, 3.11, 3.12 (3.12 recommended)
+- Available Python version: 3.9 (other versions will be supported soon!)
 - [Fluidsynth](https://www.fluidsynth.org/)
 - [PortAudio](http://www.portaudio.com/)
 
@@ -41,7 +41,7 @@ git clone https://github.com/pymatchmaker/matchmaker.git
 cd matchmaker
 
 # Create the conda environment
-conda create -n matchmaker python=3.12
+conda create -n matchmaker python=3.9
 conda activate matchmaker
 
 # Install matchmaker
