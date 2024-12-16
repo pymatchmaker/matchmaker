@@ -33,6 +33,7 @@ SAMPLE_RATE = 22050
 HOP_LENGTH = 256
 
 
+@unittest.skipIf(*SKIP_REASON)
 class TestAudioStream(unittest.TestCase):
     def setup(
         self,
@@ -72,7 +73,6 @@ class TestAudioStream(unittest.TestCase):
     def teardown(self):
         self.stream.stop()
 
-    @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)
     def test_stream_init(self, mock_stdout):
         """Test different input configurations"""
@@ -117,7 +117,6 @@ class TestAudioStream(unittest.TestCase):
             # raise error if a non existing device is selected
             stream = AudioStream(device_name_or_index=len(audio_devices) + 30)
 
-    @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)
     def test_live_input(self, mock_stdout):
         num_proc_frames = dict(
@@ -161,7 +160,6 @@ class TestAudioStream(unittest.TestCase):
 
             self.assertTrue(features_checked)
 
-    @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)
     def test_live_input_context_manager(self, mock_stdout):
         num_proc_frames = dict(
@@ -240,7 +238,6 @@ class TestAudioStream(unittest.TestCase):
 
         self.assertTrue(np.all(processed_frames == processed_frames[0]))
 
-    @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)
     def test_clear_queue(self, mock_stdout=None):
         file_path = generate_sine_wave(duration=0.2)
@@ -260,7 +257,6 @@ class TestAudioStream(unittest.TestCase):
 
         self.assertTrue(len(outputs) == 0)
 
-    @unittest.skipIf(*SKIP_REASON)
     def test_process_frame(self):
         self.setup(
             processor_name="dummy",
