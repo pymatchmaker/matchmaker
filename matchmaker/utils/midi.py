@@ -1,7 +1,6 @@
 from typing import List
 
 import mido
-
 from matchmaker.utils.symbolic import MidiDeviceInfo
 
 
@@ -12,10 +11,13 @@ def get_midi_devices() -> List[MidiDeviceInfo]:
     midi_devices : List[MidiDeviceInfo]
         List of available MIDI devices
     """
-
-    available_in_ports = mido.get_input_names()
-
-    available_out_ports = mido.get_output_names()
+    try:
+        available_in_ports = mido.get_input_names()
+        available_out_ports = mido.get_output_names()
+    except Exception as e:
+        print(f"Error getting MIDI devices: {e}")
+        available_in_ports = []
+        available_out_ports = []
 
     all_devices = list(set(available_in_ports + available_out_ports))
     all_devices.sort()

@@ -114,6 +114,7 @@ def setup_midi_player(use_example: bool = False):
     return port, queue, midi_player, note_array, mediator
 
 
+@unittest.skipIf(*SKIP_REASON)
 class TestMidiStream(unittest.TestCase):
     """
     This class tests the MidiStream class
@@ -154,7 +155,6 @@ class TestMidiStream(unittest.TestCase):
             virtual_port=virtual_port,
         )
 
-    @unittest.skipIf(*SKIP_REASON)
     def test_init(self):
         """Test that the MidiStream initializes correctly"""
         for processor in [
@@ -193,7 +193,6 @@ class TestMidiStream(unittest.TestCase):
                             if port is not None:
                                 port.close()
 
-    @unittest.skipIf(*SKIP_REASON)
     def test_init_port_selection(self):
         # Raise an error if port is incorrect
         with self.assertRaises(ValueError):
