@@ -37,7 +37,6 @@ To setup the experiments, use the following script.
 ```bash
 # Clone matchmaker
 git clone https://github.com/pymatchmaker/matchmaker.git
-
 cd matchmaker
 
 # Create the conda environment
@@ -49,6 +48,9 @@ pip install -e .
 
 # Install matchmaker with dev tools
 pip install -e .[dev]
+
+# Setup pre-commit
+pre-commit install
 ```
 
 If you have a ImportError with 'Fluidsynth' by `pyfluidsynth` library on MacOS, please refer to the following [link](https://stackoverflow.com/a/75339618).
