@@ -5,7 +5,8 @@ Processor related utilities
 
 This module contains all processor related functionality.
 """
-from typing import Any, Callable, Dict, List, Tuple, Union
+
+from typing import Any, Callable
 
 
 class Processor(object):
@@ -81,7 +82,6 @@ class DummyProcessor(Processor):
         data: Any,
         **kwargs,
     ) -> Any:
-
         return data
 
 

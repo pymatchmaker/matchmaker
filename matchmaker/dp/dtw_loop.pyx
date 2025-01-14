@@ -17,12 +17,12 @@ from libc.math cimport INFINITY
 @cython.wraparound(False)
 @cython.cdivision(True)
 def oltw_arzt_loop(
-    float[:,:] global_cost_matrix, 
-    float[:] window_cost, 
+    float[:,:] global_cost_matrix,
+    float[:] window_cost,
     int window_start,
-    int window_end, 
-    int input_index, 
-    float min_costs, 
+    int window_end,
+    int input_index,
+    float min_costs,
     int min_index
 ):
     """
@@ -93,7 +93,7 @@ def oltw_arzt_loop(
 
         idx = idx + 1
         score_index = score_index + 1
-        
+
     update_cost_matrix(global_cost_matrix, N)
 
     return global_cost_matrix, min_index, min_costs
@@ -103,7 +103,7 @@ def oltw_arzt_loop(
 cdef update_cost_matrix(float[:, :] global_cost_matrix, Py_ssize_t N):
     """
     Update the cost matrix by shifting the first column and set the second column to infinity.
-    
+
     Parameters
     ----------
     global_cost_matrix : np.ndarray
@@ -150,7 +150,7 @@ cpdef float[:,:] reset_cost_matrix(
 ):
     """
     Reset cost matrix for new window.
-    
+
     Parameters
     ----------
     global_cost_matrix : ndarray
@@ -173,5 +173,5 @@ cpdef float[:,:] reset_cost_matrix(
     for i in range(N):
         global_cost_matrix[i, 0] = INFINITY
     global_cost_matrix[six, 1] = cy_sum(window_cost)
-    
+
     return global_cost_matrix

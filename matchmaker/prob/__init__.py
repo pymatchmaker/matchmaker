@@ -3,4 +3,5 @@
 """
 Probabilistic methods for music alignment
 """
+
 from .hmm import PitchIOIHMM

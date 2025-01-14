@@ -3,14 +3,13 @@
 """
 Miscellaneous utilities
 """
+
 import numbers
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Iterable, List, Union
 
-import mido
 import numpy as np
-from mido.ports import BaseInput as MidiInputPort
 
 
 class MatchmakerInvalidParameterTypeError(Exception):
@@ -25,7 +24,6 @@ class MatchmakerInvalidParameterTypeError(Exception):
         actual_parameter_type: type,
         *args,
     ) -> None:
-
         if isinstance(required_parameter_type, Iterable):
             rqpt = ", ".join([f"{pt}" for pt in required_parameter_type])
         else:
@@ -41,7 +39,6 @@ class MatchmakerInvalidOptionError(Exception):
     """
 
     def __init__(self, parameter_name, valid_options, value, *args) -> None:
-
         rqop = ", ".join([f"{op}" for op in valid_options])
         message = f"`{parameter_name}` was expected to be in {rqop}, but is {value}"
 
@@ -54,7 +51,6 @@ class MatchmakerMissingParameterError(Exception):
     """
 
     def __init__(self, parameter_name: Union[str, List[str]], *args) -> None:
-
         if isinstance(parameter_name, Iterable) and not isinstance(parameter_name, str):
             message = ", ".join([f"`{pn}`" for pn in parameter_name])
             message = f"{message} were not given"
@@ -64,7 +60,7 @@ class MatchmakerMissingParameterError(Exception):
 
 
 def ensure_rng(
-    seed: Union[numbers.Integral, np.random.RandomState]
+    seed: Union[numbers.Integral, np.random.RandomState],
 ) -> np.random.RandomState:
     """
     Ensure random number generator is a np.random.RandomState instance

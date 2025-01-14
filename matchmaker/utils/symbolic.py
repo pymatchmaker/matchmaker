@@ -3,12 +3,12 @@
 """
 Utilities for symbolic music processing (e.g., MIDI)
 """
+
 from typing import List, Optional, Tuple, Union
 
 import mido
 import numpy as np
 import partitura as pt
-from mido.ports import BaseInput as MidiInputPort
 from numpy.typing import NDArray
 from partitura.performance import Performance, PerformanceLike, PerformedPart
 
@@ -127,7 +127,7 @@ def midi_messages_from_midi(filename: str) -> Tuple[NDArray, NDArray]:
 
 
 def midi_messages_from_performance(
-    perf: Union[PerformanceLike, str]
+    perf: Union[PerformanceLike, str],
 ) -> Tuple[NDArray, NDArray]:
     """
     Get a list of MIDI messages and message times from
@@ -168,7 +168,6 @@ def midi_messages_from_performance(
     messages = []
     message_times = []
     for ppart in pparts:
-
         # Get note on and note off info
         for note in ppart.notes:
             channel = note.get("channel", 0)
@@ -258,7 +257,6 @@ def midi_messages_to_framed_midi(
     frames = []
 
     for cursor, s_time in enumerate(start_times):
-
         buffer = Buffer(polling_period)
         if cursor == 0:
             # do not leave messages starting at 0 behind!
@@ -358,14 +356,12 @@ class MidiDeviceInfo(object):
         has_input: bool,
         has_output: bool,
     ) -> None:
-
         self.name = name
         self.device_index = device_index
         self.has_input = has_input
         self.has_output = has_output
 
     def __str__(self) -> str:
-
         out_str = (
             f"MIDI Device {self.device_index}: {self.name}\n"
             f"  - Input: {self.has_input}\n"
@@ -392,7 +388,6 @@ def get_midi_devices() -> List[MidiDeviceInfo]:
 
     midi_devices = []
     for i, device in enumerate(all_devices):
-
         has_input = device in available_in_ports
         has_output = device in available_out_ports
 

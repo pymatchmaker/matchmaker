@@ -3,7 +3,8 @@
 """
 This module contains aliases for typing
 """
-from typing import Dict, List, Optional, Tuple
+
+from typing import List, Tuple
 
 import numpy as np
 from mido import Message

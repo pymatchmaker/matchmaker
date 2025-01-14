@@ -3,6 +3,7 @@
 """
 Setup for Cython extensions
 """
+
 import numpy as np
 from setuptools import Extension, setup
 

@@ -5,7 +5,7 @@ Matchmaker is a Python library for real-time music alignment.
 Music alignment is a fundamental MIR task, and real-time music alignment is a necessary component of many interactive applications (e.g., automatic accompaniment systems, automatic page turning).
 
 Unlike offline alignment methods, for which state-of-the-art implementations are publicly available, real-time (online) methods have no standard implementation, forcing researchers and developers to build them from scratch for their projects.
-  
+
 We aim to provide efficient reference implementations of score followers for use in real-time applications which can be easily integrated into existing projects.
 
 The full documentation for matchmaker is available online at [readthedocs.org](https://pymatchmaker.readthedocs.io/).
@@ -37,7 +37,6 @@ To setup the experiments, use the following script.
 ```bash
 # Clone matchmaker
 git clone https://github.com/pymatchmaker/matchmaker.git
-
 cd matchmaker
 
 # Create the conda environment
@@ -49,6 +48,9 @@ pip install -e .
 
 # Install matchmaker with dev tools
 pip install -e .[dev]
+
+# Setup pre-commit
+pre-commit install
 ```
 
 If you have a ImportError with 'Fluidsynth' by `pyfluidsynth` library on MacOS, please refer to the following [link](https://stackoverflow.com/a/75339618).
@@ -59,7 +61,7 @@ Because of the dependency of `partitura`, which uses `MuseScore_General.sf3` (fr
 
 ### Quickstart for live streaming
 
-To get started quickly, you can use the `Matchmaker` class, which provides a simple interface for running the alignment process. You can use a `musicxml` or `midi` file as the score file. Specify `"audio"` or `"midi"` as the `input_type` argument, and the default device for that input type will be automatically set up. 
+To get started quickly, you can use the `Matchmaker` class, which provides a simple interface for running the alignment process. You can use a `musicxml` or `midi` file as the score file. Specify `"audio"` or `"midi"` as the `input_type` argument, and the default device for that input type will be automatically set up.
 
 ```python
 from matchmaker import Matchmaker

@@ -3,6 +3,7 @@
 """
 This module contains tests for the utils/audio.py module.
 """
+
 import unittest
 from io import StringIO
 from unittest.mock import patch
@@ -38,7 +39,6 @@ SKIP_REASON = (not HAS_AUDIO_DEVICES, "No audio device detected")
 class TestUtilsAudio(unittest.TestCase):
     @unittest.skipIf(*SKIP_REASON)
     def test_AudioDeviceInfo(self) -> None:
-
         p = pyaudio.PyAudio()
 
         device_info = AudioDeviceInfo(
@@ -51,7 +51,6 @@ class TestUtilsAudio(unittest.TestCase):
 
     @unittest.skipIf(*SKIP_REASON)
     def test_get_audio_devices(self) -> None:
-
         audio_devices = get_audio_devices()
 
         self.assertTrue(isinstance(audio_devices, list))
@@ -61,7 +60,6 @@ class TestUtilsAudio(unittest.TestCase):
 
     @unittest.skipIf(*SKIP_REASON)
     def test_check_input_audio_devices(self) -> None:
-
         has_audio_inputs = check_input_audio_devices()
 
         self.assertTrue(isinstance(has_audio_inputs, bool))
@@ -88,12 +86,10 @@ class TestUtilsAudio(unittest.TestCase):
     @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)
     def test_get_device_index_from_name(self, mock_stdout) -> None:
-
         # Test existing audio devices
         audio_devices = get_audio_devices()
 
         for ad in audio_devices:
-
             index = get_device_index_from_name(ad.name)
             self.assertTrue(isinstance(index, int))
 

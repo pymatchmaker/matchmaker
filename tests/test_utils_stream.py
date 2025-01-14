@@ -3,6 +3,7 @@
 """
 This module contains tests for the utils/stream.py module.
 """
+
 import unittest
 from threading import Thread
 
@@ -16,7 +17,6 @@ RNG = np.random.RandomState(1984)
 
 class TestStream(unittest.TestCase):
     def test_init(self):
-
         # Test initialization
         processor = DummyProcessor()
 

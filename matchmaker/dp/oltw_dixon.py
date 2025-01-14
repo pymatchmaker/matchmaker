@@ -3,6 +3,7 @@
 """
 On-line Dynamic Time Warping
 """
+
 import time
 from enum import IntEnum
 from typing import Callable
