@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymatchmaker"
-version = "0.1.2"
+version = "0.1.3"
 description = "A package for real-time music alignment"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -30,7 +30,7 @@ dependencies = [
     "python-rtmidi>=1.5.8",
     "mido>=1.3.2",
     "numpy>=1.26.3,<2.0",
-    "scipy==1.14.0",
+    "scipy>=1.11.4,<1.15",
     "librosa>=0.10.1",
     "partitura>=1.5.0",
     "progressbar2>=4.2.0",
