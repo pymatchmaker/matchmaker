@@ -170,12 +170,14 @@ class Matchmaker(object):
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
                 distance_func=distance_func,
+                frame_rate=self.frame_rate,
             )
         elif method == "dixon":
             self.score_follower = OnlineTimeWarpingDixon(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
                 distance_func=distance_func,
+                frame_rate=self.frame_rate,
             )
         elif method == "hmm":
             self.score_follower = PitchIOIHMM(

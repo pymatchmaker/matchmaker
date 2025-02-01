@@ -148,7 +148,8 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             )
 
         self.N_ref: int = self.reference_features.shape[0]
-        self.window_size: int = window_size * frame_rate
+        self.frame_rate = frame_rate
+        self.window_size: int = window_size * self.frame_rate
         self.step_size: int = step_size
         self.start_window_size: int = int(np.round(start_window_size * frame_rate))
         self.init_position: int = current_position
