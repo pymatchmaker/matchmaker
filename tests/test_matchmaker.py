@@ -10,7 +10,6 @@ from matchmaker.features.midi import PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
-from matchmaker.utils.eval import evaluate_alignment
 
 warnings.filterwarnings("ignore", module="partitura")
 warnings.filterwarnings("ignore", module="librosa")
@@ -70,7 +69,7 @@ class TestMatchmaker(unittest.TestCase):
         )
 
         # When: running the alignment process (get the returned result)
-        alignment_results = list(mm.run(verbose=False))
+        alignment_results = list(mm.run())
 
         # Then: the yielded result should be a float values
         for position_in_beat in alignment_results:
@@ -110,7 +109,7 @@ class TestMatchmaker(unittest.TestCase):
         )
 
         # When
-        alignment_positions = list(mm.run(verbose=False))
+        alignment_positions = list(mm.run())
 
         # Then
         current_test = self._testMethodName
@@ -176,6 +175,18 @@ class TestMatchmaker(unittest.TestCase):
                 input_type="audio",
                 method="invalid",
             )
+
+    def test_matchmaker_audio_run_with_distance_func(self):
+        # Given: a Matchmaker instance with audio input
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_audio,
+            wait=False,
+            input_type="audio",
+        )
+
+        # When & Then: distance function should be manhattan
+        self.assertEqual(mm.score_follower.distance_func.__class__.__name__, "L1")
 
     def test_matchmaker_midi_init(self):
         # When: a Matchmaker instance with midi input

@@ -25,6 +25,18 @@ from matchmaker.utils.misc import is_audio_file, is_midi_file
 
 PathLike = Union[str, bytes, os.PathLike]
 DEFAULT_TEMPO = 120
+DEFAULT_DISTANCE_FUNCS = {
+    "arzt": OnlineTimeWarpingArzt.DEFAULT_DISTANCE_FUNC,
+    "dixon": OnlineTimeWarpingDixon.DEFAULT_DISTANCE_FUNC,
+    "hmm": None,
+}
+
+DEFAULT_METHODS = {
+    "audio": "arzt",
+    "midi": "hmm",
+}
+
+AVAILABLE_METHODS = ["arzt", "dixon", "hmm"]
 
 
 class Matchmaker(object):
@@ -59,6 +71,7 @@ class Matchmaker(object):
         input_type: str = "audio",  # 'audio' or 'midi'
         feature_type: str = None,
         method: str = None,
+        distance_func: Optional[str] = None,
         device_name_or_index: Union[str, int] = None,
         sample_rate: int = SAMPLE_RATE,
         frame_rate: int = FRAME_RATE,
@@ -69,6 +82,7 @@ class Matchmaker(object):
         self.feature_type = feature_type
         self.frame_rate = frame_rate
         self.score_part: Optional[Part] = None
+        self.distance_func = distance_func
         self.device_name_or_index = device_name_or_index
         self.processor = None
         self.stream = None
@@ -140,22 +154,34 @@ class Matchmaker(object):
         # preprocess score
         self.reference_features = self.preprocess_score()
 
+        # validate method first
+        if method is None:
+            method = DEFAULT_METHODS[self.input_type]
+        elif method not in AVAILABLE_METHODS:
+            raise ValueError(f"Invalid method. Available methods: {AVAILABLE_METHODS}")
+
+        # setup distance function
+        if distance_func is None:
+            distance_func = DEFAULT_DISTANCE_FUNCS[method]
+
         # setup score follower
-        if method == "arzt" or (method is None and self.input_type == "audio"):
+        if method == "arzt":
             self.score_follower = OnlineTimeWarpingArzt(
-                reference_features=self.reference_features, queue=self.stream.queue
+                reference_features=self.reference_features,
+                queue=self.stream.queue,
+                distance_func=distance_func,
             )
         elif method == "dixon":
             self.score_follower = OnlineTimeWarpingDixon(
-                reference_features=self.reference_features, queue=self.stream.queue
+                reference_features=self.reference_features,
+                queue=self.stream.queue,
+                distance_func=distance_func,
             )
-        elif method == "hmm" or (method is None and self.input_type == "midi"):
+        elif method == "hmm":
             self.score_follower = PitchIOIHMM(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
             )
-        else:
-            raise ValueError("Invalid method")
 
     def preprocess_score(self):
         if self.input_type == "audio":

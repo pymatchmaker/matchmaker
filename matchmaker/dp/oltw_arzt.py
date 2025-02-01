@@ -24,7 +24,6 @@ from matchmaker.utils.misc import (
     RECVQueue,
 )
 
-DEFAULT_LOCAL_COST: str = "Manhattan"
 WINDOW_SIZE: int = 5
 STEP_SIZE: int = 5
 START_WINDOW_SIZE: Union[float, int] = 0.25
@@ -48,8 +47,8 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
     step_size : int
         Size of the step
 
-    local_cost_fun : str, tuple (str, dict) or callable
-        Local metric for computing pairwise distances.
+    distance_func : str, tuple (str, dict) or callable
+        Distance function for computing pairwise distances.
 
     start_window_size: int
         Size of the starting window size.
@@ -79,7 +78,8 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         List of the positions for each input.
     """
 
-    local_cost_fun: Callable[[NDArray[np.float32]], NDArray[np.float32]]
+    DEFAULT_DISTANCE_FUNC: str = "Manhattan"
+    distance_func: Callable[[NDArray[np.float32]], NDArray[np.float32]]
     vdist: Callable[[NDArray[np.float32]], NDArray[np.float32]]
 
     def __init__(
@@ -87,11 +87,11 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         reference_features: NDArray[np.float32],
         window_size: int = WINDOW_SIZE,
         step_size: int = STEP_SIZE,
-        local_cost_fun: Union[
+        distance_func: Union[
             str,
             Callable,
             Tuple[str, Dict[str, Any]],
-        ] = DEFAULT_LOCAL_COST,
+        ] = DEFAULT_DISTANCE_FUNC,
         start_window_size: int = START_WINDOW_SIZE,
         current_position: int = 0,
         frame_rate: int = FRAME_RATE,
@@ -103,43 +103,43 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.input_features: List[NDArray[np.float32]] = None
         self.queue = queue or RECVQueue()
 
-        if not (isinstance(local_cost_fun, (str, tuple)) or callable(local_cost_fun)):
+        if not (isinstance(distance_func, (str, tuple)) or callable(distance_func)):
             raise MatchmakerInvalidParameterTypeError(
-                parameter_name="local_cost_fun",
+                parameter_name="distance_func",
                 required_parameter_type=(str, tuple, Callable),
-                actual_parameter_type=type(local_cost_fun),
+                actual_parameter_type=type(distance_func),
             )
 
         # Set local cost function
-        if isinstance(local_cost_fun, str):
-            if local_cost_fun not in CYTHONIZED_METRICS_WO_ARGUMENTS:
+        if isinstance(distance_func, str):
+            if distance_func not in CYTHONIZED_METRICS_WO_ARGUMENTS:
                 raise MatchmakerInvalidOptionError(
-                    parameter_name="local_cost_fun",
+                    parameter_name="distance_func",
                     valid_options=CYTHONIZED_METRICS_WO_ARGUMENTS,
-                    value=local_cost_fun,
+                    value=distance_func,
                 )
-            # If local_cost_fun is a string
-            self.local_cost_fun = getattr(distances, local_cost_fun)()
+            # If distance_func is a string
+            self.distance_func = getattr(distances, distance_func)()
 
-        elif isinstance(local_cost_fun, tuple):
-            if local_cost_fun[0] not in CYTHONIZED_METRICS_W_ARGUMENTS:
+        elif isinstance(distance_func, tuple):
+            if distance_func[0] not in CYTHONIZED_METRICS_W_ARGUMENTS:
                 raise MatchmakerInvalidOptionError(
-                    parameter_name="local_cost_fun",
+                    parameter_name="distance_func",
                     valid_options=CYTHONIZED_METRICS_W_ARGUMENTS,
-                    value=local_cost_fun[0],
+                    value=distance_func[0],
                 )
-            # local_cost_fun is a tuple with the arguments to instantiate
+            # distance_func is a tuple with the arguments to instantiate
             # the cost
-            self.local_cost_fun = getattr(distances, local_cost_fun[0])(
-                **local_cost_fun[1]
+            self.distance_func = getattr(distances, distance_func[0])(
+                **distance_func[1]
             )
 
-        elif callable(local_cost_fun):
+        elif callable(distance_func):
             # If the local cost is a callable
-            self.local_cost_fun = local_cost_fun
+            self.distance_func = distance_func
 
         # A callable to compute the distance between the rows of matrix and a vector
-        if isinstance(self.local_cost_fun, Metric):
+        if isinstance(self.distance_func, Metric):
             self.vdist = vdist
         else:
             # TODO: Speed this up somehow instead of list comprehension
@@ -255,7 +255,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         window_cost = self.vdist(
             self.reference_features[window_start:window_end],
             input_features.squeeze(),
-            self.local_cost_fun,
+            self.distance_func,
         )
 
         self.global_cost_matrix, min_index, min_costs = oltw_arzt_loop(

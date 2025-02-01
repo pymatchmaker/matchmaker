@@ -1,6 +1,6 @@
 import numpy as np
 
-TOLERANCES = [50, 100, 300, 500, 1000]
+TOLERANCES = [50, 100, 300, 500, 1000, 2000]
 
 
 def transfer_positions(wp, ref_anns, frame_rate):
