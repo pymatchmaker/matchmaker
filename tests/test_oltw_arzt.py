@@ -46,7 +46,7 @@ SCIPY_DISTANCES = [
 
 
 class TestOnlineTimeWarpingArzt(unittest.TestCase):
-    def test_local_cost_fun(self):
+    def test_distance_func(self):
         """
         Test initialization of the class
         """
@@ -75,18 +75,18 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             window_size=2,
             step_size=1,
             # Invalid type (not str, tuple or callable)
-            local_cost_fun=RNG.rand(19),
+            distance_func=RNG.rand(19),
             start_window_size=2,
             frame_rate=1,
         )
 
-        # Test local_cost_fun as string
-        for local_cost_fun in CYTHONIZED_METRICS_WO_ARGUMENTS:
+        # Test distance_func as string
+        for distance_func in CYTHONIZED_METRICS_WO_ARGUMENTS:
             oltw = OnlineTimeWarpingArzt(
                 reference_features=X,
                 window_size=2,
                 step_size=1,
-                local_cost_fun=local_cost_fun,
+                distance_func=distance_func,
                 start_window_size=2,
                 frame_rate=1,
             )
@@ -105,19 +105,19 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             reference_features=X,
             window_size=2,
             step_size=1,
-            local_cost_fun="wrong_local_cost_fun",
+            distance_func="wrong_distance_func",
             start_window_size=2,
         )
 
         # Test local_cost_fun as tuple
-        for local_cost_fun in CYTHONIZED_METRICS_W_ARGUMENTS:
-            if local_cost_fun == "Lp":
+        for distance_func in CYTHONIZED_METRICS_W_ARGUMENTS:
+            if distance_func == "Lp":
                 for p in RNG.uniform(low=1, high=10, size=10):
                     oltw = OnlineTimeWarpingArzt(
                         reference_features=X,
                         window_size=2,
                         step_size=1,
-                        local_cost_fun=(local_cost_fun, dict(p=p)),
+                        distance_func=(distance_func, dict(p=p)),
                         start_window_size=2,
                         frame_rate=1,
                     )
@@ -136,7 +136,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             reference_features=X,
             window_size=2,
             step_size=1,
-            local_cost_fun=("wrong_local_cost_fun", {"param": "value"}),
+            distance_func=("wrong_distance_func", {"param": "value"}),
             start_window_size=2,
             frame_rate=1,
         )
@@ -146,7 +146,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
                 reference_features=X,
                 window_size=2,
                 step_size=1,
-                local_cost_fun=getattr(sp_distance, spdist),
+                distance_func=getattr(sp_distance, spdist),
                 start_window_size=2,
                 frame_rate=1,
             )

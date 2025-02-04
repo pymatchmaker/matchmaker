@@ -47,7 +47,7 @@ conda activate matchmaker
 pip install -e .
 
 # Install matchmaker with dev tools
-pip install -e .[dev]
+pip install -e ."[dev]"
 
 # Setup pre-commit
 pre-commit install
