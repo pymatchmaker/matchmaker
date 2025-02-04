@@ -296,6 +296,8 @@ class Matchmaker(object):
         ref_annots = self._build_ref_annots(level)
         perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
 
+        ref_annots = ref_annots[: len(perf_annots)]
+
         target_annots_predicted = transfer_positions(
             self.score_follower.warping_path, ref_annots, frame_rate=self.frame_rate
         )
