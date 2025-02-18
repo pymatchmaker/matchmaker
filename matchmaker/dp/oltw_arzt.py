@@ -4,6 +4,7 @@
 On-line Dynamic Time Warping
 """
 
+import time
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
@@ -12,6 +13,7 @@ from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.dp.dtw_loop import oltw_arzt_loop
+from matchmaker.features.audio import FRAME_RATE, QUEUE_TIMEOUT, WINDOW_SIZE
 from matchmaker.utils import (
     CYTHONIZED_METRICS_W_ARGUMENTS,
     CYTHONIZED_METRICS_WO_ARGUMENTS,
@@ -24,10 +26,8 @@ from matchmaker.utils.misc import (
     RECVQueue,
 )
 
-WINDOW_SIZE: int = 5
 STEP_SIZE: int = 5
 START_WINDOW_SIZE: Union[float, int] = 0.25
-FRAME_RATE: int = 50
 
 
 class OnlineTimeWarpingArzt(OnlineAlignment):
@@ -199,7 +199,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             pbar = progressbar.ProgressBar(max_value=self.N_ref, redirect_stdout=True)
 
         while self.is_still_following():
-            features, f_time = self.queue.get()
+            features, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
             self.input_features = (
                 np.concatenate((self.input_features, features))
                 if self.input_features is not None
@@ -248,6 +248,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         """
         Update the current position and the warping path.
         """
+        self.last_queue_update = time.time()
         min_costs = np.inf
         min_index = max(self.window_index - self.step_size, 0)
 

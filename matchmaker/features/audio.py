@@ -12,7 +12,7 @@ import numpy as np
 # from madmom.audio.chroma import DeepChromaProcessor
 from matchmaker.utils.processor import Processor
 
-SAMPLE_RATE = 44100
+SAMPLE_RATE = 22050
 FRAME_RATE = 30
 HOP_LENGTH = SAMPLE_RATE // FRAME_RATE
 N_CHROMA = 12
@@ -21,6 +21,8 @@ N_MFCC = 13
 DCT_TYPE = 2
 NORM = np.inf
 FEATURES = "chroma"
+QUEUE_TIMEOUT = 10
+WINDOW_SIZE = 5
 
 # Type hint for Input Audio frame.
 InputAudioSeries = np.ndarray

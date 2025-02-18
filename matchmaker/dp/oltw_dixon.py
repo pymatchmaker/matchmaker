@@ -14,6 +14,7 @@ import scipy
 from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
+from matchmaker.features.audio import FRAME_RATE, QUEUE_TIMEOUT, WINDOW_SIZE
 
 
 class Direction(IntEnum):
@@ -25,11 +26,8 @@ class Direction(IntEnum):
         return Direction(self ^ 1) if self != Direction.BOTH else Direction.TARGET
 
 
-FRAME_RATE = 30
 MAX_RUN_COUNT: int = 30
-WINDOW_SIZE = 5  # seconds
 FRAME_PER_SEG = 1
-QUEUE_TIMEOUT = 10
 
 
 class OnlineTimeWarpingDixon(OnlineAlignment):
@@ -94,7 +92,6 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.input_pointer = 0
         self.input_index: int = 0
         self.previous_direction = None
-        self.last_queue_update = time.time()
 
     @property
     def warping_path(self) -> NDArray[np.float32]:  # [shape=(2, T)]
@@ -342,14 +339,12 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         return next_direction
 
     def get_new_input(self):
-        input_feature, f_time = self.queue.get()
+        input_feature, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
         self.input_features = np.vstack([self.input_features, input_feature])
         self.input_pointer += self.frame_per_seg
-        self.last_queue_update = time.time()
 
     def is_still_following(self):
-        no_update = (time.time() - self.last_queue_update) > QUEUE_TIMEOUT
-        return self.ref_pointer <= (self.N_ref - self.frame_per_seg) and not no_update
+        return self.ref_pointer <= (self.N_ref - self.frame_per_seg)
 
     def run(self, verbose=True):
         """Run the online alignment process.

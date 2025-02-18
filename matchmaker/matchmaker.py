@@ -4,7 +4,6 @@ from typing import Optional, Union
 import numpy as np
 import partitura
 import scipy
-from partitura.io.exportaudio import save_wav_fluidsynth
 from partitura.io.exportmidi import get_ppq
 from partitura.score import Part
 
@@ -20,7 +19,11 @@ from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
-from matchmaker.utils.eval import TOLERANCES, transfer_positions
+from matchmaker.utils.eval import (
+    TOLERANCES,
+    adjust_tempo_for_performance_audio,
+    transfer_positions,
+)
 from matchmaker.utils.misc import is_audio_file, is_midi_file
 
 PathLike = Union[str, bytes, os.PathLike]
@@ -95,7 +98,8 @@ class Matchmaker(object):
             raise ValueError("Score file is required")
 
         try:
-            self.score_part = partitura.load_score_as_part(score_file)
+            self.score_part = partitura.load_score_as_part(self.score_file)
+
         except Exception as e:
             raise ValueError(f"Invalid score file: {e}")
 
@@ -187,20 +191,19 @@ class Matchmaker(object):
 
     def preprocess_score(self):
         if self.input_type == "audio":
-            beat_type = self.score_part.time_sigs[0].beat_type
-            musical_beats = self.score_part.time_sigs[0].musical_beats
-            score_audio = save_wav_fluidsynth(
+            adjusted_tempo = None
+            if self.performance_file is not None:
+                adjusted_tempo = adjust_tempo_for_performance_audio(
+                    self.score_part, self.performance_file
+                )
+            score_audio = partitura.save_wav_fluidsynth(
                 self.score_part,
-                bpm=DEFAULT_TEMPO,
+                bpm=adjusted_tempo,
                 samplerate=SAMPLE_RATE,
             )
-            # trim score audio to last onset beat
-            last_onset = np.floor(self.score_part.note_array()["onset_beat"].max())
-            tick = get_ppq(self.score_part)
-            buffer_sec = 0.5
-            last_onset_time = (
-                self.score_part.inv_beat_map(last_onset) / (tick * 2) + buffer_sec
-            )
+            last_onset_time = np.floor(self.score_part.note_array()["onset_beat"].max())
+            buffer_size = 0.1  # seconds
+            last_onset_time += buffer_size
             score_audio = score_audio[: int(last_onset_time * SAMPLE_RATE)]
             reference_features = self.processor(score_audio.astype(np.float32))
             return reference_features
@@ -264,6 +267,10 @@ class Matchmaker(object):
                 for beat in beats
             ]
         )
+
+        # start_sec = np.ceil(self.score_part.note_array()["onset_beat"].min())
+        # end_sec = np.floor(self.score_part.note_array()["onset_sec"].max())
+        # beat_timestamp = np.arange(start_sec, end_sec)
         return beat_timestamp
 
     def run_evaluation(
@@ -296,7 +303,9 @@ class Matchmaker(object):
         ref_annots = self._build_ref_annots(level)
         perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
 
-        ref_annots = ref_annots[: len(perf_annots)]
+        min_length = min(len(ref_annots), len(perf_annots))
+        ref_annots = ref_annots[:min_length]
+        perf_annots = perf_annots[:min_length]
 
         target_annots_predicted = transfer_positions(
             self.score_follower.warping_path, ref_annots, frame_rate=self.frame_rate
