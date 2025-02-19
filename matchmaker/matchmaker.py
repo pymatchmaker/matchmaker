@@ -6,6 +6,7 @@ import partitura
 import scipy
 from partitura.io.exportmidi import get_ppq
 from partitura.score import Part
+from partitura.utils.music import performance_notearray_from_score_notearray
 
 from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
 from matchmaker.features.audio import (
@@ -92,7 +93,7 @@ class Matchmaker(object):
         self.score_follower = None
         self.reference_features = None
         self._has_run = False
-
+        self.tempo = DEFAULT_TEMPO
         # setup score file
         if score_file is None:
             raise ValueError("Score file is required")
@@ -191,14 +192,13 @@ class Matchmaker(object):
 
     def preprocess_score(self):
         if self.input_type == "audio":
-            adjusted_tempo = None
             if self.performance_file is not None:
-                adjusted_tempo = adjust_tempo_for_performance_audio(
+                self.tempo = adjust_tempo_for_performance_audio(
                     self.score_part, self.performance_file
                 )
             score_audio = partitura.save_wav_fluidsynth(
                 self.score_part,
-                bpm=adjusted_tempo,
+                bpm=self.tempo,
                 samplerate=SAMPLE_RATE,
             )
             last_onset_time = np.floor(self.score_part.note_array()["onset_beat"].max())
@@ -257,20 +257,19 @@ class Matchmaker(object):
         return self.score_follower.warping_path
 
     def _build_ref_annots(self, level="beat"):
-        start_beat = np.ceil(self.score_part.note_array()["onset_beat"].min())
-        end_beat = np.floor(self.score_part.note_array()["onset_beat"].max())
+        note_array = self.score_part.note_array()
+        start_beat = np.ceil(note_array["onset_beat"].min())
+        end_beat = np.floor(note_array["onset_beat"].max())
         beats = np.arange(start_beat, end_beat + 1)
+        duration_ratio = DEFAULT_TEMPO / self.tempo
         beat_timestamp = np.array(
             [
                 self.score_part.inv_beat_map(beat)
-                / (get_ppq(self.score_part) * 2)  # 2 is for 120 bpm
+                / (get_ppq(self.score_part) * 2)
+                * duration_ratio
                 for beat in beats
             ]
         )
-
-        # start_sec = np.ceil(self.score_part.note_array()["onset_beat"].min())
-        # end_sec = np.floor(self.score_part.note_array()["onset_sec"].max())
-        # beat_timestamp = np.arange(start_sec, end_sec)
         return beat_timestamp
 
     def run_evaluation(
@@ -300,7 +299,7 @@ class Matchmaker(object):
         if not self._has_run:
             raise ValueError("Must call run() before evaluation")
 
-        ref_annots = self._build_ref_annots(level)
+        ref_annots = self._build_ref_annots()
         perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
 
         min_length = min(len(ref_annots), len(perf_annots))
