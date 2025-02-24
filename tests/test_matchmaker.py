@@ -107,19 +107,21 @@ class TestMatchmaker(unittest.TestCase):
                 except queue.Empty as e:
                     print(f"Error: {type(e)}, {e}")
                     traceback.print_exc()
+                    mm._has_run = True
 
-                current_test = f"{self._testMethodName}_{method}"
-                mm._has_run = True
                 results = mm.run_evaluation(self.performance_file_annotations)
+                current_test = f"{self._testMethodName}_{method}"
                 print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
 
                 save_dir = Path("./tests/results")
                 save_dir.mkdir(parents=True, exist_ok=True)
+                score_annots = mm.build_score_annotations()
                 save_score_following_result(
                     mm.score_follower,
-                    Path("./tests/results"),
-                    mm.build_score_annotations(),
+                    save_dir,
+                    score_annots,
                     self.performance_file_annotations,
+                    name=f"{Path(self.performance_file_audio).stem}",
                 )
 
                 # Then: the results should at least be 0.7

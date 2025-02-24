@@ -1,17 +1,12 @@
 import csv
 from pathlib import Path
 
-import librosa
 import matplotlib.pyplot as plt
-import mido
 import numpy as np
-import pandas as pd
-import partitura
 import scipy
 from numpy.typing import NDArray
-from partitura import save_wav_fluidsynth
 
-from matchmaker.features.audio import FRAME_RATE, SAMPLE_RATE
+from matchmaker.features.audio import FRAME_RATE
 
 TOLERANCES = [50, 100, 300, 500, 1000, 2000]
 
@@ -32,21 +27,36 @@ def transfer_positions(wp, ref_anns, frame_rate):
     return predicted_targets / frame_rate
 
 
-def adjust_tempo_for_performance_audio(score_part, performance_audio: Path):
-    default_tempo = 120
-    score_midi = partitura.save_score_midi(score_part, out=None)
-    source_length = score_midi.length
-    target_length = librosa.get_duration(path=str(performance_audio))
-    ratio = target_length / source_length
-    # ratio = np.clip(ratio, 0.5, 2.0)  # limit the ratio to 0.5 to 2.0
-    # rounded_tempo = int((default_tempo / ratio + 10) // 20 * 20)  # round to nearest 20
-    rounded_tempo = int(
-        (default_tempo / ratio + 19) // 20 * 20
-    )  # round up to nearest 20
-    print(
-        f"default tempo: {default_tempo} (score length: {source_length}) -> adjusted_tempo: {rounded_tempo} (perf length: {target_length})"
+def get_evaluation_results(
+    score_annots,
+    perf_annots,
+    warping_path,
+    frame_rate,
+    tolerance=TOLERANCES,
+):
+    target_annots_predicted = transfer_positions(
+        warping_path, score_annots, frame_rate=frame_rate
     )
-    return rounded_tempo
+    errors_in_delay = (
+        (perf_annots - target_annots_predicted) / frame_rate * 1000
+    )  # in milliseconds
+
+    absolute_errors_in_delay = np.abs(errors_in_delay)
+    filtered_abs_errors_in_delay = absolute_errors_in_delay[
+        absolute_errors_in_delay <= tolerance[-1]
+    ]
+
+    results = {
+        "mean": float(f"{np.mean(filtered_abs_errors_in_delay):.4f}"),
+        "median": float(f"{np.median(filtered_abs_errors_in_delay):.4f}"),
+        "std": float(f"{np.std(filtered_abs_errors_in_delay):.4f}"),
+        "skewness": float(f"{scipy.stats.skew(filtered_abs_errors_in_delay):.4f}"),
+        "kurtosis": float(f"{scipy.stats.kurtosis(filtered_abs_errors_in_delay):.4f}"),
+    }
+    for tau in tolerance:
+        results[f"{tau}ms"] = float(f"{np.mean(absolute_errors_in_delay <= tau):.4f}")
+    results["count"] = len(filtered_abs_errors_in_delay)
+    return results
 
 
 def save_nparray_to_csv(array: NDArray, save_path: str):
@@ -84,12 +94,13 @@ def save_score_following_result(
         )
 
     # plot ground-truth labels
-    perf_annots = pd.read_csv(
-        filepath_or_buffer=perf_ann_path, delimiter="\t", header=None
-    )[0]
+    with open(perf_ann_path, "r") as f:
+        reader = csv.reader(f, delimiter="\t")
+        perf_annots = [float(row[0]) for row in reader]
+    # perf_annots = pd.read_csv(
+    #     filepath_or_buffer=perf_ann_path, delimiter="\t", header=None
+    # )[0]
     for i, (ref, target) in enumerate(zip(score_annots, perf_annots)):
-        # if i % 5 != 0:
-        #     continue
         plt.plot(
             target * frame_rate, ref * frame_rate, "x", color="r", alpha=1, markersize=3
         )

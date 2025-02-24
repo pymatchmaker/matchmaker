@@ -1,9 +1,10 @@
 import os
+from pathlib import Path
 from typing import Optional, Union
 
+import librosa
 import numpy as np
 import partitura
-import scipy
 import soundfile as sf
 from partitura.io.exportmidi import get_ppq
 from partitura.score import Part
@@ -20,12 +21,13 @@ from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
-from matchmaker.utils.eval import (
-    TOLERANCES,
+from matchmaker.utils.eval import TOLERANCES, get_evaluation_results
+from matchmaker.utils.misc import (
     adjust_tempo_for_performance_audio,
-    transfer_positions,
+    generate_score_audio,
+    is_audio_file,
+    is_midi_file,
 )
-from matchmaker.utils.misc import is_audio_file, is_midi_file
 
 PathLike = Union[str, bytes, os.PathLike]
 DEFAULT_TEMPO = 120
@@ -195,64 +197,36 @@ class Matchmaker(object):
     def preprocess_score(self):
         if self.input_type == "audio":
             if self.performance_file is not None:
+                # tempo is slightly adjusted to reflect the tempo of the performance audio
                 self.tempo = adjust_tempo_for_performance_audio(
                     self.score_part, self.performance_file
                 )
 
-            bpm_array = [
-                [onset_beat, self._get_current_bpm(onset_beat)]
-                for onset_beat in self.score_part.note_array()["onset_beat"]
-            ]
-            bpm_array = np.array(bpm_array)
-            score_audio = partitura.save_wav_fluidsynth(
-                self.score_part,
-                bpm=bpm_array,
-                samplerate=SAMPLE_RATE,
+            # generate score audio
+            score_audio = generate_score_audio(self.score_part, self.tempo, SAMPLE_RATE)
+
+            # save score audio (for debugging)
+            score_annots = self.build_score_annotations()
+            score_annots_audio = librosa.clicks(
+                times=score_annots,
+                sr=SAMPLE_RATE,
+                click_freq=1000,
+                length=len(score_audio),
             )
-            last_onset_in_div = np.floor(
-                self.score_part.note_array()["onset_div"].max()
-            )
-            last_onset_in_time = (
-                last_onset_in_div / get_ppq(self.score_part) * (60 / self.tempo)
+            score_audio_mixed = score_audio + score_annots_audio
+            sf.write(
+                f"score_audio_{Path(self.score_file).stem}.wav",
+                score_audio_mixed,
+                SAMPLE_RATE,
+                subtype="PCM_24",
             )
 
-            buffer_size = 0.1  # for assuring the last onset is included (in seconds)
-            last_onset_in_time += buffer_size
-            score_audio = score_audio[: int(last_onset_in_time * SAMPLE_RATE)]
-
-            # save score audio
-            # sf.write("score_audio.wav", score_audio, SAMPLE_RATE, subtype="PCM_24")
             reference_features = self.processor(score_audio.astype(np.float32))
             self.reference_features = reference_features
         else:
             self.reference_features = self.score_part.note_array()
 
-    def _get_current_bpm(self, onset_beat):
-        """Get the adjusted BPM for a given beat position based on time signature."""
-        current_time = self.score_part.inv_beat_map(onset_beat)
-        beat_type_changes = [
-            {"start": time_sig.start, "beat_type": time_sig.beat_type}
-            for time_sig in self.score_part.time_sigs
-        ]
-
-        # Find the latest applicable time signature change
-        latest_change = next(
-            (
-                change
-                for change in reversed(beat_type_changes)
-                if current_time >= change["start"].t
-            ),
-            None,
-        )
-
-        # Return adjusted BPM if time signature change exists, else default tempo
-        return (
-            latest_change["beat_type"] / 4 * self.tempo if latest_change else self.tempo
-        )
-
-    def convert_frame_to_beat(
-        self, current_frame: int, frame_rate: int = FRAME_RATE
-    ) -> float:
+    def _convert_frame_to_beat(self, current_frame: int) -> float:
         """
         Convert frame number to relative beat position in the score.
 
@@ -264,7 +238,7 @@ class Matchmaker(object):
             Current frame number
         """
         tick = get_ppq(self.score_part)
-        timeline_time = (current_frame / frame_rate) * tick * (DEFAULT_TEMPO / 60)
+        timeline_time = (current_frame / self.frame_rate) * tick * (self.tempo / 60)
         beat_position = np.round(
             self.score_part.beat_map(timeline_time),
             decimals=2,
@@ -288,7 +262,7 @@ class Matchmaker(object):
         with self.stream:
             for current_frame in self.score_follower.run(verbose=verbose):
                 if self.input_type == "audio":
-                    position_in_beat = self.convert_frame_to_beat(current_frame)
+                    position_in_beat = self._convert_frame_to_beat(current_frame)
                     yield position_in_beat
                 else:
                     yield float(self.score_follower.state_space[current_frame])
@@ -341,7 +315,7 @@ class Matchmaker(object):
         if not self._has_run:
             raise ValueError("Must call run() before evaluation")
 
-        score_annots = self.build_score_annotations()
+        score_annots = self.build_score_annotations(level)
         perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
 
         # print(f"score annotations: {score_annots}, len: {len(score_annots)}")
@@ -351,30 +325,6 @@ class Matchmaker(object):
         score_annots = score_annots[:min_length]
         perf_annots = perf_annots[:min_length]
 
-        target_annots_predicted = transfer_positions(
-            self.score_follower.warping_path, score_annots, frame_rate=self.frame_rate
+        return get_evaluation_results(
+            score_annots, perf_annots, self.score_follower.warping_path, self.frame_rate
         )
-        errors_in_delay = (
-            (perf_annots - target_annots_predicted) / self.frame_rate * 1000
-        )  # in milliseconds
-
-        absolute_errors_in_delay = np.abs(errors_in_delay)
-        filtered_abs_errors_in_delay = absolute_errors_in_delay[
-            absolute_errors_in_delay <= tolerance[-1]
-        ]
-
-        results = {
-            "mean": float(f"{np.mean(filtered_abs_errors_in_delay):.4f}"),
-            "median": float(f"{np.median(filtered_abs_errors_in_delay):.4f}"),
-            "std": float(f"{np.std(filtered_abs_errors_in_delay):.4f}"),
-            "skewness": float(f"{scipy.stats.skew(filtered_abs_errors_in_delay):.4f}"),
-            "kurtosis": float(
-                f"{scipy.stats.kurtosis(filtered_abs_errors_in_delay):.4f}"
-            ),
-        }
-        for tau in tolerance:
-            results[f"{tau}ms"] = float(
-                f"{np.mean(absolute_errors_in_delay <= tau):.4f}"
-            )
-        results["count"] = len(filtered_abs_errors_in_delay)
-        return results
