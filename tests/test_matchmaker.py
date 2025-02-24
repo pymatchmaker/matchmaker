@@ -22,20 +22,20 @@ warnings.filterwarnings("ignore", module="librosa")
 class TestMatchmaker(unittest.TestCase):
     def setUp(self):
         # Set up paths to test files
-        self.score_file = "./tests/resources/Chopin_op38.musicxml"
-        self.performance_file_audio = "./tests/resources/Chopin_op38_p01.wav"
-        self.performance_file_annotations = "./tests/resources/Chopin_op38_p01.tsv"
+        self.score_file = "./tests/resources/Bach-fugue_bwv_858.musicxml"
+        self.performance_file_audio = "./tests/resources/Bach-fugue_bwv_858.mp3"
+        self.performance_file_midi = "./tests/resources/Bach-fugue_bwv_858.mid"
+        self.performance_file_annotations = (
+            "./tests/resources/Bach-fugue_bwv_858_annotations.txt"
+        )
+
+        # self.score_file = "./tests/resources/Chopin_op38.musicxml"
+        # self.performance_file_audio = "./tests/resources/Chopin_op38_p01.wav"
+        # self.performance_file_annotations = "./tests/resources/Chopin_op38_p01.tsv"
 
         # self.score_file = "./tests/resources/kv279_2.musicxml"
         # self.performance_file_audio = "./tests/resources/kv279_2.wav"
         # self.performance_file_annotations = "./tests/resources/kv279_2.tsv"
-
-        # self.score_file = "./tests/resources/Bach-fugue_bwv_858.musicxml"
-        # self.performance_file_audio = "./tests/resources/Bach-fugue_bwv_858.mp3"
-        # self.performance_file_midi = "./tests/resources/Bach-fugue_bwv_858.mid"
-        # self.performance_file_annotations = (
-        #     "./tests/resources/Bach-fugue_bwv_858_annotations.txt"
-        # )
 
         # self.score_file = "./matchmaker/assets/mozart_k265_var1.musicxml"
         # self.performance_file_audio = "./matchmaker/assets/mozart_k265_var1.mp3"
@@ -92,8 +92,7 @@ class TestMatchmaker(unittest.TestCase):
         self.assertIsInstance(alignment_results, list)
 
     def test_matchmaker_audio_run_with_evaluation(self):
-        # for method in ["arzt", "dixon"]:
-        for method in ["dixon"]:
+        for method in ["arzt", "dixon"]:
             with self.subTest(method=method):
                 mm = Matchmaker(
                     score_file=self.score_file,
@@ -114,12 +113,13 @@ class TestMatchmaker(unittest.TestCase):
                 results = mm.run_evaluation(self.performance_file_annotations)
                 print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
 
+                save_dir = Path("./tests/results")
+                save_dir.mkdir(parents=True, exist_ok=True)
                 save_score_following_result(
                     mm.score_follower,
                     Path("./tests/results"),
                     mm.build_score_annotations(),
                     self.performance_file_annotations,
-                    30,
                 )
 
                 # Then: the results should at least be 0.7
