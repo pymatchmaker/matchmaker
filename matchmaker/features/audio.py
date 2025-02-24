@@ -12,7 +12,7 @@ import numpy as np
 # from madmom.audio.chroma import DeepChromaProcessor
 from matchmaker.utils.processor import Processor
 
-SAMPLE_RATE = 22050
+SAMPLE_RATE = 44100
 FRAME_RATE = 30
 HOP_LENGTH = SAMPLE_RATE // FRAME_RATE
 N_CHROMA = 12
