@@ -247,6 +247,8 @@ class AudioStream(Stream):
             if self.wait:
                 time.sleep(max(time_interval - elapsed_time, 0))
 
+        self.stop_listening()
+
     def run_online(self) -> None:
         """Process audio in real-time from input device.
 

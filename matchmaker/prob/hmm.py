@@ -1115,6 +1115,7 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
         precision: Optional[float] = DEFAULT_GAUSSIAN_AUDIO_PRECISION,
         initial_probabilities: Optional[np.ndarray] = None,
         state_space: Optional[NDArray] = None,
+        patience: int = 50,
     ) -> None:
         """
         Initialize the object.
@@ -1147,7 +1148,7 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
         """
         OnlineAlignment.__init__(
             self,
-            reference_features=(reference_features, state_space),
+            reference_features=reference_features,
         )
 
         if transition_model is not None and transition_matrix is not None:
@@ -1215,13 +1216,14 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
             tempo_model=None,
             has_insertions=False,
             queue=queue,
+            patience=patience,
         )
 
     def __call__(self, input, *args, **kwargs):
         frame_index = args[0] if args else None
-
+        frame, f_time = input
         current_state = self.forward_algorithm_step(
-            observation=input,
+            observation=frame,
             log_probabilities=False,
         )
         self._warping_path.append((current_state, self.input_index))
@@ -1245,7 +1247,7 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
         empty_counter = 0
         if verbose:
             pbar = progressbar.ProgressBar(
-                maxval=self.n_states,  # redirect_stdout=True
+                max_val=self.n_states,  # redirect_stdout=True
             )
             pbar.start()
 
@@ -1255,7 +1257,7 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
                 current_state = self(queue_input)
                 empty_counter = 0
                 if current_state == prev_state:
-                    if same_state_counter < self.patience:
+                    if same_state_counter < 3:# self.patience:
                         same_state_counter += 1
                     else:
                         break

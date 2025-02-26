@@ -20,7 +20,7 @@ from matchmaker.features.audio import (
 from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
-from matchmaker.prob.hmm import PitchIOIHMM
+from matchmaker.prob.hmm import GaussianAudioPitchHMM, PitchIOIHMM
 from matchmaker.utils.eval import TOLERANCES, get_evaluation_results
 from matchmaker.utils.misc import (
     adjust_tempo_for_performance_audio,
@@ -96,6 +96,7 @@ class Matchmaker(object):
         self.reference_features = None
         self.tempo = DEFAULT_TEMPO  # bpm for quarter note
         self._has_run = False
+        self.method = method
 
         # setup score file
         if score_file is None:
@@ -188,10 +189,19 @@ class Matchmaker(object):
                 distance_func=distance_func,
                 frame_rate=self.frame_rate,
             )
-        elif method == "hmm":
+        elif method == "hmm" and self.input_type == "midi":
             self.score_follower = PitchIOIHMM(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
+            )
+        elif method == "hmm" and self.input_type == "audio":
+
+            state_space = self._convert_frame_to_beat(np.arange(len(self.reference_features)))
+            self.score_follower = GaussianAudioPitchHMM(
+                reference_features=self.reference_features,
+                queue=self.stream.queue,
+                state_space=state_space,
+                patience=50,
             )
 
     def preprocess_score(self):
@@ -261,10 +271,11 @@ class Matchmaker(object):
         """
         with self.stream:
             for current_frame in self.score_follower.run(verbose=verbose):
-                if self.input_type == "audio":
+                if self.input_type == "audio" and self.method != "hmm":
                     position_in_beat = self._convert_frame_to_beat(current_frame)
                     yield position_in_beat
                 else:
+                    print("nn", float(self.score_follower.state_space[current_frame]))
                     yield float(self.score_follower.state_space[current_frame])
 
         self._has_run = True
