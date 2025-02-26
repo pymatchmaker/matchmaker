@@ -14,7 +14,7 @@ import scipy
 from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
-from matchmaker.features.audio import SAMPLE_RATE
+from matchmaker.features.audio import FRAME_RATE, QUEUE_TIMEOUT, WINDOW_SIZE
 
 
 class Direction(IntEnum):
@@ -26,13 +26,8 @@ class Direction(IntEnum):
         return Direction(self ^ 1) if self != Direction.BOTH else Direction.TARGET
 
 
-DEFAULT_LOCAL_COST: str = "euclidean"
-FRAME_RATE = 30
 MAX_RUN_COUNT: int = 30
-WINDOW_SIZE = 5  # seconds
-HOP_LENGTH = SAMPLE_RATE // FRAME_RATE
 FRAME_PER_SEG = 1
-QUEUE_TIMEOUT = 10
 
 
 class OnlineTimeWarpingDixon(OnlineAlignment):
@@ -45,8 +40,8 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         A 2D array with dimensions (`F(n_features)`, `T(n_timesteps)`) containing the
         features of the reference the input is going to be aligned to.
 
-    local_cost_fun : str
-        Local metric for computing pairwise distances.
+    distance_func : str, tuple (str, dict) or callable
+        Distance function for computing pairwise distances.
 
     window_size : int
         Size of the window for searching the optimal path in the cumulative cost matrix.
@@ -67,7 +62,8 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         where warping_path[0] is the index of the reference feature and warping_path[1] is the index of the target(input) feature.
     """
 
-    local_cost_fun: str
+    DEFAULT_DISTANCE_FUNC: str = "euclidean"
+    distance_func: str
     vdist: Callable[[NDArray[np.float32]], NDArray[np.float32]]
 
     def __init__(
@@ -75,7 +71,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         reference_features,
         queue,
         window_size=WINDOW_SIZE,
-        local_cost_fun=DEFAULT_LOCAL_COST,
+        distance_func=DEFAULT_DISTANCE_FUNC,
         max_run_count=MAX_RUN_COUNT,
         frame_per_seg=FRAME_PER_SEG,
         frame_rate=FRAME_RATE,
@@ -85,8 +81,9 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.input_features = np.empty((0, self.reference_features.shape[1]))
         self.queue = queue
         self.N_ref = self.reference_features.shape[0]
-        self.w = int(window_size * frame_rate)
-        self.local_cost_fun = local_cost_fun
+        self.frame_rate = frame_rate
+        self.w = int(window_size * self.frame_rate)
+        self.distance_func = distance_func
         self.max_run_count = max_run_count
         self.frame_per_seg = frame_per_seg
         self.current_position = 0
@@ -95,7 +92,6 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.input_pointer = 0
         self.input_index: int = 0
         self.previous_direction = None
-        self.last_queue_update = time.time()
 
     @property
     def warping_path(self) -> NDArray[np.float32]:  # [shape=(2, T)]
@@ -117,7 +113,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         x_seg = self.reference_features[x - wx : x]  # [wx, 12]
         y_seg = self.input_features[min(y - d, 0) : y]  # [d, 12]
         dist = scipy.spatial.distance.cdist(
-            x_seg, y_seg, metric=self.local_cost_fun
+            x_seg, y_seg, metric=self.distance_func
         )  # [wx, d]
 
         for i in range(wx):
@@ -207,7 +203,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             x_seg = self.reference_features[x - d : x]  # [d, 12]
             y_seg = self.input_features[y - wy : y]  # [wy, 12]
             dist = scipy.spatial.distance.cdist(
-                x_seg, y_seg, metric=self.local_cost_fun
+                x_seg, y_seg, metric=self.distance_func
             )  # [d, wy]
             new_acc, new_len_acc = self.update_ref_direction(
                 dist, new_acc, new_len_acc, wx, wy, d
@@ -220,7 +216,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             x_seg = self.reference_features[x - wx : x]  # [wx, 12]
             y_seg = self.input_features[y - d : y]  # [d, 12]
             dist = scipy.spatial.distance.cdist(
-                x_seg, y_seg, metric=self.local_cost_fun
+                x_seg, y_seg, metric=self.distance_func
             )  # [wx, d]
             new_acc, new_len_acc = self.update_target_direction(
                 dist, new_acc, new_len_acc, wx, wy, d
@@ -283,7 +279,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             x_seg = self.reference_features[x - wx : x]  # [w, 12]
             y_seg = self.input_features[y - d : y]  # [1, 12]
             dist = scipy.spatial.distance.cdist(
-                x_seg, y_seg, metric=self.local_cost_fun
+                x_seg, y_seg, metric=self.distance_func
             )  # [w, 1]
             for n in range(dist.shape[0]):
                 for m in range(dist.shape[1]):
@@ -298,7 +294,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             x_seg = self.reference_features[x - d : x]  # [1, 12]
             y_seg = self.input_features[y - wy : y]  # [w, 12]
             dist = scipy.spatial.distance.cdist(
-                x_seg, y_seg, metric=self.local_cost_fun
+                x_seg, y_seg, metric=self.distance_func
             )  # [1, w]
             for n in range(dist.shape[0]):
                 for m in range(dist.shape[1]):
@@ -343,14 +339,11 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         return next_direction
 
     def get_new_input(self):
-        input_feature, f_time = self.queue.get()
+        input_feature, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
         self.input_features = np.vstack([self.input_features, input_feature])
         self.input_pointer += self.frame_per_seg
-        self.last_queue_update = time.time()
 
     def is_still_following(self):
-        # no_update = time.time() - self.last_queue_update > QUEUE_TIMEOUT
-        # return self.ref_pointer <= (self.N_ref - self.frame_per_seg) and not no_update
         return self.ref_pointer <= (self.N_ref - self.frame_per_seg)
 
     def run(self, verbose=True):

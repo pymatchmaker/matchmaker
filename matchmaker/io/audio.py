@@ -54,6 +54,7 @@ class AudioStream(Stream):
         queue: Optional[RECVQueue] = None,
         device_name_or_index: Optional[Union[str, int]] = None,
         wait: bool = True,
+        target_sr: int = SAMPLE_RATE,
     ):
         if processor is None:
             processor = ChromagramProcessor(
@@ -113,6 +114,7 @@ class AudioStream(Stream):
         self.f_time = 0
         self.prev_time = None
         self.wait = wait  # only for offline mode making it same time as online
+        self.target_sr = target_sr
 
         if self.mock:
             self.run = self.run_offline
@@ -217,9 +219,13 @@ class AudioStream(Stream):
         """
         self.start_listening()
         self.init_time = time.time()
+
+        audio_y, sr = librosa.load(self.file_path, sr=None)
+        if sr != self.target_sr:
+            audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
+
         duration = int(librosa.get_duration(path=self.file_path))
         time_interval = self.hop_length / self.sample_rate
-        audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
         padded_audio = np.concatenate(  # zero padding at the end
             (
                 audio_y,
