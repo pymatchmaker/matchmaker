@@ -29,20 +29,22 @@ class TestMatchmaker(unittest.TestCase):
             "./tests/resources/Bach-fugue_bwv_858_annotations.txt"
         )
 
-        # self.score_file = "./tests/resources/Chopin_op38.musicxml"
-        # self.performance_file_audio = "./tests/resources/Chopin_op38_p01.wav"
-        # self.performance_file_annotations = "./tests/resources/Chopin_op38_p01.tsv"
-
-        # self.score_file = "./tests/resources/kv279_2.musicxml"
-        # self.performance_file_audio = "./tests/resources/kv279_2.wav"
-        # self.performance_file_annotations = "./tests/resources/kv279_2.tsv"
-
-        # self.score_file = "./matchmaker/assets/mozart_k265_var1.musicxml"
-        # self.performance_file_audio = "./matchmaker/assets/mozart_k265_var1.mp3"
-        # self.performance_file_midi = "./matchmaker/assets/mozart_k265_var1.mid"
-        # self.performance_file_annotations = (
-        #     "./matchmaker/assets/mozart_k265_var1_annotations.txt"
-        # )
+        self.test_datasets = [
+            {
+                "name": "bach_fugue_bwv_858",
+                "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
+                "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
+                "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
+                "annotations": "./tests/resources/Bach-fugue_bwv_858_annotations.txt",
+            },
+            {
+                "name": "mozart_k265_var1",
+                "score": "./matchmaker/assets/mozart_k265_var1.musicxml",
+                "audio": "./matchmaker/assets/mozart_k265_var1.mp3",
+                "midi": "./matchmaker/assets/mozart_k265_var1.mid",
+                "annotations": "./matchmaker/assets/mozart_k265_var1_annotations.txt",
+            },
+        ]
 
     def test_matchmaker_audio_init(self):
         # When: a Matchmaker instance with audio input
@@ -92,41 +94,43 @@ class TestMatchmaker(unittest.TestCase):
         self.assertIsInstance(alignment_results, list)
 
     def test_matchmaker_audio_run_with_evaluation(self):
-        for method in ["arzt", "dixon"]:
-            with self.subTest(method=method):
-                mm = Matchmaker(
-                    score_file=self.score_file,
-                    performance_file=self.performance_file_audio,
-                    wait=False,
-                    input_type="audio",
-                    method=method,
-                )
-                # When: running the alignment process
-                try:
-                    alignment_positions = list(mm.run())
-                except queue.Empty as e:
-                    print(f"Error: {type(e)}, {e}")
-                    traceback.print_exc()
-                    mm._has_run = True
+        for dataset in self.test_datasets:
+            for method in ["arzt", "dixon"]:
+                with self.subTest(dataset=dataset["name"], method=method):
+                    mm = Matchmaker(
+                        score_file=dataset["score"],
+                        performance_file=dataset["audio"],
+                        wait=False,
+                        input_type="audio",
+                        method=method,
+                    )
 
-                results = mm.run_evaluation(self.performance_file_annotations)
-                current_test = f"{self._testMethodName}_{method}"
-                print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
+                    # When: running the alignment process
+                    try:
+                        alignment_positions = list(mm.run())
+                    except queue.Empty as e:
+                        print(f"Error: {type(e)}, {e}")
+                        traceback.print_exc()
+                        mm._has_run = True
 
-                save_dir = Path("./tests/results")
-                save_dir.mkdir(parents=True, exist_ok=True)
-                score_annots = mm.build_score_annotations()
-                save_score_following_result(
-                    mm.score_follower,
-                    save_dir,
-                    score_annots,
-                    self.performance_file_annotations,
-                    name=f"{Path(self.performance_file_audio).stem}",
-                )
+                    results = mm.run_evaluation(dataset["annotations"])
+                    current_test = f"{dataset['name']}_{method}"
+                    print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
 
-                # Then: the results should at least be 0.7
-                for threshold in ["300ms", "500ms", "1000ms"]:
-                    self.assertGreaterEqual(results[threshold], 0.7)
+                    save_dir = Path("./tests/results")
+                    save_dir.mkdir(parents=True, exist_ok=True)
+                    score_annots = mm.build_score_annotations()
+                    save_score_following_result(
+                        mm.score_follower,
+                        save_dir,
+                        score_annots,
+                        dataset["annotations"],
+                        name=f"{dataset['name']}_{method}",
+                    )
+
+                    # Then: the results should at least be 0.7
+                    for threshold in ["300ms", "500ms", "1000ms"]:
+                        self.assertGreaterEqual(results[threshold], 0.7)
 
     def test_matchmaker_audio_run_with_evaluation_before_run(self):
         # Given: a Matchmaker instance with audio input

@@ -18,8 +18,9 @@ def transfer_positions(wp, ref_anns, frame_rate):
     ----------
     wp : np.array with shape (2, T)
         array of warping path.
+        warping_path[0] is the index of the reference (score) feature and warping_path[1] is the index of the target(input) feature.
     ref_ann : List[float]
-        reference annotations in frame indices.
+        reference annotations in seconds.
     """
     x, y = wp[0], wp[1]
     ref_anns_frame = np.round(ref_anns * frame_rate)
@@ -97,9 +98,6 @@ def save_score_following_result(
     with open(perf_ann_path, "r") as f:
         reader = csv.reader(f, delimiter="\t")
         perf_annots = [float(row[0]) for row in reader]
-    # perf_annots = pd.read_csv(
-    #     filepath_or_buffer=perf_ann_path, delimiter="\t", header=None
-    # )[0]
     for i, (ref, target) in enumerate(zip(score_annots, perf_annots)):
         plt.plot(
             target * frame_rate, ref * frame_rate, "x", color="r", alpha=1, markersize=3
