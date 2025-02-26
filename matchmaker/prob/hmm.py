@@ -5,7 +5,7 @@ This module implements Hidden Markov Models for score following
 """
 
 import warnings
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
 import progressbar
@@ -106,7 +106,7 @@ class BaseHMM(HiddenMarkovModel):
 
         return current_state
 
-    def run(self) -> NDArrayInt:
+    def run(self) -> Generator[int, None, NDArrayInt]:
         if self.queue is not None:
             prev_state = self.current_state
             same_state_counter = 0

@@ -187,3 +187,4 @@ dev/*
 examples/example_live_audio_oltw.py
 
 .ruff_cache/
+results/

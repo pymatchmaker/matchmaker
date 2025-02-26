@@ -9,7 +9,11 @@ from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Iterable, List, Union
 
+import librosa
 import numpy as np
+import partitura
+from partitura.io.exportmidi import get_ppq
+from partitura.score import ScoreLike
 
 
 class MatchmakerInvalidParameterTypeError(Exception):
@@ -164,3 +168,80 @@ def interleave_with_constant(
     interleaved_array[1::2] = constant_row
 
     return interleaved_array
+
+
+def adjust_tempo_for_performance_audio(score: ScoreLike, performance_audio: Path):
+    """
+    Adjust the tempo of the score part to match the performance audio.
+    We round up the tempo to the nearest 20 bpm to avoid too much optimization.
+
+    Parameters
+    ----------
+    score : partitura.score.ScoreLike
+        The score to adjust the tempo of.
+    performance_audio : Path
+        The performance audio file to adjust the tempo to.
+    """
+    default_tempo = 120
+    score_midi = partitura.save_score_midi(score, out=None)
+    source_length = score_midi.length
+    target_length = librosa.get_duration(path=str(performance_audio))
+    ratio = target_length / source_length
+    rounded_tempo = int(
+        (default_tempo / ratio + 19) // 20 * 20
+    )  # round up to nearest 20
+    print(
+        f"default tempo: {default_tempo} (score length: {source_length}) -> adjusted_tempo: {rounded_tempo} (perf length: {target_length})"
+    )
+    return rounded_tempo
+
+
+def get_current_note_bpm(score: ScoreLike, onset_beat: float, tempo: float) -> float:
+    """Get the adjusted BPM for a given note onset beat position based on time signature."""
+    current_time = score.inv_beat_map(onset_beat)
+    beat_type_changes = [
+        {"start": time_sig.start, "beat_type": time_sig.beat_type}
+        for time_sig in score.time_sigs
+    ]
+
+    # Find the latest applicable time signature change
+    latest_change = next(
+        (
+            change
+            for change in reversed(beat_type_changes)
+            if current_time >= change["start"].t
+        ),
+        None,
+    )
+
+    # Return adjusted BPM if time signature change exists, else default tempo
+    return latest_change["beat_type"] / 4 * tempo if latest_change else tempo
+
+
+def generate_score_audio(score: ScoreLike, bpm: float, samplerate: int):
+    bpm_array = [
+        [onset_beat, get_current_note_bpm(score, onset_beat, bpm)]
+        for onset_beat in score.note_array()["onset_beat"]
+    ]
+    bpm_array = np.array(bpm_array)
+    score_audio = partitura.save_wav_fluidsynth(
+        score,
+        bpm=bpm_array,
+        samplerate=samplerate,
+    )
+
+    first_onset_in_beat = score.note_array()["onset_beat"].min()
+    first_onset_in_time = (
+        score.inv_beat_map(first_onset_in_beat) / get_ppq(score) * (60 / bpm)
+    )
+    # add padding to the beginning of the score audio
+    padding_size = int(first_onset_in_time * samplerate)
+    score_audio = np.pad(score_audio, (padding_size, 0))
+
+    last_onset_in_div = np.floor(score.note_array()["onset_div"].max())
+    last_onset_in_time = last_onset_in_div / get_ppq(score) * (60 / bpm)
+
+    buffer_size = 0.1  # for assuring the last onset is included (in seconds)
+    last_onset_in_time += buffer_size
+    score_audio = score_audio[: int(last_onset_in_time * samplerate)]
+    return score_audio
