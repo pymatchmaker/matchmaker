@@ -188,3 +188,5 @@ examples/example_live_audio_oltw.py
 
 .ruff_cache/
 results/
+score_audio_Bach-fugue_bwv_858.wav
+score_audio_mozart_k265_var1.wav
