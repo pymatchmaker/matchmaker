@@ -32,6 +32,7 @@ SKIP_REASON = (not HAS_AUDIO_INPUT, "No input audio devices detected")
 SAMPLE_RATE = 22050
 HOP_LENGTH = 256
 
+RNG = np.random.RandomState(1984)
 
 class TestAudioStream(unittest.TestCase):
     def setup(
@@ -239,6 +240,49 @@ class TestAudioStream(unittest.TestCase):
         processed_frames = np.array(processed_frames)
 
         self.assertTrue(np.all(processed_frames == processed_frames[0]))
+
+    @unittest.skipIf(*SKIP_REASON)
+    @patch("sys.stdout", new_callable=StringIO)
+    def test_run_offline(
+        self,
+        mock_stdout=None,
+    ):
+        for processor in [
+            "chroma",
+            # "mel",
+            # "mfcc",
+            "dummy",
+        ]:  
+            duration = RNG.randint(1, 5)
+            file_path = generate_sine_wave(
+                frequency=440,
+                duration=duration,
+            )
+            self.setup(
+                processor_name=processor,
+                file_path=file_path,
+            )
+
+            expected_frames = int(np.floor(duration * 1.1 * SAMPLE_RATE / HOP_LENGTH))
+
+            with self.stream as stream:
+
+                frames = stream.run_offline()
+
+            # assert that the frames are not empty
+            self.assertTrue(len(frames) == expected_frames)
+
+            # assert that each frame is a tuple, and the first entry
+            # are the features, and the second the frame times
+            for features, f_time in frames:
+
+                self.assertTrue(features is not None)
+                self.assertTrue(isinstance(f_time, float))
+
+                if processor == "chroma":
+                    self.assertTrue(features.shape == (1, 12))
+
+            os.unlink(file_path)
 
     @unittest.skipIf(*SKIP_REASON)
     @patch("sys.stdout", new_callable=StringIO)

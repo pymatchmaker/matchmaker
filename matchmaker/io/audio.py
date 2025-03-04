@@ -6,7 +6,7 @@ Input audio stream
 
 import time
 from types import TracebackType
-from typing import Callable, Optional, Tuple, Type, Union
+from typing import Any, Callable, List, Optional, Tuple, Type, Union
 
 import librosa
 import numpy as np
@@ -156,7 +156,7 @@ class AudioStream(Stream):
         self,
         target_audio: np.ndarray,
         f_time: float,
-    ):
+    ) -> None:
         if self.last_chunk is None:  # add zero padding at the first block
             target_audio = np.concatenate(
                 (np.zeros(self.hop_length, dtype=np.float32), target_audio)
@@ -168,6 +168,25 @@ class AudioStream(Stream):
         features = self.processor(target_audio)
         self.queue.put((features, f_time))
         self.last_chunk = target_audio[-self.hop_length :]
+
+    def _process_feature_offline(
+        self,
+        target_audio: np.ndarray,
+        f_time: float,
+    ) -> Tuple[Any, float]:
+        if self.last_chunk is None:  # add zero padding at the first block
+            target_audio = np.concatenate(
+                (np.zeros(self.hop_length, dtype=np.float32), target_audio)
+            )
+        else:
+            # add last chunk at the beginning of the block
+            target_audio = np.concatenate((self.last_chunk, target_audio))
+
+        features = self.processor(target_audio)
+        # self.queue.put((features, f_time))
+        self.last_chunk = target_audio[-self.hop_length :]
+
+        return (features, f_time)
 
     @property
     def current_time(self) -> Optional[float]:
@@ -205,7 +224,50 @@ class AudioStream(Stream):
             self.audio_interface.terminate()
         self.listen = False
 
-    def run_offline(self) -> None:
+    # def run_offline(self) -> None:
+    #     """Process audio file in offline mode.
+
+    #     This method simulates real-time processing by reading chunks from
+    #     an audio file at regular intervals. The processing speed can be
+    #     controlled using the `wait` parameter.
+
+    #     Note
+    #     ----
+    #     The audio file is processed in chunks of size `hop_length`,
+    #     and features are extracted for each chunk.
+    #     """
+    #     self.start_listening()
+    #     self.init_time = time.time()
+
+    #     audio_y, sr = librosa.load(self.file_path, sr=None)
+    #     if sr != self.target_sr:
+    #         audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
+
+    #     duration = int(librosa.get_duration(path=self.file_path))
+    #     time_interval = self.hop_length / self.sample_rate
+    #     padded_audio = np.concatenate(  # zero padding at the end
+    #         (
+    #             audio_y,
+    #             np.zeros(int(duration * 0.1 * self.sample_rate), dtype=np.float32),
+    #         )
+    #     )
+    #     trimmed_audio = padded_audio[  # trim to multiple of chunk_size
+    #         : len(padded_audio) - (len(padded_audio) % self.hop_length)
+    #     ]
+    #     while trimmed_audio.any():
+    #         start_time = time.time()
+    #         target_audio = trimmed_audio[: self.hop_length]
+    #         f_time = time.time()
+    #         self.last_time = f_time
+    #         self._process_feature(target_audio, f_time)
+    #         trimmed_audio = trimmed_audio[self.hop_length :]
+    #         elapsed_time = time.time() - start_time
+
+    #         if self.wait:
+    #             time.sleep(max(time_interval - elapsed_time, 0))
+
+
+    def run_offline(self) -> List[Any]:
         """Process audio file in offline mode.
 
         This method simulates real-time processing by reading chunks from
@@ -220,32 +282,44 @@ class AudioStream(Stream):
         self.start_listening()
         self.init_time = time.time()
 
-        audio_y, sr = librosa.load(self.file_path, sr=None)
-        if sr != self.target_sr:
-            audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
-
+        # Calculate the duration (in seconds), hop interval (in seconds), etc.
         duration = int(librosa.get_duration(path=self.file_path))
         time_interval = self.hop_length / self.sample_rate
-        padded_audio = np.concatenate(  # zero padding at the end
+
+        # Load the audio and pad it to handle edge cases
+        audio_y, _ = librosa.load(self.file_path, sr=self.sample_rate)
+        padded_audio = np.concatenate(
             (
                 audio_y,
+                # e.g., add 10% of the original duration in zeros
                 np.zeros(int(duration * 0.1 * self.sample_rate), dtype=np.float32),
             )
         )
-        trimmed_audio = padded_audio[  # trim to multiple of chunk_size
-            : len(padded_audio) - (len(padded_audio) % self.hop_length)
-        ]
-        while trimmed_audio.any():
-            start_time = time.time()
-            target_audio = trimmed_audio[: self.hop_length]
-            f_time = time.time()
-            self.last_time = f_time
-            self._process_feature(target_audio, f_time)
-            trimmed_audio = trimmed_audio[self.hop_length :]
-            elapsed_time = time.time() - start_time
 
-            if self.wait:
-                time.sleep(max(time_interval - elapsed_time, 0))
+        # Trim the padded audio so its length is a multiple of hop_length
+        excess = len(padded_audio) % self.hop_length
+        trimmed_audio = padded_audio if excess == 0 else padded_audio[:-excess]
+
+        # Process the audio in frames of hop_length
+        frames = []
+        for i in range(0, len(trimmed_audio), self.hop_length):
+            # Slice the current frame
+            target_audio = trimmed_audio[i : i + self.hop_length]
+
+            # Compute the corresponding frame time in seconds (audio time)
+            # This sets the frame "timestamp" based on how many samples have passed
+            f_time = i / self.sample_rate
+
+            # Update self.last_time (if you need to keep track of the last processed frame time)
+            self.last_time = f_time
+
+            # Process the current frame
+            output = self._process_feature_offline(target_audio, f_time)
+            frames.append(output)
+
+        self.stop_listening()
+
+        return frames
 
     def run_online(self) -> None:
         """Process audio in real-time from input device.
