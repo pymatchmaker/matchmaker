@@ -269,7 +269,25 @@ class Matchmaker(object):
 
         self._has_run = True
         return self.score_follower.warping_path
+    
+    def run_offline(self, verbose: bool = True, wait: bool = True):
 
+        with self.stream as stream:
+
+            frames = stream.run_offline()
+
+        if self.input_type == "audio":
+            position_in_beat = np.array([self._convert_frame_to_beat(self.score_follower(frame)) for frame in frames])
+        else:
+            position_in_beat = np.array([float(self.score_follower.state_space[self.score_follower(frame)]) for frame in frames])
+
+
+        return self.score_follower.warping_path
+
+
+            
+
+            
     def build_score_annotations(self, level="beat"):
         score_annots = []
         if level == "beat":  # TODO: add bar-level, note-level
