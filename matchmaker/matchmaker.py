@@ -214,8 +214,11 @@ class Matchmaker(object):
                 length=len(score_audio),
             )
             score_audio_mixed = score_audio + score_annots_audio
+            # tmp
+            score_dir = Path(self.score_file).parent.name
+            score_parent_dir = Path(self.score_file).parent.parent.name
             sf.write(
-                f"score_audio_{Path(self.score_file).stem}.wav",
+                f"score_audio_{score_parent_dir}_{score_dir}_{Path(self.score_file).stem}.wav",
                 score_audio_mixed,
                 SAMPLE_RATE,
                 subtype="PCM_24",
@@ -324,6 +327,24 @@ class Matchmaker(object):
         min_length = min(len(score_annots), len(perf_annots))
         score_annots = score_annots[:min_length]
         perf_annots = perf_annots[:min_length]
+
+        perf_audio, sr = librosa.load(self.performance_file, sr=SAMPLE_RATE)
+        perf_annots_audio = librosa.clicks(
+            times=perf_annots,
+            sr=SAMPLE_RATE,
+            click_freq=1000,
+            length=len(perf_audio),
+        )
+        perf_audio_mixed = perf_audio + perf_annots_audio
+        # tmp
+        perf_dir = Path(self.performance_file).parent.name
+        perf_parent_dir = Path(self.performance_file).parent.parent.name
+        sf.write(
+            f"perf_audio_{perf_parent_dir}_{perf_dir}_{Path(self.performance_file).stem}.wav",
+            perf_audio_mixed,
+            SAMPLE_RATE,
+            subtype="PCM_24",
+        )
 
         return get_evaluation_results(
             score_annots, perf_annots, self.score_follower.warping_path, self.frame_rate
