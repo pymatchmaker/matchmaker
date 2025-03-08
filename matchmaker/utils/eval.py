@@ -24,7 +24,13 @@ def transfer_positions(wp, ref_anns, frame_rate):
     """
     x, y = wp[0], wp[1]
     ref_anns_frame = np.round(ref_anns * frame_rate)
-    predicted_targets = np.array([y[np.where(x >= r)[0][0]] for r in ref_anns_frame])
+    predicted_targets = np.array(
+        [
+            y[np.where(x >= r)[0][0]]
+            for r in ref_anns_frame
+            if np.where(x >= r)[0].size > 0
+        ]
+    )
     return predicted_targets / frame_rate
 
 
@@ -38,6 +44,7 @@ def get_evaluation_results(
     target_annots_predicted = transfer_positions(
         warping_path, score_annots, frame_rate=frame_rate
     )
+    perf_annots = perf_annots[: len(target_annots_predicted)]
     errors_in_delay = (
         (perf_annots - target_annots_predicted) / frame_rate * 1000
     )  # in milliseconds

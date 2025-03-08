@@ -82,7 +82,7 @@ class Matchmaker(object):
         sample_rate: int = SAMPLE_RATE,
         frame_rate: int = FRAME_RATE,
     ):
-        self.score_file = score_file
+        self.score_file = str(score_file)
         self.performance_file = performance_file
         self.input_type = input_type
         self.feature_type = feature_type
