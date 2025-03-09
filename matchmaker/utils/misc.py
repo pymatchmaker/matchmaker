@@ -10,6 +10,7 @@ from queue import Empty, Queue
 from typing import Any, Iterable, List, Union
 
 import librosa
+import mido
 import numpy as np
 import partitura
 from partitura.io.exportmidi import get_ppq
@@ -183,8 +184,10 @@ def adjust_tempo_for_performance_audio(score: ScoreLike, performance_audio: Path
         The performance audio file to adjust the tempo to.
     """
     default_tempo = 120
-    score_midi = partitura.save_score_midi(score, out=None)
-    source_length = score_midi.length
+    # score_midi = partitura.save_score_midi(score, out=None)
+    tmp_score_path = "score.mid"
+    partitura.save_score_midi(score, out=tmp_score_path)
+    source_length = mido.MidiFile(tmp_score_path).length
     target_length = librosa.get_duration(path=str(performance_audio))
     ratio = target_length / source_length
     rounded_tempo = int(

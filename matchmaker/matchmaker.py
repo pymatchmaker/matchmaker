@@ -219,8 +219,13 @@ class Matchmaker(object):
             # tmp
             score_dir = Path(self.score_file).parent.name
             score_parent_dir = Path(self.score_file).parent.parent.name
+            score_audio_dir = Path("./score_audio")
+            score_audio_dir.mkdir(parents=True, exist_ok=True)
             sf.write(
-                f"score_audio_{score_parent_dir}_{score_dir}_{Path(self.score_file).stem}.wav",
+                (
+                    score_audio_dir
+                    / f"score_audio_{score_parent_dir}_{score_dir}_{Path(self.score_file).stem}.wav"
+                ).as_posix(),
                 score_audio_mixed,
                 SAMPLE_RATE,
                 subtype="PCM_24",
@@ -330,6 +335,7 @@ class Matchmaker(object):
         score_annots = score_annots[:min_length]
         perf_annots = perf_annots[:min_length]
 
+        # tmp
         perf_audio, sr = librosa.load(self.performance_file, sr=SAMPLE_RATE)
         perf_annots_audio = librosa.clicks(
             times=perf_annots,
@@ -338,11 +344,16 @@ class Matchmaker(object):
             length=len(perf_audio),
         )
         perf_audio_mixed = perf_audio + perf_annots_audio
-        # tmp
+
         perf_dir = Path(self.performance_file).parent.name
         perf_parent_dir = Path(self.performance_file).parent.parent.name
+        perf_audio_dir = Path("./performance_audio")
+        perf_audio_dir.mkdir(parents=True, exist_ok=True)
         sf.write(
-            f"perf_audio_{perf_parent_dir}_{perf_dir}_{Path(self.performance_file).stem}.wav",
+            (
+                perf_audio_dir
+                / f"perf_audio_{perf_parent_dir}_{perf_dir}_{Path(self.performance_file).stem}.wav"
+            ).as_posix(),
             perf_audio_mixed,
             SAMPLE_RATE,
             subtype="PCM_24",
