@@ -83,7 +83,9 @@ class Matchmaker(object):
         frame_rate: int = FRAME_RATE,
     ):
         self.score_file = str(score_file)
-        self.performance_file = performance_file
+        self.performance_file = (
+            str(performance_file) if performance_file is not None else None
+        )
         self.input_type = input_type
         self.feature_type = feature_type
         self.frame_rate = frame_rate
@@ -295,7 +297,7 @@ class Matchmaker(object):
         self,
         perf_annotations: PathLike,
         level: str = "beat",
-        tolerance: list = TOLERANCES,
+        tolerances: list = TOLERANCES,
     ) -> dict:
         """
         Evaluate the score following process
@@ -347,5 +349,9 @@ class Matchmaker(object):
         )
 
         return get_evaluation_results(
-            score_annots, perf_annots, self.score_follower.warping_path, self.frame_rate
+            score_annots,
+            perf_annots,
+            self.score_follower.warping_path,
+            self.frame_rate,
+            tolerances,
         )

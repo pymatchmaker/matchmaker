@@ -39,7 +39,7 @@ def get_evaluation_results(
     perf_annots,
     warping_path,
     frame_rate,
-    tolerance=TOLERANCES,
+    tolerances,
 ):
     target_annots_predicted = transfer_positions(
         warping_path, score_annots, frame_rate=frame_rate
@@ -51,7 +51,7 @@ def get_evaluation_results(
 
     absolute_errors_in_delay = np.abs(errors_in_delay)
     filtered_abs_errors_in_delay = absolute_errors_in_delay[
-        absolute_errors_in_delay <= tolerance[-1]
+        absolute_errors_in_delay <= tolerances[-1]
     ]
 
     results = {
@@ -61,7 +61,7 @@ def get_evaluation_results(
         "skewness": float(f"{scipy.stats.skew(filtered_abs_errors_in_delay):.4f}"),
         "kurtosis": float(f"{scipy.stats.kurtosis(filtered_abs_errors_in_delay):.4f}"),
     }
-    for tau in tolerance:
+    for tau in tolerances:
         results[f"{tau}ms"] = float(f"{np.mean(absolute_errors_in_delay <= tau):.4f}")
     results["count"] = len(filtered_abs_errors_in_delay)
     return results
