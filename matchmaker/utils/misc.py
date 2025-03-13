@@ -5,6 +5,7 @@ Miscellaneous utilities
 """
 
 import numbers
+import os
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Iterable, List, Union
@@ -13,8 +14,11 @@ import librosa
 import mido
 import numpy as np
 import partitura
+import soundfile as sf
 from partitura.io.exportmidi import get_ppq
 from partitura.score import ScoreLike
+
+from matchmaker.features.audio import SAMPLE_RATE
 
 
 class MatchmakerInvalidParameterTypeError(Exception):
@@ -248,3 +252,22 @@ def generate_score_audio(score: ScoreLike, bpm: float, samplerate: int):
     last_onset_in_time += buffer_size
     score_audio = score_audio[: int(last_onset_in_time * samplerate)]
     return score_audio
+
+
+def save_mixed_audio(
+    audio: Union[np.ndarray, str, os.PathLike],
+    annots: np.ndarray,
+    save_path: Union[str, os.PathLike],
+    sr: int = SAMPLE_RATE,
+):
+    if not isinstance(audio, np.ndarray):
+        audio, _ = librosa.load(audio, sr=sr)
+
+    annots_audio = librosa.clicks(
+        times=annots,
+        sr=sr,
+        click_freq=1000,
+        length=len(audio),
+    )
+    audio_mixed = audio + annots_audio
+    sf.write(str(save_path), audio_mixed, sr, subtype="PCM_24")

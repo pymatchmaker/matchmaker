@@ -185,6 +185,7 @@ setup_old.py
 notebook.py
 dev/*
 examples/example_live_audio_oltw.py
+*.mid
 
 .ruff_cache/
 results/
