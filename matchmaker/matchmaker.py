@@ -267,6 +267,7 @@ class Matchmaker(object):
 
             reference_features = self.processor(self.score_audio)
             self.reference_features = reference_features
+            self.processor.reset()
         else:
             self.reference_features = self.score_part.note_array()
 
@@ -358,7 +359,7 @@ class Matchmaker(object):
 
     def run_evaluation(
         self,
-        perf_annotations: PathLike,
+        perf_annotations: Union[PathLike, np.ndarray],
         level: str = "beat",
         tolerances: list = TOLERANCES_IN_MILLISECONDS,
         musical_beat: bool = False,  # beat annots are difference in some dataset
@@ -372,8 +373,9 @@ class Matchmaker(object):
 
         Parameters
         ----------
-        perf_annotations : PathLike
-            Path to the performance annotations file (tab-separated)
+        perf_annotations : PathLike or np.ndarray
+            Path to the performance annotations file (tab-separated),
+            or numpy array of annotation times in seconds.
         level : str
             Level of annotations to use: bar, beat or note
         tolerance : list
@@ -392,8 +394,11 @@ class Matchmaker(object):
         if not self._has_run:
             raise ValueError("Must call run() before evaluation")
 
+        if isinstance(perf_annotations, np.ndarray):
+            perf_annots = perf_annotations
+        else:
+            perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
         score_annots = self.build_score_annotations(level, musical_beat)
-        perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
         original_perf_annots_length = len(perf_annots)
 
         min_length = min(len(score_annots), len(perf_annots))
