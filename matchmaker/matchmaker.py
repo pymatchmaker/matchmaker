@@ -2,10 +2,8 @@ import os
 from pathlib import Path
 from typing import Optional, Union
 
-import librosa
 import numpy as np
 import partitura
-import soundfile as sf
 from partitura.io.exportmidi import get_ppq
 from partitura.score import Part
 
@@ -27,6 +25,7 @@ from matchmaker.utils.misc import (
     generate_score_audio,
     is_audio_file,
     is_midi_file,
+    save_mixed_audio,
 )
 
 PathLike = Union[str, bytes, os.PathLike]
@@ -82,8 +81,10 @@ class Matchmaker(object):
         sample_rate: int = SAMPLE_RATE,
         frame_rate: int = FRAME_RATE,
     ):
-        self.score_file = score_file
-        self.performance_file = performance_file
+        self.score_file = str(score_file)
+        self.performance_file = (
+            str(performance_file) if performance_file is not None else None
+        )
         self.input_type = input_type
         self.feature_type = feature_type
         self.frame_rate = frame_rate
@@ -213,25 +214,11 @@ class Matchmaker(object):
                 )
 
             # generate score audio
-            score_audio = generate_score_audio(self.score_part, self.tempo, SAMPLE_RATE)
+            self.score_audio = generate_score_audio(
+                self.score_part, self.tempo, SAMPLE_RATE
+            ).astype(np.float32)
 
-            # save score audio (for debugging)
-            score_annots = self.build_score_annotations()
-            score_annots_audio = librosa.clicks(
-                times=score_annots,
-                sr=SAMPLE_RATE,
-                click_freq=1000,
-                length=len(score_audio),
-            )
-            score_audio_mixed = score_audio + score_annots_audio
-            sf.write(
-                f"score_audio_{Path(self.score_file).stem}.wav",
-                score_audio_mixed,
-                SAMPLE_RATE,
-                subtype="PCM_24",
-            )
-
-            reference_features = self.processor(score_audio.astype(np.float32))
+            reference_features = self.processor(self.score_audio)
             self.reference_features = reference_features
         else:
             self.reference_features = self.score_part.note_array()
@@ -303,7 +290,8 @@ class Matchmaker(object):
         self,
         perf_annotations: PathLike,
         level: str = "beat",
-        tolerance: list = TOLERANCES,
+        tolerances: list = TOLERANCES,
+        debug: bool = False,
     ) -> dict:
         """
         Evaluate the score following process
@@ -316,6 +304,8 @@ class Matchmaker(object):
             Level of annotations to use: bar, beat or note
         tolerance : list
             Tolerances to use for evaluation (in milliseconds)
+        debug : bool
+            Whether to save the score and performance audio with beat annotations
 
         Returns
         -------
@@ -336,6 +326,30 @@ class Matchmaker(object):
         score_annots = score_annots[:min_length]
         perf_annots = perf_annots[:min_length]
 
+        if debug:
+            # save score audio with beat annotations
+            score_audio_dir = Path("./score_audio")
+            score_audio_dir.mkdir(parents=True, exist_ok=True)
+            save_mixed_audio(
+                self.score_audio,
+                score_annots,
+                save_path=score_audio_dir
+                / f"score_audio_{Path(self.score_file).parent.parent.name}_{Path(self.score_file).parent.name}_{Path(self.score_file).stem}.wav",
+            )
+            # save performance audio with beat annotations
+            perf_audio_dir = Path("./performance_audio")
+            perf_audio_dir.mkdir(parents=True, exist_ok=True)
+            save_mixed_audio(
+                self.performance_file,
+                perf_annots,
+                save_path=perf_audio_dir
+                / f"perf_audio_{Path(self.performance_file).parent.parent.name}_{Path(self.performance_file).parent.name}_{Path(self.performance_file).stem}.wav",
+            )
+
         return get_evaluation_results(
-            score_annots, perf_annots, self.score_follower.warping_path, self.frame_rate
+            score_annots,
+            perf_annots,
+            self.score_follower.warping_path,
+            self.frame_rate,
+            tolerances,
         )

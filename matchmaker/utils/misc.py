@@ -5,15 +5,20 @@ Miscellaneous utilities
 """
 
 import numbers
+import os
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Iterable, List, Union
 
 import librosa
+import mido
 import numpy as np
 import partitura
+import soundfile as sf
 from partitura.io.exportmidi import get_ppq
 from partitura.score import ScoreLike
+
+from matchmaker.features.audio import SAMPLE_RATE
 
 
 class MatchmakerInvalidParameterTypeError(Exception):
@@ -183,8 +188,10 @@ def adjust_tempo_for_performance_audio(score: ScoreLike, performance_audio: Path
         The performance audio file to adjust the tempo to.
     """
     default_tempo = 120
-    score_midi = partitura.save_score_midi(score, out=None)
-    source_length = score_midi.length
+    # score_midi = partitura.save_score_midi(score, out=None)
+    tmp_score_path = "score.mid"
+    partitura.save_score_midi(score, out=tmp_score_path)
+    source_length = mido.MidiFile(tmp_score_path).length
     target_length = librosa.get_duration(path=str(performance_audio))
     ratio = target_length / source_length
     rounded_tempo = int(
@@ -245,3 +252,22 @@ def generate_score_audio(score: ScoreLike, bpm: float, samplerate: int):
     last_onset_in_time += buffer_size
     score_audio = score_audio[: int(last_onset_in_time * samplerate)]
     return score_audio
+
+
+def save_mixed_audio(
+    audio: Union[np.ndarray, str, os.PathLike],
+    annots: np.ndarray,
+    save_path: Union[str, os.PathLike],
+    sr: int = SAMPLE_RATE,
+):
+    if not isinstance(audio, np.ndarray):
+        audio, _ = librosa.load(audio, sr=sr)
+
+    annots_audio = librosa.clicks(
+        times=annots,
+        sr=sr,
+        click_freq=1000,
+        length=len(audio),
+    )
+    audio_mixed = audio + annots_audio
+    sf.write(str(save_path), audio_mixed, sr, subtype="PCM_24")
