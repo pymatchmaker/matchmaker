@@ -83,7 +83,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.N_ref = self.reference_features.shape[0]
         self.frame_rate = frame_rate
         self.w = int(window_size * self.frame_rate)
-        self.distance_func = distance_func
+        self.distance_func = distance_func.lower()
         self.max_run_count = max_run_count
         self.frame_per_seg = frame_per_seg
         self.current_position = 0
