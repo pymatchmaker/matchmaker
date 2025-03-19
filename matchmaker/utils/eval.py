@@ -45,9 +45,7 @@ def get_evaluation_results(
         warping_path, score_annots, frame_rate=frame_rate
     )
     perf_annots = perf_annots[: len(target_annots_predicted)]
-    errors_in_delay = (
-        (perf_annots - target_annots_predicted) / frame_rate * 1000
-    )  # in milliseconds
+    errors_in_delay = (perf_annots - target_annots_predicted) * 1000  # in milliseconds
 
     absolute_errors_in_delay = np.abs(errors_in_delay)
     filtered_abs_errors_in_delay = absolute_errors_in_delay[
