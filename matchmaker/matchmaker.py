@@ -19,7 +19,7 @@ from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
-from matchmaker.utils.eval import TOLERANCES, get_evaluation_results
+from matchmaker.utils.eval import TOLERANCES, get_evaluation_results, transfer_positions
 from matchmaker.utils.misc import (
     adjust_tempo_for_performance_audio,
     generate_score_audio,
@@ -260,6 +260,7 @@ class Matchmaker(object):
     def build_score_annotations(self, level="beat"):
         score_annots = []
         if level == "beat":  # TODO: add bar-level, note-level
+            # self.score_part.use_musical_beat()  # for asap
             note_array = np.unique(self.score_part.note_array()["onset_beat"])
             start_beat = np.ceil(note_array.min())
             end_beat = np.floor(note_array.max())
@@ -267,7 +268,9 @@ class Matchmaker(object):
 
             beat_timestamp = [
                 self.score_part.inv_beat_map(beat)
-                / get_ppq(self.score_part)
+                / self.score_part.quarter_duration_map(
+                    self.score_part.inv_beat_map(beat)
+                )
                 * (60 / self.tempo)
                 for beat in beats
             ]
@@ -308,12 +311,14 @@ class Matchmaker(object):
         score_annots = self.build_score_annotations(level)
         perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
 
-        # print(f"score annotations: {score_annots}, len: {len(score_annots)}")
-        # print(f"performance annotations: {perf_annots}, len: {len(perf_annots)}")
-
         min_length = min(len(score_annots), len(perf_annots))
         score_annots = score_annots[:min_length]
         perf_annots = perf_annots[:min_length]
+
+        perf_annots_predicted = transfer_positions(
+            self.score_follower.warping_path, score_annots, frame_rate=self.frame_rate
+        )
+        perf_annots = perf_annots[: len(perf_annots_predicted)]
 
         if debug:
             # save score audio with beat annotations
@@ -334,11 +339,20 @@ class Matchmaker(object):
                 save_path=perf_audio_dir
                 / f"perf_audio_{Path(self.performance_file).parent.parent.name}_{Path(self.performance_file).parent.name}_{Path(self.performance_file).stem}.wav",
             )
+            # save performance audio with predicted beat annotations
+            perf_predicted_audio_dir = Path("./performance_audio_predicted")
+            perf_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
+            save_mixed_audio(
+                self.performance_file,
+                perf_annots_predicted,
+                save_path=perf_predicted_audio_dir
+                / f"perf_audio_{Path(self.performance_file).parent.parent.name}_{Path(self.performance_file).parent.name}_{Path(self.performance_file).stem}.wav",
+            )
 
         return get_evaluation_results(
             score_annots,
             perf_annots,
-            self.score_follower.warping_path,
+            perf_annots_predicted,
             self.frame_rate,
             tolerances,
         )

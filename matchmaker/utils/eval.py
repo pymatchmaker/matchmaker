@@ -21,31 +21,60 @@ def transfer_positions(wp, ref_anns, frame_rate):
         warping_path[0] is the index of the reference (score) feature and warping_path[1] is the index of the target(input) feature.
     ref_ann : List[float]
         reference annotations in seconds.
+    frame_rate : int
+        frame rate of the audio.
+
+    Returns
+    -------
+    predicted_targets : np.array with shape (T,)
+        predicted target positions in seconds.
     """
+    # Causal nearest interpolation
     x, y = wp[0], wp[1]
     ref_anns_frame = np.round(ref_anns * frame_rate)
-    predicted_targets = np.array(
-        [
-            y[np.where(x >= r)[0][0]]
-            for r in ref_anns_frame
-            if np.where(x >= r)[0].size > 0
-        ]
-    )
-    return predicted_targets / frame_rate
+    predicted_targets = []
+
+    for r in ref_anns_frame:
+        past_indices = np.where(x <= r)[0]
+        if past_indices.size > 0:
+            nearest_past_idx = past_indices[-1]
+            predicted_targets.append(y[nearest_past_idx])
+
+    return np.array(predicted_targets) / frame_rate
+
+    # 1. nearest interpolation
+    # ref_anns_frame = np.round(ref_anns * frame_rate)
+    # positions_1_transferred_to_2 = scipy.interpolate.interp1d(
+    #     wp[0], wp[1], kind="nearest"
+    # )(ref_anns_frame)
+    # return positions_1_transferred_to_2 / frame_rate
+
+    # 2. threshold-crossing
+    # x, y = wp[0], wp[1]
+    # ref_anns_frame = np.round(ref_anns * frame_rate)
+    # predicted_targets = np.array(
+    #     [
+    #         y[np.where(x >= r)[0][0]]
+    #         for r in ref_anns_frame
+    #         if np.where(x >= r)[0].size > 0
+    #     ]
+    # )
+    # return predicted_targets / frame_rate
 
 
 def get_evaluation_results(
     score_annots,
     perf_annots,
-    warping_path,
+    perf_annots_predicted,
+    # warping_path,
     frame_rate,
     tolerances,
 ):
-    target_annots_predicted = transfer_positions(
-        warping_path, score_annots, frame_rate=frame_rate
-    )
-    perf_annots = perf_annots[: len(target_annots_predicted)]
-    errors_in_delay = (perf_annots - target_annots_predicted) * 1000  # in milliseconds
+    # target_annots_predicted = transfer_positions(
+    #     warping_path, score_annots, frame_rate=frame_rate
+    # )
+    # perf_annots = perf_annots[: len(target_annots_predicted)]
+    errors_in_delay = (perf_annots - perf_annots_predicted) * 1000  # in milliseconds
 
     absolute_errors_in_delay = np.abs(errors_in_delay)
     filtered_abs_errors_in_delay = absolute_errors_in_delay[
@@ -96,7 +125,7 @@ def save_score_following_result(
     ref_paths, target_paths = model.warping_path[0], model.warping_path[1]
     for n in range(len(ref_paths)):
         plt.plot(
-            target_paths[n], ref_paths[n], ".", color="purple", alpha=0.5, markersize=3
+            target_paths[n], ref_paths[n], ".", color="lime", alpha=0.5, markersize=3
         )
 
     # plot ground-truth labels
@@ -105,6 +134,6 @@ def save_score_following_result(
         perf_annots = [float(row[0]) for row in reader]
     for i, (ref, target) in enumerate(zip(score_annots, perf_annots)):
         plt.plot(
-            target * frame_rate, ref * frame_rate, "x", color="r", alpha=1, markersize=3
+            target * frame_rate, ref * frame_rate, "x", color="r", alpha=1, markersize=5
         )
     plt.savefig(save_dir / f"{run_name}.png")

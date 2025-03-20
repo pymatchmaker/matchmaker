@@ -31,19 +31,25 @@ class TestMatchmaker(unittest.TestCase):
 
         self.test_datasets = [
             {
-                "name": "bach_fugue_bwv_858",
-                "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
-                "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
-                "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
-                "annotations": "./tests/resources/Bach-fugue_bwv_858_annotations.txt",
+                "name": "chopin_op38",
+                "score": "./tests/resources/Chopin_op38.musicxml",
+                "audio": "./tests/resources/Chopin_op38_p01.wav",
+                "annotations": "./tests/resources/Chopin_op38_p01.tsv",
             },
-            {
-                "name": "mozart_k265_var1",
-                "score": "./matchmaker/assets/mozart_k265_var1.musicxml",
-                "audio": "./matchmaker/assets/mozart_k265_var1.mp3",
-                "midi": "./matchmaker/assets/mozart_k265_var1.mid",
-                "annotations": "./matchmaker/assets/mozart_k265_var1_annotations.txt",
-            },
+            # {
+            #     "name": "bach_fugue_bwv_858",
+            #     "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
+            #     "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
+            #     "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
+            #     "annotations": "./tests/resources/Bach-fugue_bwv_858_annotations.txt",
+            # },
+            # {
+            #     "name": "mozart_k265_var1",
+            #     "score": "./matchmaker/assets/mozart_k265_var1.musicxml",
+            #     "audio": "./matchmaker/assets/mozart_k265_var1.mp3",
+            #     "midi": "./matchmaker/assets/mozart_k265_var1.mid",
+            #     "annotations": "./matchmaker/assets/mozart_k265_var1_annotations.txt",
+            # },
         ]
 
     def test_matchmaker_audio_init(self):
@@ -113,7 +119,7 @@ class TestMatchmaker(unittest.TestCase):
                         traceback.print_exc()
                         mm._has_run = True
 
-                    results = mm.run_evaluation(dataset["annotations"])
+                    results = mm.run_evaluation(dataset["annotations"], debug=True)
                     current_test = f"{dataset['name']}_{method}"
                     print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
 
