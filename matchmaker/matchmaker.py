@@ -1,3 +1,4 @@
+import csv
 import os
 from pathlib import Path
 from typing import Optional, Union
@@ -25,7 +26,7 @@ from matchmaker.utils.misc import (
     generate_score_audio,
     is_audio_file,
     is_midi_file,
-    save_mixed_audio,
+    save_debug_results,
 )
 
 PathLike = Union[str, bytes, os.PathLike]
@@ -230,6 +231,7 @@ class Matchmaker(object):
             self.score_part.beat_map(timeline_time),
             decimals=2,
         )
+        # tick = self.score_part.quarter_duration_map(self.score_part.inv_beat_map(beat))
         return beat_position
 
     def run(self, verbose: bool = True, wait: bool = True):
@@ -257,10 +259,11 @@ class Matchmaker(object):
         self._has_run = True
         return self.score_follower.warping_path
 
-    def build_score_annotations(self, level="beat"):
+    def build_score_annotations(self, level="beat", musical_beat: bool = False):
         score_annots = []
         if level == "beat":  # TODO: add bar-level, note-level
-            # self.score_part.use_musical_beat()  # for asap
+            if musical_beat:
+                self.score_part.use_musical_beat()  # for asap
             note_array = np.unique(self.score_part.note_array()["onset_beat"])
             start_beat = np.ceil(note_array.min())
             end_beat = np.floor(note_array.max())
@@ -283,7 +286,10 @@ class Matchmaker(object):
         perf_annotations: PathLike,
         level: str = "beat",
         tolerances: list = TOLERANCES,
+        musical_beat: bool = False,  # beat annots are difference in some dataset
         debug: bool = False,
+        save_dir: PathLike = None,
+        run_name: str = None,
     ) -> dict:
         """
         Evaluate the score following process
@@ -308,7 +314,7 @@ class Matchmaker(object):
         if not self._has_run:
             raise ValueError("Must call run() before evaluation")
 
-        score_annots = self.build_score_annotations(level)
+        score_annots = self.build_score_annotations(level, musical_beat)
         perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
 
         min_length = min(len(score_annots), len(perf_annots))
@@ -321,38 +327,21 @@ class Matchmaker(object):
         perf_annots = perf_annots[: len(perf_annots_predicted)]
 
         if debug:
-            # save score audio with beat annotations
-            score_audio_dir = Path("./score_audio")
-            score_audio_dir.mkdir(parents=True, exist_ok=True)
-            save_mixed_audio(
+            save_debug_results(
+                self.score_file,
                 self.score_audio,
                 score_annots,
-                save_path=score_audio_dir
-                / f"score_audio_{Path(self.score_file).parent.parent.name}_{Path(self.score_file).parent.name}_{Path(self.score_file).stem}.wav",
-            )
-            # save performance audio with beat annotations
-            perf_audio_dir = Path("./performance_audio")
-            perf_audio_dir.mkdir(parents=True, exist_ok=True)
-            save_mixed_audio(
                 self.performance_file,
                 perf_annots,
-                save_path=perf_audio_dir
-                / f"perf_audio_{Path(self.performance_file).parent.parent.name}_{Path(self.performance_file).parent.name}_{Path(self.performance_file).stem}.wav",
-            )
-            # save performance audio with predicted beat annotations
-            perf_predicted_audio_dir = Path("./performance_audio_predicted")
-            perf_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
-            save_mixed_audio(
-                self.performance_file,
                 perf_annots_predicted,
-                save_path=perf_predicted_audio_dir
-                / f"perf_audio_{Path(self.performance_file).parent.parent.name}_{Path(self.performance_file).parent.name}_{Path(self.performance_file).stem}.wav",
+                self.score_follower,
+                self.frame_rate,
+                save_dir,
+                run_name,
             )
 
         return get_evaluation_results(
-            score_annots,
             perf_annots,
             perf_annots_predicted,
-            self.frame_rate,
             tolerances,
         )

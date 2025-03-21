@@ -1,5 +1,6 @@
 import csv
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,7 +30,7 @@ def transfer_positions(wp, ref_anns, frame_rate):
     predicted_targets : np.array with shape (T,)
         predicted target positions in seconds.
     """
-    # Causal nearest interpolation
+    # Causal nearest
     x, y = wp[0], wp[1]
     ref_anns_frame = np.round(ref_anns * frame_rate)
     predicted_targets = []
@@ -63,17 +64,10 @@ def transfer_positions(wp, ref_anns, frame_rate):
 
 
 def get_evaluation_results(
-    score_annots,
     perf_annots,
     perf_annots_predicted,
-    # warping_path,
-    frame_rate,
     tolerances,
 ):
-    # target_annots_predicted = transfer_positions(
-    #     warping_path, score_annots, frame_rate=frame_rate
-    # )
-    # perf_annots = perf_annots[: len(target_annots_predicted)]
     errors_in_delay = (perf_annots - perf_annots_predicted) * 1000  # in milliseconds
 
     absolute_errors_in_delay = np.abs(errors_in_delay)
@@ -92,48 +86,3 @@ def get_evaluation_results(
         results[f"{tau}ms"] = float(f"{np.mean(absolute_errors_in_delay <= tau):.4f}")
     results["count"] = len(filtered_abs_errors_in_delay)
     return results
-
-
-def save_nparray_to_csv(array: NDArray, save_path: str):
-    with open(save_path, "w") as csvfile:
-        writer = csv.writer(csvfile, delimiter="\t")
-        writer.writerows(array)
-
-
-def save_score_following_result(
-    model, save_dir, score_annots, perf_ann_path: Path, frame_rate=FRAME_RATE, name=None
-):
-    run_name = name or "results"
-    save_path = save_dir / f"wp_{run_name}.tsv"
-    save_nparray_to_csv(model.warping_path.T, save_path.as_posix())
-
-    dist = scipy.spatial.distance.cdist(
-        model.reference_features,
-        model.input_features[: model.warping_path[1][-1]],
-        metric=model.distance_func,
-    )  # [d, wy]
-    plt.figure(figsize=(15, 15))
-    plt.imshow(dist, aspect="auto", origin="lower", interpolation="nearest")
-    plt.title(
-        f"[{save_dir.name}] \n Matchmaker alignment path with ground-truth labels",
-        fontsize=25,
-    )
-    plt.xlabel("Performance Audio frame", fontsize=15)
-    plt.ylabel("Score Audio frame", fontsize=15)
-
-    # plot online DTW path
-    ref_paths, target_paths = model.warping_path[0], model.warping_path[1]
-    for n in range(len(ref_paths)):
-        plt.plot(
-            target_paths[n], ref_paths[n], ".", color="lime", alpha=0.5, markersize=3
-        )
-
-    # plot ground-truth labels
-    with open(perf_ann_path, "r") as f:
-        reader = csv.reader(f, delimiter="\t")
-        perf_annots = [float(row[0]) for row in reader]
-    for i, (ref, target) in enumerate(zip(score_annots, perf_annots)):
-        plt.plot(
-            target * frame_rate, ref * frame_rate, "x", color="r", alpha=1, markersize=5
-        )
-    plt.savefig(save_dir / f"{run_name}.png")

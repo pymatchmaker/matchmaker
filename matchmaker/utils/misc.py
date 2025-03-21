@@ -4,6 +4,7 @@
 Miscellaneous utilities
 """
 
+import csv
 import numbers
 import os
 from pathlib import Path
@@ -14,7 +15,10 @@ import librosa
 import mido
 import numpy as np
 import partitura
+import scipy
 import soundfile as sf
+from matplotlib import pyplot as plt
+from numpy.typing import NDArray
 from partitura.io.exportmidi import get_ppq
 from partitura.score import ScoreLike
 
@@ -254,6 +258,12 @@ def generate_score_audio(score: ScoreLike, bpm: float, samplerate: int):
     return score_audio
 
 
+def save_nparray_to_csv(array: NDArray, save_path: str):
+    with open(save_path, "w") as csvfile:
+        writer = csv.writer(csvfile, delimiter="\t")
+        writer.writerows(array)
+
+
 def save_mixed_audio(
     audio: Union[np.ndarray, str, os.PathLike],
     annots: np.ndarray,
@@ -271,3 +281,102 @@ def save_mixed_audio(
     )
     audio_mixed = audio + annots_audio
     sf.write(str(save_path), audio_mixed, sr, subtype="PCM_24")
+
+
+def plot_and_save_score_following_result(
+    wp,
+    ref_features,
+    input_features,
+    distance_func,
+    save_dir,
+    score_annots,
+    perf_annots,
+    frame_rate,
+    name=None,
+):
+    run_name = name or "results"
+    save_path = save_dir / f"wp_{run_name}.tsv"
+    save_nparray_to_csv(wp.T, save_path.as_posix())
+
+    dist = scipy.spatial.distance.cdist(
+        ref_features,
+        input_features[: wp[1][-1]],
+        metric=distance_func,
+    )  # [d, wy]
+    plt.figure(figsize=(15, 15))
+    plt.imshow(dist, aspect="auto", origin="lower", interpolation="nearest")
+    plt.title(
+        f"[{save_dir.name}] \n Matchmaker alignment path with ground-truth labels",
+        fontsize=25,
+    )
+    plt.xlabel("Performance Audio frame", fontsize=15)
+    plt.ylabel("Score Audio frame", fontsize=15)
+
+    # plot online DTW path
+    ref_paths, target_paths = wp[0], wp[1]
+    for n in range(len(ref_paths)):
+        plt.plot(
+            target_paths[n], ref_paths[n], ".", color="lime", alpha=0.5, markersize=3
+        )
+
+    # plot ground-truth labels
+    for i, (ref, target) in enumerate(zip(score_annots, perf_annots)):
+        plt.plot(
+            target * frame_rate, ref * frame_rate, "x", color="r", alpha=1, markersize=3
+        )
+    plt.savefig(save_dir / f"{run_name}.png")
+
+
+def save_debug_results(
+    score_file,
+    score_audio,
+    score_annots,
+    perf_file,
+    perf_annots,
+    perf_annots_predicted,
+    model,
+    frame_rate,
+    save_dir=None,
+    run_name="",
+):
+    # save score audio with beat annotations
+    score_audio_dir = Path("./score_audio")
+    score_audio_dir.mkdir(parents=True, exist_ok=True)
+    save_mixed_audio(
+        score_audio,
+        score_annots,
+        save_path=score_audio_dir
+        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).parent.name}_{Path(score_file).stem}.wav",
+    )
+    # save performance audio with beat annotations
+    perf_audio_dir = Path("./performance_audio")
+    perf_audio_dir.mkdir(parents=True, exist_ok=True)
+    save_mixed_audio(
+        perf_file,
+        perf_annots,
+        save_path=perf_audio_dir
+        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{Path(perf_file).stem}.wav",
+    )
+    # save performance audio with predicted beat annotations
+    perf_predicted_audio_dir = Path("./performance_audio_predicted")
+    perf_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
+    save_mixed_audio(
+        perf_file,
+        perf_annots_predicted,
+        save_path=perf_predicted_audio_dir
+        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{Path(perf_file).stem}.wav",
+    )
+    # save score following plot result
+    save_dir = save_dir or Path("./tests/results")
+    save_dir.mkdir(parents=True, exist_ok=True)
+    plot_and_save_score_following_result(
+        model.warping_path,
+        model.reference_features,
+        model.input_features,
+        model.distance_func,
+        save_dir,
+        score_annots,
+        perf_annots,
+        frame_rate,
+        name=run_name,
+    )

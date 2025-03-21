@@ -13,7 +13,6 @@ from matchmaker.features.midi import PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
-from matchmaker.utils.eval import save_score_following_result
 
 warnings.filterwarnings("ignore", module="partitura")
 warnings.filterwarnings("ignore", module="librosa")
@@ -119,20 +118,14 @@ class TestMatchmaker(unittest.TestCase):
                         traceback.print_exc()
                         mm._has_run = True
 
-                    results = mm.run_evaluation(dataset["annotations"], debug=True)
                     current_test = f"{dataset['name']}_{method}"
-                    print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
-
-                    save_dir = Path("./tests/results")
-                    save_dir.mkdir(parents=True, exist_ok=True)
-                    score_annots = mm.build_score_annotations()
-                    save_score_following_result(
-                        mm.score_follower,
-                        save_dir,
-                        score_annots,
+                    results = mm.run_evaluation(
                         dataset["annotations"],
-                        name=f"{dataset['name']}_{method}",
+                        debug=True,
+                        save_dir=Path("./tests/results"),
+                        run_name=current_test,
                     )
+                    print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
 
                     # Then: the results should at least be 0.7
                     for threshold in ["300ms", "500ms", "1000ms"]:
