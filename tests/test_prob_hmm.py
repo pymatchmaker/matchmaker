@@ -18,6 +18,7 @@ from matchmaker.prob.hmm import (
     BernoulliPitchObservationModel,
     PitchHMM,
     PitchIOIHMM,
+    GaussianAudioPitchHMM,
     compute_discrete_pitch_profiles,
     compute_discrete_pitch_profiles_old,
     compute_ioi_matrix,
@@ -26,7 +27,7 @@ from matchmaker.prob.hmm import (
     simple_transition_matrix,
 )
 from matchmaker.utils.tempo_models import ReactiveTempoModel
-from tests.utils import process_midi_offline
+from tests.utils import process_midi_offline, process_audio_offline
 
 
 class TestBaseHMM(unittest.TestCase):
@@ -185,3 +186,24 @@ class TestPitchIOIHMM(unittest.TestCase):
                 self.assertTrue(hmm.state_space[cp] in unique_sonsets)
 
         self.assertTrue(isinstance(hmm.warping_path, np.ndarray))
+
+
+class TestBernoulliGaussianPitchIOIHMM(unittest.TestCase):
+
+    def test_init(self):
+
+        self.score_file = "./tests/resources/Bach-fugue_bwv_858.musicxml"
+        self.performance_file_audio = "./tests/resources/Bach-fugue_bwv_858.mp3"
+        self.performance_file_midi = "./tests/resources/Bach-fugue_bwv_858.mid"
+        self.performance_file_annotations = (
+            "./tests/resources/Bach-fugue_bwv_858_annotations.txt"
+        )
+
+        self.performance = process_audio_offline(
+            perf_info=self.performance_file_audio,
+        )
+
+
+
+
+    

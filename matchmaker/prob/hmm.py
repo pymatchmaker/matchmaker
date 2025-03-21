@@ -1183,6 +1183,7 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
                 transition_matrix = gumbel_transition_matrix(
                     n_states=len(reference_features),
                     inserted_states=False,
+                    scale=0.05,
                 )
             if initial_probabilities is None:
                 initial_probabilities = gumbel_init_dist(

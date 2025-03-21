@@ -332,6 +332,7 @@ def process_audio_offline(
         processor=processor,
         sample_rate=sample_rate,
         hop_length=hop_length,
+        wait=False,
     )
 
     input_stream.start()
