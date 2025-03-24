@@ -33,7 +33,10 @@ from matchmaker.utils.tempo_models import KalmanTempoModel, TempoModel
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]
 
-DEFAULT_GAUSSIAN_AUDIO_PRECISION = 1.0
+DEFAULT_GAUSSIAN_AUDIO_PRECISION = 2.0
+
+DEFAULT_GAUSSIAN_AUDIO_IOI_PRECISION = 2.0
+DEFAULT_GUMBEL_AUDIO_SCALE = 0.05
 
 
 class BaseHMM(HiddenMarkovModel):
@@ -731,6 +734,72 @@ class GaussianAudioPitchObservationModel(ObservationModel):
         )
 
 
+class GaussianAudioPitchTempoObservationModel(ObservationModel):
+    """
+    Computes the probabilities that an observation was emitted, i.e. the
+    likelihood of observing performed audio frame at the current moment/state.
+
+    Parameters
+    ----------
+    audio_features : NDArrayFloat
+        Audio features from the reference (score). Used in calculating
+        the pitch observation probabilities.
+    """
+
+    def __init__(
+        self,
+        audio_features: NDArrayFloat,
+        ioi_matrix: NDArrayFloat,
+        pitch_precision: float = 1,
+        ioi_precision: float = 1,
+    ):
+        """
+        The initialization method.
+
+        Parameters
+        ----------
+        audio_features : NDArrayFloat
+            he pre-computed audio features for the reference (e.g., score).
+            Used in calculating the pitch observation probabilities.
+        """
+        super().__init__(use_log_probabilities=False)
+        # Store the parameters of the object:
+        self.audio_features = audio_features
+        self.pitch_precision = pitch_precision
+        self.pitch_norm_term = np.sqrt(0.5 * pitch_precision / np.pi)
+        self.ioi_norm_term = np.sqrt(0.5 * ioi_precision / np.pi)
+        self.ioi_precision = ioi_precision
+        self.ioi_matrix = ioi_matrix
+        self.current_state = None
+
+    def __call__(self, observation: NDArrayFloat) -> NDArrayFloat:
+
+        pitch_obs, tempo_est = observation
+
+        ioi_idx = self.current_state if self.current_state is not None else 0
+
+        ioi_ref = self.ioi_matrix[ioi_idx]
+
+        pitch_prob = compute_gaussian_audio_probabilities(
+            audio_obs=pitch_obs,
+            audio_features=self.audio_features,
+            precision=self.pitch_precision,
+            norm_term=self.pitch_norm_term,
+        )
+
+        tempo_prob = compute_gaussian_ioi_observation_probability(
+            ioi_obs=1,
+            ioi_score=ioi_ref,
+            tempo_est=tempo_est,
+            ioi_precision=self.ioi_precision,
+            norm_term=self.ioi_norm_term,
+        )
+
+        obs_prob = pitch_prob * tempo_prob
+
+        return obs_prob
+
+
 class PitchIOIObservationModel(ObservationModel):
     def __init__(
         self,
@@ -1258,7 +1327,217 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
                 current_state = self(queue_input)
                 empty_counter = 0
                 if current_state == prev_state:
-                    if same_state_counter < 3:# self.patience:
+                    if same_state_counter < 3:  # self.patience:
+                        same_state_counter += 1
+                    else:
+                        break
+                else:
+                    same_state_counter = 0
+
+                if verbose:
+                    pbar.update(int(current_state))
+                yield current_state
+
+            if verbose:
+                pbar.finish()
+        return self.warping_path
+
+
+class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
+    """
+    Audio Gaussian HMM
+    """
+
+    def __init__(
+        self,
+        reference_features: np.ndarray,  # audio features
+        queue: Optional[RECVQueue] = None,
+        transition_model: Optional[TransitionModel] = None,
+        observation_model: Optional[PitchIOIObservationModel] = None,
+        tempo_model: Optional[TempoModel] = None,
+        transition_matrix: Optional[NDArrayFloat] = None,
+        pitch_precision: Optional[float] = DEFAULT_GAUSSIAN_AUDIO_PRECISION,
+        ioi_precision: Optional[float] = DEFAULT_GAUSSIAN_AUDIO_IOI_PRECISION,
+        transition_scale: Optional[float] = DEFAULT_GUMBEL_AUDIO_SCALE,
+        initial_probabilities: Optional[np.ndarray] = None,
+        state_space: Optional[NDArray] = None,
+        patience: int = 50,
+    ) -> None:
+        """
+        Initialize the object.
+
+        Parameters
+        ----------
+        transition_matrix : numpy array
+            The Tranistion probability matrix of HMM.
+
+        pitch_profiles : numpy array
+            The pre-computed pitch profiles, for each separate possible pitch
+            in the MIDI range. Used in calculating the pitch observation
+            probabilities.
+
+        ioi_matrix : numpy array
+            The pre-computed score IOI values in beats, from each unique state
+            to all other states, stored in a matrix.
+
+        ioi_precision : float
+            The precision parameter for computing the IOI observation
+            probability.
+
+        score_onsets : numpy array
+            TODO
+
+        initial_distribution : numpy array
+            The initial distribution of the model. If not given, it is asumed to
+            be uniform.
+            Default = None.
+        """
+        OnlineAlignment.__init__(
+            self,
+            reference_features=reference_features,
+        )
+
+        if transition_model is not None and transition_matrix is not None:
+            warnings.warn(
+                "Both `transition_model` and `transition_matrix` were "
+                "provided. Only `transition_model` will be used."
+            )
+        obs_model_params_given = [
+            pitch_precision is not None,
+        ]
+        if observation_model is not None and any(obs_model_params_given):
+            warnings.warn(
+                "`observation_model` and params were provided. "
+                "Only `observation_model` will be used."
+            )
+
+        if observation_model is None and not all(obs_model_params_given):
+            missing_params = [
+                pn
+                for pn, given in zip(
+                    [
+                        "precision",
+                    ],
+                    obs_model_params_given,
+                )
+                if not given
+            ]
+            raise MatchmakerMissingParameterError(missing_params)
+
+        if transition_model is None:
+            if transition_matrix is None:
+                transition_matrix = gumbel_transition_matrix(
+                    n_states=len(reference_features),
+                    inserted_states=False,
+                    scale=transition_scale,
+                )
+            if initial_probabilities is None:
+                initial_probabilities = gumbel_init_dist(
+                    n_states=len(reference_features)
+                )
+            transition_model = ConstantTransitionModel(
+                transition_probabilities=transition_matrix,
+                init_probabilities=initial_probabilities,
+            )
+
+        if observation_model is None:
+            observation_model = GaussianAudioPitchTempoObservationModel(
+                audio_features=reference_features,
+                ioi_matrix=compute_ioi_matrix(
+                    np.arange(len(reference_features)),
+                    inserted_states=False,
+                ),
+                pitch_precision=(
+                    pitch_precision
+                    if pitch_precision is not None
+                    else DEFAULT_GAUSSIAN_AUDIO_PRECISION
+                ),
+                ioi_precision=(
+                    ioi_precision
+                    if ioi_precision is not None
+                    else DEFAULT_GAUSSIAN_AUDIO_IOI_PRECISION
+                ),
+            )
+
+        if tempo_model is None:
+            tempo_model = KalmanTempoModel(
+                init_beat_period=1.0,
+                init_score_onset=0,
+                trans_par=1.0,
+                trans_var=0.03,
+                obs_var=0.0213,
+                init_var=1.0,
+            )
+        self.perf_onset = None
+
+        BaseHMM.__init__(
+            self,
+            observation_model=observation_model,
+            transition_model=transition_model,
+            state_space=(
+                state_space
+                if state_space is not None
+                else np.arange(len(reference_features))
+            ),
+            tempo_model=tempo_model,
+            has_insertions=False,
+            queue=queue,
+            patience=patience,
+        )
+
+    def __call__(self, input, *args, **kwargs):
+        frame_index = args[0] if args else None
+        frame, f_time = input
+
+        current_state = self.forward_algorithm_step(
+            observation=(
+                frame,
+                self.tempo_model.beat_period,
+            ),
+            log_probabilities=False,
+        )
+
+        self._warping_path.append((current_state, self.input_index))
+        self.input_index = self.input_index + 1 if frame_index is None else frame_index
+
+        if current_state > self.current_state:
+            # Only update tempo if jump is forward
+            # current_so = self.state_space[current_state]
+            
+            self.tempo_model.update_beat_period(
+                performed_onset=f_time,
+                score_onset=current_state,
+            )
+        self.perf_onset = f_time
+        self.current_state = current_state
+
+        return self.current_state
+
+    @property
+    def current_state(self):
+        return self.observation_model.current_state
+
+    @current_state.setter
+    def current_state(self, state):
+        self.observation_model.current_state = state
+
+    def run(self, verbose: bool = True):
+        prev_state = self.current_state
+        same_state_counter = 0
+        empty_counter = 0
+        if verbose:
+            pbar = progressbar.ProgressBar(
+                max_val=self.n_states,  # redirect_stdout=True
+            )
+            pbar.start()
+
+        while self.is_still_following():
+            queue_input = self.queue.get()
+            if queue_input is not None:
+                current_state = self(queue_input)
+                empty_counter = 0
+                if current_state == prev_state:
+                    if same_state_counter < 3:  # self.patience:
                         same_state_counter += 1
                     else:
                         break

@@ -286,6 +286,9 @@ class KalmanTempoModel(TempoModel):
             score_ioi = 0
             performed_ioi = 0
             self.est_onset = performed_onset
+            self.prev_perf_onset = performed_onset
+            self.prev_score_onset = score_onset
+            return # skip update on first observation
         else:
             performed_ioi = abs(performed_onset - self.prev_perf_onset)
 

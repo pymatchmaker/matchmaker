@@ -19,13 +19,8 @@ from matchmaker.features.audio import (
 from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
-<<<<<<< HEAD
 from matchmaker.prob.hmm import GaussianAudioPitchHMM, PitchIOIHMM
-from matchmaker.utils.eval import TOLERANCES, get_evaluation_results
-=======
-from matchmaker.prob.hmm import PitchIOIHMM
 from matchmaker.utils.eval import TOLERANCES, get_evaluation_results, transfer_positions
->>>>>>> feature/evaluation
 from matchmaker.utils.misc import (
     adjust_tempo_for_performance_audio,
     generate_score_audio,

@@ -68,7 +68,8 @@ def get_evaluation_results(
     perf_annots_predicted,
     tolerances,
 ):
-    errors_in_delay = (perf_annots - perf_annots_predicted) * 1000  # in milliseconds
+    el = min(len(perf_annots), len(perf_annots_predicted))
+    errors_in_delay = (perf_annots[:el] - perf_annots_predicted[:el]) * 1000  # in milliseconds
 
     absolute_errors_in_delay = np.abs(errors_in_delay)
     filtered_abs_errors_in_delay = absolute_errors_in_delay[
