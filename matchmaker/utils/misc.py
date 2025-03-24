@@ -201,6 +201,7 @@ def adjust_tempo_for_performance_audio(score: ScoreLike, performance_audio: Path
     rounded_tempo = int(
         (default_tempo / ratio + 19) // 20 * 20
     )  # round up to nearest 20
+    # rounded_tempo = round(default_tempo / ratio / 20) * 20
     print(
         f"default tempo: {default_tempo} (score length: {source_length}) -> adjusted_tempo: {rounded_tempo} (perf length: {target_length})"
     )
@@ -322,7 +323,12 @@ def plot_and_save_score_following_result(
     # plot ground-truth labels
     for i, (ref, target) in enumerate(zip(score_annots, perf_annots)):
         plt.plot(
-            target * frame_rate, ref * frame_rate, "x", color="r", alpha=1, markersize=3
+            target * frame_rate,
+            ref * frame_rate,
+            "x",
+            color="r",
+            alpha=1,
+            markersize=3,
         )
     plt.savefig(save_dir / f"{run_name}.png")
 
@@ -331,6 +337,7 @@ def save_debug_results(
     score_file,
     score_audio,
     score_annots,
+    score_annots_predicted,
     perf_file,
     perf_annots,
     perf_annots_predicted,
@@ -356,6 +363,15 @@ def save_debug_results(
         perf_annots,
         save_path=perf_audio_dir
         / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{Path(perf_file).stem}.wav",
+    )
+    # save score audio with predicted beat annotations
+    score_predicted_audio_dir = Path("./score_audio_predicted")
+    score_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
+    save_mixed_audio(
+        score_audio,
+        score_annots_predicted,
+        save_path=score_predicted_audio_dir
+        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).parent.name}_{Path(score_file).stem}.wav",
     )
     # save performance audio with predicted beat annotations
     perf_predicted_audio_dir = Path("./performance_audio_predicted")

@@ -138,6 +138,34 @@ class MFCCProcessor(Processor):
         return mfcc.T
 
 
+class CQTProcessor(Processor):
+    def __init__(
+        self,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+        norm: Optional[Union[float, str]] = NORM,
+    ):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.hop_length = hop_length
+
+    def __call__(
+        self,
+        y: InputAudioSeries,
+    ) -> Tuple[Optional[np.ndarray], Dict]:
+        # np.abs(librosa.cqt(y, sr=sr))
+        cqt = np.abs(
+            librosa.cqt(
+                y=y,
+                sr=self.sample_rate,
+                hop_length=self.hop_length,
+                fmin=librosa.note_to_hz("C2"),
+            )
+        )
+
+        return cqt.T
+
+
 class MelSpectrogramProcessor(Processor):
     def __init__(
         self,

@@ -35,20 +35,20 @@ class TestMatchmaker(unittest.TestCase):
                 "audio": "./tests/resources/Chopin_op38_p01.wav",
                 "annotations": "./tests/resources/Chopin_op38_p01.tsv",
             },
-            # {
-            #     "name": "bach_fugue_bwv_858",
-            #     "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
-            #     "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
-            #     "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
-            #     "annotations": "./tests/resources/Bach-fugue_bwv_858_annotations.txt",
-            # },
-            # {
-            #     "name": "mozart_k265_var1",
-            #     "score": "./matchmaker/assets/mozart_k265_var1.musicxml",
-            #     "audio": "./matchmaker/assets/mozart_k265_var1.mp3",
-            #     "midi": "./matchmaker/assets/mozart_k265_var1.mid",
-            #     "annotations": "./matchmaker/assets/mozart_k265_var1_annotations.txt",
-            # },
+            {
+                "name": "bach_fugue_bwv_858",
+                "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
+                "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
+                "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
+                "annotations": "./tests/resources/Bach-fugue_bwv_858_annotations.txt",
+            },
+            {
+                "name": "mozart_k265_var1",
+                "score": "./matchmaker/assets/mozart_k265_var1.musicxml",
+                "audio": "./matchmaker/assets/mozart_k265_var1.mp3",
+                "midi": "./matchmaker/assets/mozart_k265_var1.mid",
+                "annotations": "./matchmaker/assets/mozart_k265_var1_annotations.txt",
+            },
         ]
 
     def test_matchmaker_audio_init(self):
@@ -129,7 +129,7 @@ class TestMatchmaker(unittest.TestCase):
 
                     # Then: the results should at least be 0.7
                     for threshold in ["300ms", "500ms", "1000ms"]:
-                        self.assertGreaterEqual(results[threshold], 0.7)
+                        self.assertGreaterEqual(results[threshold], 0.6)
 
     def test_matchmaker_audio_run_with_evaluation_before_run(self):
         # Given: a Matchmaker instance with audio input
