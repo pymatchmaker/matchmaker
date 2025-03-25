@@ -624,6 +624,33 @@ def compute_gaussian_audio_probabilities(
     return obs_prob
 
 
+def compute_exponential_cosine_audio_probabilities(
+    audio_obs: NDArrayFloat,
+    audio_features: NDArrayFloat,
+    rate: float,
+    epsilon: float = 1e-10,
+) -> NDArrayFloat:
+    # Compute norms with epsilon to avoid division by zero
+    obs_norm = np.linalg.norm(audio_obs.flatten()) + epsilon
+    features_norm = np.linalg.norm(audio_features, axis=1, keepdims=True) + epsilon
+
+    # Normalize the vectors
+    audio_obs_norm = audio_obs.flatten() / obs_norm
+    audio_features_norm = audio_features / features_norm
+
+    # Cosine similarity
+    cos_sim = np.dot(audio_features_norm, audio_obs_norm)
+    # Compute cosine similarity
+    cos_sim = np.dot(audio_features_norm, audio_obs_norm)
+
+    # Convert to cosine distance
+    cos_dist = 1.0 - cos_sim
+
+    # Apply exponential decay
+    obs_prob = rate * np.exp(-rate * cos_dist)
+
+    return obs_prob
+
 def compute_gaussian_ioi_observation_probability(
     ioi_obs: float,
     ioi_score: NDArrayFloat,
@@ -734,6 +761,45 @@ class GaussianAudioPitchObservationModel(ObservationModel):
         )
 
 
+class CosineExpAudioPitchObservationModel(ObservationModel):
+    """
+    Computes the probabilities that an observation was emitted, i.e. the
+    likelihood of observing performed audio frame at the current moment/state.
+
+    Parameters
+    ----------
+    audio_features : NDArrayFloat
+        Audio features from the reference (score). Used in calculating
+        the pitch observation probabilities.
+    """
+
+    def __init__(
+        self,
+        audio_features: NDArrayFloat,
+        rate: float = 1,
+    ):
+        """
+        The initialization method.
+
+        Parameters
+        ----------
+        audio_features : NDArrayFloat
+            he pre-computed audio features for the reference (e.g., score).
+            Used in calculating the pitch observation probabilities.
+        """
+        super().__init__(use_log_probabilities=False)
+        # Store the parameters of the object:
+        self.audio_features = audio_features
+        self.rate = rate
+
+    def __call__(self, observation: NDArrayFloat) -> NDArrayFloat:
+        return compute_exponential_cosine_audio_probabilities(
+            audio_obs=observation,
+            audio_features=self.audio_features,
+            rate=self.rate,
+        )
+
+
 class GaussianAudioPitchTempoObservationModel(ObservationModel):
     """
     Computes the probabilities that an observation was emitted, i.e. the
@@ -785,6 +851,76 @@ class GaussianAudioPitchTempoObservationModel(ObservationModel):
             audio_features=self.audio_features,
             precision=self.pitch_precision,
             norm_term=self.pitch_norm_term,
+        )
+
+        tempo_prob = compute_gaussian_ioi_observation_probability(
+            ioi_obs=1,
+            ioi_score=ioi_ref,
+            tempo_est=tempo_est,
+            ioi_precision=self.ioi_precision,
+            norm_term=self.ioi_norm_term,
+        )
+
+        obs_prob = pitch_prob * tempo_prob
+
+        return obs_prob
+
+
+class CosineExpGaussianAudioPitchTempoObservationModel(ObservationModel):
+    """
+    Computes the probabilities that an observation was emitted, i.e. the
+    likelihood of observing performed audio frame at the current moment/state.
+
+    Parameters
+    ----------
+    audio_features : NDArrayFloat
+        Audio features from the reference (score). Used in calculating
+        the pitch observation probabilities.
+    """
+
+    def __init__(
+        self,
+        audio_features: NDArrayFloat,
+        ioi_matrix: Optional[NDArrayFloat] = None,
+        pitch_rate: float = 1,
+        ioi_precision: float = 1,
+    ):
+        """
+        The initialization method.
+
+        Parameters
+        ----------
+        audio_features : NDArrayFloat
+            he pre-computed audio features for the reference (e.g., score).
+            Used in calculating the pitch observation probabilities.
+        """
+        super().__init__(use_log_probabilities=False)
+        # Store the parameters of the object:
+        self.audio_features = audio_features
+        self.pitch_rate = pitch_rate
+
+        self.ioi_norm_term = np.sqrt(0.5 * ioi_precision / np.pi)
+        self.ioi_precision = ioi_precision
+
+        if ioi_matrix is None:
+            ioi_matrix = compute_ioi_matrix(
+                unique_onsets=np.arange(len(audio_features))
+            )
+        self.ioi_matrix = ioi_matrix
+        self.current_state = None
+
+    def __call__(self, observation: NDArrayFloat) -> NDArrayFloat:
+
+        pitch_obs, tempo_est = observation
+
+        ioi_idx = self.current_state if self.current_state is not None else 0
+
+        ioi_ref = self.ioi_matrix[ioi_idx]
+
+        pitch_prob = compute_exponential_cosine_audio_probabilities(
+            audio_obs=pitch_obs,
+            audio_features=self.audio_features,
+            rate=self.pitch_rate,
         )
 
         tempo_prob = compute_gaussian_ioi_observation_probability(
@@ -1503,7 +1639,7 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
         if current_state > self.current_state:
             # Only update tempo if jump is forward
             # current_so = self.state_space[current_state]
-            
+
             self.tempo_model.update_beat_period(
                 performed_onset=f_time,
                 score_onset=current_state,
