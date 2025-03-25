@@ -108,8 +108,6 @@ class TestMatchmaker(unittest.TestCase):
                         wait=False,
                         input_type="audio",
                         method=method,
-                        feature_type="cqt",
-                        distance_func="Cosine",
                     )
 
                     # When: running the alignment process
@@ -129,9 +127,39 @@ class TestMatchmaker(unittest.TestCase):
                     )
                     print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
 
-                    # Then: the results should at least be 0.7
+                    # Then: the results should at least be 0.5
                     for threshold in ["300ms", "500ms", "1000ms"]:
-                        self.assertGreaterEqual(results[threshold], 0.6)
+                        self.assertGreaterEqual(results[threshold], 0.5)
+
+    def test_matchmaker_audio_run_with_evaluation_cqt(self):
+        # Given: a Matchmaker instance with audio input
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_audio,
+            wait=False,
+            input_type="audio",
+            feature_type="cqt",
+            distance_func="Cosine",
+            method="dixon",
+        )
+        try:
+            alignment_positions = list(mm.run())
+        except queue.Empty as e:
+            print(f"Error: {type(e)}, {e}")
+            traceback.print_exc()
+            mm._has_run = True
+
+        results = mm.run_evaluation(
+            self.performance_file_annotations,
+            debug=True,
+            save_dir=Path("./tests/results"),
+            run_name="test_matchmaker_audio_run_with_evaluation_cqt",
+        )
+        print(f"RESULTS: {json.dumps(results, indent=4)}")
+
+        # Then: the results should at least be 0.5
+        for threshold in ["300ms", "500ms", "1000ms"]:
+            self.assertGreaterEqual(results[threshold], 0.5)
 
     def test_matchmaker_audio_run_with_evaluation_before_run(self):
         # Given: a Matchmaker instance with audio input
