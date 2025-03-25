@@ -124,6 +124,7 @@ class TestMatchmaker(unittest.TestCase):
                         debug=True,
                         save_dir=Path("./tests/results"),
                         run_name=current_test,
+                        in_seconds=False,
                     )
                     print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
 
@@ -140,7 +141,7 @@ class TestMatchmaker(unittest.TestCase):
             input_type="audio",
             feature_type="cqt",
             distance_func="Cosine",
-            method="dixon",
+            method="arzt",
         )
         try:
             alignment_positions = list(mm.run())
@@ -159,6 +160,34 @@ class TestMatchmaker(unittest.TestCase):
 
         # Then: the results should at least be 0.5
         for threshold in ["300ms", "500ms", "1000ms"]:
+            self.assertGreaterEqual(results[threshold], 0.5)
+
+    def test_matchmaker_audio_run_with_evaluation_in_beats(self):
+        # Given: a Matchmaker instance with audio input
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_audio,
+            wait=False,
+            input_type="audio",
+        )
+        try:
+            alignment_positions = list(mm.run())
+        except queue.Empty as e:
+            print(f"Error: {type(e)}, {e}")
+            traceback.print_exc()
+            mm._has_run = True
+
+        results = mm.run_evaluation(
+            self.performance_file_annotations,
+            debug=True,
+            save_dir=Path("./tests/results"),
+            run_name="test_matchmaker_audio_run_with_evaluation_in_beats",
+            in_seconds=False,
+        )
+        print(f"RESULTS: {json.dumps(results, indent=4)}")
+
+        # Then: the results should at least be 0.5
+        for threshold in ["0.3", "0.5", "1"]:
             self.assertGreaterEqual(results[threshold], 0.5)
 
     def test_matchmaker_audio_run_with_evaluation_before_run(self):
