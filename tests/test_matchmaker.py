@@ -108,6 +108,8 @@ class TestMatchmaker(unittest.TestCase):
                         wait=False,
                         input_type="audio",
                         method=method,
+                        feature_type="cqt",
+                        distance_func="Cosine",
                     )
 
                     # When: running the alignment process

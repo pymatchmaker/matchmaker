@@ -134,6 +134,7 @@ class MFCCProcessor(Processor):
             n_mfcc=self.n_mfcc,
             center=False,
             norm=self.norm,
+            dtype=np.float32,
         )
         return mfcc.T
 
@@ -148,22 +149,20 @@ class CQTProcessor(Processor):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
+        self.norm = norm
 
     def __call__(
         self,
         y: InputAudioSeries,
     ) -> Tuple[Optional[np.ndarray], Dict]:
-        # np.abs(librosa.cqt(y, sr=sr))
-        cqt = np.abs(
-            librosa.cqt(
-                y=y,
-                sr=self.sample_rate,
-                hop_length=self.hop_length,
-                fmin=librosa.note_to_hz("C2"),
-            )
+        cqt = librosa.cqt(
+            y=y,
+            sr=self.sample_rate,
+            hop_length=self.hop_length,
+            norm=self.norm,
+            dtype=np.float32,
         )
-
-        return cqt.T
+        return np.abs(cqt).T[1:-1]
 
 
 class MelSpectrogramProcessor(Processor):
@@ -193,8 +192,8 @@ class MelSpectrogramProcessor(Processor):
             n_mels=self.n_mels,
             norm=self.norm,
             center=False,
+            dtype=np.float32,
         )
-        mel_spectrogram = np.log1p(mel_spectrogram * 5) / 4
 
         return mel_spectrogram.T
 
@@ -220,6 +219,7 @@ class LogSpectralEnergyProcessor(Processor):
             win_length=self.n_fft,
             hop_length=self.hop_length,
             center=False,
+            dtype=np.float32,
         )
         magnitude = np.abs(stft_result)
 

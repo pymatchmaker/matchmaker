@@ -13,6 +13,7 @@ from matchmaker.features.audio import (
     FRAME_RATE,
     SAMPLE_RATE,
     ChromagramProcessor,
+    CQTProcessor,
     MelSpectrogramProcessor,
     MFCCProcessor,
 )
@@ -126,10 +127,10 @@ class Matchmaker(object):
             self.processor = MFCCProcessor(
                 sample_rate=sample_rate,
             )
-        # elif self.feature_type == "cqt":
-        #     self.processor = CQTProcessor(
-        #         sample_rate=sample_rate,
-        #     )
+        elif self.feature_type == "cqt":
+            self.processor = CQTProcessor(
+                sample_rate=sample_rate,
+            )
         elif self.feature_type == "mel":
             self.processor = MelSpectrogramProcessor(
                 sample_rate=sample_rate,
