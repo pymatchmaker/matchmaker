@@ -6,7 +6,7 @@ On-line Dynamic Time Warping
 
 import time
 from enum import IntEnum
-from typing import Callable
+from typing import Callable, Dict
 
 import numpy as np
 import progressbar
@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.features.audio import FRAME_RATE, QUEUE_TIMEOUT, WINDOW_SIZE
+from matchmaker.utils.misc import set_latency_stats
 
 
 class Direction(IntEnum):
@@ -92,6 +93,13 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.input_pointer = 0
         self.input_index: int = 0
         self.previous_direction = None
+        self.last_queue_update = time.time()
+        self.latency_stats: Dict[str, float] = {
+            "total_latency": 0,
+            "total_frames": 0,
+            "max_latency": 0,
+            "min_latency": float("inf"),
+        }
 
     @property
     def warping_path(self) -> NDArray[np.float32]:  # [shape=(2, T)]
@@ -340,6 +348,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
 
     def get_new_input(self):
         input_feature, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
+        self.last_queue_update = time.time()
         self.input_features = np.vstack([self.input_features, input_feature])
         self.input_pointer += self.frame_per_seg
 
@@ -395,6 +404,13 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
                 pbar.update(int(self.current_position))
 
             self.save_history()
+
+            if direction is not Direction.REF:
+                self.input_index += 1
+                latency = time.time() - self.last_queue_update
+                self.latency_stats = set_latency_stats(
+                    latency, self.latency_stats, self.input_index
+                )
 
             yield self.current_position
 

@@ -9,7 +9,7 @@ import numbers
 import os
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Any, Iterable, List, Union
+from typing import Any, Dict, Iterable, List, Union
 
 import librosa
 import mido
@@ -19,6 +19,7 @@ import scipy
 import soundfile as sf
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
+from partitura.io.exportmidi import get_ppq
 from partitura.score import ScoreLike
 
 from matchmaker.features.audio import SAMPLE_RATE
@@ -152,6 +153,17 @@ def is_midi_file(file_path) -> bool:
     midi_extensions = {".mid", ".midi"}
     ext = Path(file_path).suffix
     return ext.lower() in midi_extensions
+
+
+def set_latency_stats(
+    latency: float, latency_stats: Dict[str, float], count: int
+) -> Dict[str, float]:
+    latency_stats["total_latency"] += latency
+    latency_stats["total_frames"] = count
+    latency_stats["max_latency"] = max(latency_stats["max_latency"], latency)
+    latency_stats["min_latency"] = min(latency_stats["min_latency"], latency)
+
+    return latency_stats
 
 
 def interleave_with_constant(

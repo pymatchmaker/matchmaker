@@ -71,24 +71,24 @@ def get_evaluation_results(
     else:
         errors_in_delay = gt_annots - predicted_annots
 
-    absolute_errors_in_delay = np.abs(errors_in_delay)
-    filtered_abs_errors_in_delay = absolute_errors_in_delay[
-        absolute_errors_in_delay <= tolerances[-1]
+    filtered_errors_in_delay = errors_in_delay[
+        np.abs(errors_in_delay) <= tolerances[-1]
     ]
+    filtered_abs_errors_in_delay = np.abs(filtered_errors_in_delay)
 
     results = {
         "mean": float(f"{np.mean(filtered_abs_errors_in_delay):.4f}"),
         "median": float(f"{np.median(filtered_abs_errors_in_delay):.4f}"),
         "std": float(f"{np.std(filtered_abs_errors_in_delay):.4f}"),
-        "skewness": float(f"{scipy.stats.skew(filtered_abs_errors_in_delay):.4f}"),
-        "kurtosis": float(f"{scipy.stats.kurtosis(filtered_abs_errors_in_delay):.4f}"),
+        "skewness": float(f"{scipy.stats.skew(filtered_errors_in_delay):.4f}"),
+        "kurtosis": float(f"{scipy.stats.kurtosis(filtered_errors_in_delay):.4f}"),
     }
     for tau in tolerances:
         if in_seconds:
             results[f"{tau}ms"] = float(
-                f"{np.mean(absolute_errors_in_delay <= tau):.4f}"
+                f"{np.mean(np.abs(errors_in_delay) <= tau):.4f}"
             )
         else:
-            results[f"{tau}"] = float(f"{np.mean(absolute_errors_in_delay <= tau):.4f}")
+            results[f"{tau}"] = float(f"{np.mean(np.abs(errors_in_delay) <= tau):.4f}")
     results["count"] = len(filtered_abs_errors_in_delay)
     return results

@@ -244,31 +244,6 @@ class Matchmaker(object):
         )
         return beat_position
 
-    def run(self, verbose: bool = True, wait: bool = True):
-        """
-        Run the score following process
-
-        Yields
-        ------
-        float
-            Beat position in the score (interpolated)
-
-        Returns
-        -------
-        list
-            Alignment results with warping path
-        """
-        with self.stream:
-            for current_frame in self.score_follower.run(verbose=verbose):
-                if self.input_type == "audio":
-                    position_in_beat = self._convert_frame_to_beat(current_frame)
-                    yield position_in_beat
-                else:
-                    yield float(self.score_follower.state_space[current_frame])
-
-        self._has_run = True
-        return self.score_follower.warping_path
-
     def build_score_annotations(self, level="beat", musical_beat: bool = False):
         score_annots = []
         if level == "beat":  # TODO: add bar-level, note-level
@@ -318,6 +293,23 @@ class Matchmaker(object):
             beats.append(beat_position)
 
         return np.array(beats)
+
+    def get_latency_stats(self):
+        feature_stats = self.stream.latency_stats
+        inference_stats = self.score_follower.latency_stats
+
+        return {
+            "f_avg_latency": round(
+                feature_stats["total_latency"] / feature_stats["total_frames"] * 1000,
+                3,
+            ),
+            "i_avg_latency": round(
+                inference_stats["total_latency"]
+                / inference_stats["total_frames"]
+                * 1000,
+                3,
+            ),
+        }
 
     def run_evaluation(
         self,
@@ -387,7 +379,7 @@ class Matchmaker(object):
             )
 
         if in_seconds:
-            return get_evaluation_results(
+            eval_results = get_evaluation_results(
                 perf_annots,
                 perf_annots_predicted,
                 tolerances,
@@ -399,9 +391,38 @@ class Matchmaker(object):
             )
             if tolerances == TOLERANCES_IN_MILLISECONDS:
                 tolerances = TOLERANCES_IN_BEATS  # switch to beats
-            return get_evaluation_results(
+            eval_results = get_evaluation_results(
                 score_annots,
                 score_annots_predicted,
                 tolerances=tolerances,
                 in_seconds=False,
             )
+
+        latency_results = self.get_latency_stats()
+        eval_results.update(latency_results)
+        return eval_results
+
+    def run(self, verbose: bool = True, wait: bool = True):
+        """
+        Run the score following process
+
+        Yields
+        ------
+        float
+            Beat position in the score (interpolated)
+
+        Returns
+        -------
+        list
+            Alignment results with warping path
+        """
+        with self.stream:
+            for current_frame in self.score_follower.run(verbose=verbose):
+                if self.input_type == "audio":
+                    position_in_beat = self._convert_frame_to_beat(current_frame)
+                    yield position_in_beat
+                else:
+                    yield float(self.score_follower.state_space[current_frame])
+
+        self._has_run = True
+        return self.score_follower.warping_path

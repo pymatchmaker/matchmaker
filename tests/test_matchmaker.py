@@ -124,7 +124,6 @@ class TestMatchmaker(unittest.TestCase):
                         debug=True,
                         save_dir=Path("./tests/results"),
                         run_name=current_test,
-                        in_seconds=False,
                     )
                     print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
 
@@ -300,7 +299,6 @@ class TestMatchmaker(unittest.TestCase):
         # When & Then: running the alignment process,
         # the yielded result should be a float values
         for position_in_beat in mm.run():
-            print(f"Position in beat: {position_in_beat}")
             self.assertIsInstance(position_in_beat, float)
             if position_in_beat >= 130:
                 break
