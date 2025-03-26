@@ -166,7 +166,8 @@ class AudioStream(Stream):
             target_audio = np.concatenate((self.last_chunk, target_audio))
 
         features = self.processor(target_audio)
-        self.queue.put((features, f_time))
+        if self.last_chunk is not None:
+            self.queue.put((features, f_time))
         self.last_chunk = target_audio[-self.hop_length :]
 
     @property

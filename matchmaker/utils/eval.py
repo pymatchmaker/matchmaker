@@ -1,18 +1,12 @@
-import csv
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import TypedDict
 
-import matplotlib.pyplot as plt
 import numpy as np
 import scipy
-from numpy.typing import NDArray
-
-from matchmaker.features.audio import FRAME_RATE
 
 TOLERANCES = [50, 100, 300, 500, 1000, 2000]
 
 
-def transfer_positions(wp, ref_anns, frame_rate):
+def transfer_positions(wp, ref_anns, frame_rate, reverse=False):
     """
     Transfer the positions of the reference annotations to the target annotations using the warping path.
     Parameters
@@ -30,46 +24,47 @@ def transfer_positions(wp, ref_anns, frame_rate):
     predicted_targets : np.array with shape (T,)
         predicted target positions in seconds.
     """
-    # Causal nearest
-    x, y = wp[0], wp[1]
+    # Causal nearest neighbor interpolation
+    if reverse:
+        x, y = wp[1], wp[0]
+    else:
+        x, y = wp[0], wp[1]
     ref_anns_frame = np.round(ref_anns * frame_rate)
     predicted_targets = []
 
     for r in ref_anns_frame:
+        # 1) Scan all x values less than or equal to r and find the largest x value
         past_indices = np.where(x <= r)[0]
         if past_indices.size > 0:
-            nearest_past_idx = past_indices[-1]
-            predicted_targets.append(y[nearest_past_idx])
+            # Find indices corresponding to the largest x value
+            max_x_val = x[past_indices[-1]]
+            max_x_indices = np.where(x == max_x_val)[0]
+
+            # 2) Among all y values mapped to this x value, select the minimum y value
+            corresponding_y_values = y[max_x_indices]
+            min_y_val = np.min(corresponding_y_values)
+
+            predicted_targets.append(min_y_val)
 
     return np.array(predicted_targets) / frame_rate
 
-    # 1. nearest interpolation
-    # ref_anns_frame = np.round(ref_anns * frame_rate)
-    # positions_1_transferred_to_2 = scipy.interpolate.interp1d(
-    #     wp[0], wp[1], kind="nearest"
-    # )(ref_anns_frame)
-    # return positions_1_transferred_to_2 / frame_rate
 
-    # 2. threshold-crossing
-    # x, y = wp[0], wp[1]
-    # ref_anns_frame = np.round(ref_anns * frame_rate)
-    # predicted_targets = np.array(
-    #     [
-    #         y[np.where(x >= r)[0][0]]
-    #         for r in ref_anns_frame
-    #         if np.where(x >= r)[0].size > 0
-    #     ]
-    # )
-    # return predicted_targets / frame_rate
+def transfer_from_score_to_predicted_perf(wp, score_annots, frame_rate):
+    predicted_perf_idx = transfer_positions(wp, score_annots, frame_rate)
+    return predicted_perf_idx
+
+
+def transfer_from_perf_to_predicted_score(wp, perf_annots, frame_rate):
+    predicted_score_idx = transfer_positions(wp, perf_annots, frame_rate, reverse=True)
+    return predicted_score_idx
 
 
 def get_evaluation_results(
-    perf_annots,
-    perf_annots_predicted,
+    gt_annots,
+    predicted_annots,
     tolerances,
 ):
-    el = min(len(perf_annots), len(perf_annots_predicted))
-    errors_in_delay = (perf_annots[:el] - perf_annots_predicted[:el]) * 1000  # in milliseconds
+    errors_in_delay = (gt_annots - predicted_annots) * 1000  # in milliseconds
 
     absolute_errors_in_delay = np.abs(errors_in_delay)
     filtered_abs_errors_in_delay = absolute_errors_in_delay[

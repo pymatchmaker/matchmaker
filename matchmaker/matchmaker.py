@@ -13,6 +13,7 @@ from matchmaker.features.audio import (
     FRAME_RATE,
     SAMPLE_RATE,
     ChromagramProcessor,
+    CQTProcessor,
     MelSpectrogramProcessor,
     MFCCProcessor,
 )
@@ -20,7 +21,12 @@ from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import GaussianAudioPitchHMM, PitchIOIHMM
-from matchmaker.utils.eval import TOLERANCES, get_evaluation_results, transfer_positions
+from matchmaker.utils.eval import (
+    TOLERANCES,
+    get_evaluation_results,
+    transfer_from_perf_to_predicted_score,
+    transfer_from_score_to_predicted_perf,
+)
 from matchmaker.utils.misc import (
     adjust_tempo_for_performance_audio,
     generate_score_audio,
@@ -120,6 +126,10 @@ class Matchmaker(object):
             )
         elif self.feature_type == "mfcc":
             self.processor = MFCCProcessor(
+                sample_rate=sample_rate,
+            )
+        elif self.feature_type == "cqt":
+            self.processor = CQTProcessor(
                 sample_rate=sample_rate,
             )
         elif self.feature_type == "mel":
@@ -274,7 +284,7 @@ class Matchmaker(object):
         score_annots = []
         if level == "beat":  # TODO: add bar-level, note-level
             if musical_beat:
-                self.score_part.use_musical_beat()  # for asap
+                self.score_part.use_musical_beat()  # for asap dataset
             note_array = np.unique(self.score_part.note_array()["onset_beat"])
             start_beat = np.ceil(note_array.min())
             end_beat = np.floor(note_array.max())
@@ -332,16 +342,24 @@ class Matchmaker(object):
         score_annots = score_annots[:min_length]
         perf_annots = perf_annots[:min_length]
 
-        perf_annots_predicted = transfer_positions(
+        perf_annots_predicted = transfer_from_score_to_predicted_perf(
             self.score_follower.warping_path, score_annots, frame_rate=self.frame_rate
         )
-        perf_annots = perf_annots[: len(perf_annots_predicted)]
+
+        score_annots_predicted = transfer_from_perf_to_predicted_score(
+            self.score_follower.warping_path, perf_annots, frame_rate=self.frame_rate
+        )
+        score_annots = score_annots[: len(score_annots_predicted)]
+        # print(f"score_annots: {score_annots}")
+        # print(f"score_annots_predicted: {score_annots_predicted}")
+        # print(f"perf_annots: {perf_annots}")
 
         if debug:
             save_debug_results(
                 self.score_file,
                 self.score_audio,
                 score_annots,
+                score_annots_predicted,
                 self.performance_file,
                 perf_annots,
                 perf_annots_predicted,
@@ -351,7 +369,12 @@ class Matchmaker(object):
                 run_name,
             )
 
-        return get_evaluation_results(
+        # return get_evaluation_results(
+        #     score_annots,
+        #     score_annots_predicted,
+        #     tolerances,
+        # )
+        return get_evaluation_results(  # evaluate in performance axis
             perf_annots,
             perf_annots_predicted,
             tolerances,
