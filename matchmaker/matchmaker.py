@@ -22,7 +22,8 @@ from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import GaussianAudioPitchHMM, PitchIOIHMM
 from matchmaker.utils.eval import (
-    TOLERANCES,
+    TOLERANCES_IN_BEATS,
+    TOLERANCES_IN_MILLISECONDS,
     get_evaluation_results,
     transfer_from_perf_to_predicted_score,
     transfer_from_score_to_predicted_perf,
@@ -251,7 +252,6 @@ class Matchmaker(object):
             self.score_part.beat_map(timeline_time),
             decimals=2,
         )
-        # tick = self.score_part.quarter_duration_map(self.score_part.inv_beat_map(beat))
         return beat_position
 
     def run(self, verbose: bool = True, wait: bool = True):
@@ -288,7 +288,7 @@ class Matchmaker(object):
             note_array = np.unique(self.score_part.note_array()["onset_beat"])
             start_beat = np.ceil(note_array.min())
             end_beat = np.floor(note_array.max())
-            beats = np.arange(start_beat, end_beat + 1)
+            self.beats = np.arange(start_beat, end_beat + 1)
 
             beat_timestamp = [
                 self.score_part.inv_beat_map(beat)
@@ -296,21 +296,50 @@ class Matchmaker(object):
                     self.score_part.inv_beat_map(beat)
                 )
                 * (60 / self.tempo)
-                for beat in beats
+                for beat in self.beats
             ]
 
             score_annots = np.array(beat_timestamp)
         return score_annots
 
+    def convert_timestamps_to_beats(self, timestamps):
+        """
+        Convert an array of timestamps (in seconds) to beat positions.
+
+        Parameters
+        ----------
+        timestamps : array-like
+            Array of timestamps in seconds
+
+        Returns
+        -------
+        beats : np.ndarray
+            Array of beat positions corresponding to the input timestamps
+        """
+        beats = []
+        tick = get_ppq(self.score_part)
+
+        for timestamp in timestamps:
+            timeline_time = timestamp * tick * (self.tempo / 60)
+
+            beat_position = np.round(
+                self.score_part.beat_map(timeline_time),
+                decimals=2,
+            )
+            beats.append(beat_position)
+
+        return np.array(beats)
+
     def run_evaluation(
         self,
         perf_annotations: PathLike,
         level: str = "beat",
-        tolerances: list = TOLERANCES,
+        tolerances: list = TOLERANCES_IN_MILLISECONDS,
         musical_beat: bool = False,  # beat annots are difference in some dataset
         debug: bool = False,
         save_dir: PathLike = None,
         run_name: str = None,
+        in_seconds: bool = True,  # 'score' or 'performance'
     ) -> dict:
         """
         Evaluate the score following process
@@ -325,6 +354,8 @@ class Matchmaker(object):
             Tolerances to use for evaluation (in milliseconds)
         debug : bool
             Whether to save the score and performance audio with beat annotations
+        axis : str
+            Evaluation axis, either 'score' or 'performance'
 
         Returns
         -------
@@ -350,9 +381,6 @@ class Matchmaker(object):
             self.score_follower.warping_path, perf_annots, frame_rate=self.frame_rate
         )
         score_annots = score_annots[: len(score_annots_predicted)]
-        # print(f"score_annots: {score_annots}")
-        # print(f"score_annots_predicted: {score_annots_predicted}")
-        # print(f"perf_annots: {perf_annots}")
 
         if debug:
             save_debug_results(
@@ -369,13 +397,22 @@ class Matchmaker(object):
                 run_name,
             )
 
-        # return get_evaluation_results(
-        #     score_annots,
-        #     score_annots_predicted,
-        #     tolerances,
-        # )
-        return get_evaluation_results(  # evaluate in performance axis
-            perf_annots,
-            perf_annots_predicted,
-            tolerances,
-        )
+        if in_seconds:
+            return get_evaluation_results(
+                perf_annots,
+                perf_annots_predicted,
+                tolerances,
+            )
+        else:
+            score_annots = self.beats
+            score_annots_predicted = self.convert_timestamps_to_beats(
+                score_annots_predicted
+            )
+            if tolerances == TOLERANCES_IN_MILLISECONDS:
+                tolerances = TOLERANCES_IN_BEATS  # switch to beats
+            return get_evaluation_results(
+                score_annots,
+                score_annots_predicted,
+                tolerances=tolerances,
+                in_seconds=False,
+            )

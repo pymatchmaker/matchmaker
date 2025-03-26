@@ -19,7 +19,6 @@ import scipy
 import soundfile as sf
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
-from partitura.io.exportmidi import get_ppq
 from partitura.score import ScoreLike
 from partitura.utils.music import performance_notearray_from_score_notearray
 
@@ -253,14 +252,20 @@ def generate_score_audio(score: ScoreLike, bpm: float, samplerate: int):
 
     first_onset_in_beat = score.note_array()["onset_beat"].min()
     first_onset_in_time = (
-        score.inv_beat_map(first_onset_in_beat) / get_ppq(score) * (60 / bpm)
+        score.inv_beat_map(first_onset_in_beat)
+        / score.quarter_duration_map(score.inv_beat_map(first_onset_in_beat))
+        * (60 / bpm)
     )
     # add padding to the beginning of the score audio
     padding_size = int(first_onset_in_time * samplerate)
     score_audio = np.pad(score_audio, (padding_size, 0))
 
     last_onset_in_div = np.floor(score.note_array()["onset_div"].max())
-    last_onset_in_time = last_onset_in_div / get_ppq(score) * (60 / bpm)
+    last_onset_in_time = (
+        last_onset_in_div
+        / score.quarter_duration_map(score.inv_beat_map(last_onset_in_div))
+        * (60 / bpm)
+    )
 
     buffer_size = 0.1  # for assuring the last onset is included (in seconds)
     last_onset_in_time += buffer_size
@@ -313,14 +318,14 @@ def plot_and_save_score_following_result(
         input_features[: wp[1][-1]],
         metric=distance_func,
     )  # [d, wy]
-    plt.figure(figsize=(15, 15))
+    plt.figure(figsize=(10, 10))
     plt.imshow(dist, aspect="auto", origin="lower", interpolation="nearest")
     plt.title(
-        f"[{save_dir.name}] \n Matchmaker alignment path with ground-truth labels",
-        fontsize=25,
+        f"[{save_dir.name}/{run_name}] \n Matchmaker alignment path with ground-truth labels",
+        fontsize=15,
     )
-    plt.xlabel("Performance Audio frame", fontsize=15)
-    plt.ylabel("Score Audio frame", fontsize=15)
+    plt.xlabel("Performance Features", fontsize=15)
+    plt.ylabel("Score Features", fontsize=15)
 
     # plot online DTW path
     ref_paths, target_paths = wp[0], wp[1]

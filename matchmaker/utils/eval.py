@@ -3,7 +3,8 @@ from typing import TypedDict
 import numpy as np
 import scipy
 
-TOLERANCES = [50, 100, 300, 500, 1000, 2000]
+TOLERANCES_IN_MILLISECONDS = [50, 100, 300, 500, 1000, 2000]
+TOLERANCES_IN_BEATS = [0.05, 0.1, 0.3, 0.5, 1, 2]
 
 
 def transfer_positions(wp, ref_anns, frame_rate, reverse=False):
@@ -62,9 +63,13 @@ def transfer_from_perf_to_predicted_score(wp, perf_annots, frame_rate):
 def get_evaluation_results(
     gt_annots,
     predicted_annots,
-    tolerances,
+    tolerances=TOLERANCES_IN_MILLISECONDS,
+    in_seconds=True,
 ):
-    errors_in_delay = (gt_annots - predicted_annots) * 1000  # in milliseconds
+    if in_seconds:
+        errors_in_delay = (gt_annots - predicted_annots) * 1000  # in milliseconds
+    else:
+        errors_in_delay = gt_annots - predicted_annots
 
     absolute_errors_in_delay = np.abs(errors_in_delay)
     filtered_abs_errors_in_delay = absolute_errors_in_delay[
@@ -79,6 +84,11 @@ def get_evaluation_results(
         "kurtosis": float(f"{scipy.stats.kurtosis(filtered_abs_errors_in_delay):.4f}"),
     }
     for tau in tolerances:
-        results[f"{tau}ms"] = float(f"{np.mean(absolute_errors_in_delay <= tau):.4f}")
+        if in_seconds:
+            results[f"{tau}ms"] = float(
+                f"{np.mean(absolute_errors_in_delay <= tau):.4f}"
+            )
+        else:
+            results[f"{tau}"] = float(f"{np.mean(absolute_errors_in_delay <= tau):.4f}")
     results["count"] = len(filtered_abs_errors_in_delay)
     return results
