@@ -31,9 +31,9 @@ def transfer_positions(wp, ref_anns, frame_rate, reverse=False):
     else:
         x, y = wp[0], wp[1]
     ref_anns_frame = np.round(ref_anns * frame_rate)
-    predicted_targets = []
+    predicted_targets = np.ones(len(ref_anns)) * np.nan
 
-    for r in ref_anns_frame:
+    for i, r in enumerate(ref_anns_frame):
         # 1) Scan all x values less than or equal to r and find the largest x value
         past_indices = np.where(x <= r)[0]
         if past_indices.size > 0:
@@ -45,7 +45,8 @@ def transfer_positions(wp, ref_anns, frame_rate, reverse=False):
             corresponding_y_values = y[max_x_indices]
             min_y_val = np.min(corresponding_y_values)
 
-            predicted_targets.append(min_y_val)
+            # predicted_targets.append(min_y_val)
+            predicted_targets[i] = min_y_val
 
     return np.array(predicted_targets) / frame_rate
 
@@ -77,9 +78,9 @@ def get_evaluation_results(
     ]
 
     results = {
-        "mean": float(f"{np.mean(filtered_abs_errors_in_delay):.4f}"),
-        "median": float(f"{np.median(filtered_abs_errors_in_delay):.4f}"),
-        "std": float(f"{np.std(filtered_abs_errors_in_delay):.4f}"),
+        "mean": float(f"{np.nanmean(filtered_abs_errors_in_delay):.4f}"),
+        "median": float(f"{np.nanmedian(filtered_abs_errors_in_delay):.4f}"),
+        "std": float(f"{np.nanstd(filtered_abs_errors_in_delay):.4f}"),
         "skewness": float(f"{scipy.stats.skew(filtered_abs_errors_in_delay):.4f}"),
         "kurtosis": float(f"{scipy.stats.kurtosis(filtered_abs_errors_in_delay):.4f}"),
     }

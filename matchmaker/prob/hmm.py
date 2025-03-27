@@ -27,7 +27,13 @@ from matchmaker.utils.misc import (
     get_window_indices,
     interleave_with_constant,
 )
-from matchmaker.utils.tempo_models import KalmanTempoModel, TempoModel
+from matchmaker.utils.tempo_models import (
+    KalmanTempoModel,
+    LinearTempoModel,
+    MovingAverageTempoModel,
+    ReactiveTempoModel,
+    TempoModel,
+)
 
 # Alias for typing arrays
 NDArrayFloat = NDArray[np.float32]
@@ -170,18 +176,20 @@ class PitchHMM(BaseHMM):
 
 
 def jiang_transition_matrix(
-    n_states: int, frame_rate, sigma, transition_variance: float
+    n_states: int,
+    trans_prob: float = 0.8,
+    # frame_rate, sigma, transition_variance: float
 ) -> NDArrayFloat:
     transition_matrix = np.zeros((n_states, n_states))
-    p1 = 1  # this should be computed according to the Eq. 12
+
     for i in range(n_states):
         for j in range(n_states):
             if j <= i:
                 transition_matrix[i, j] = 0  # (1 - p1 if we want to go back)
             elif j == i:
-                transition_matrix[i, j] = p1
+                transition_matrix[i, j] = trans_prob
             else:
-                transition_matrix[i, j] = 1 - p1
+                transition_matrix[i, j] = (1 - trans_prob) / (n_states - j)
 
     return transition_matrix
 
@@ -260,6 +268,39 @@ def jiang_transition_matrix_from_sequence(sequence, frame_rate, sigma):
     return transition_matrix, state_space
 
 
+def simple_transition_matrix(
+    n_states, trans_prob: float = 0.6, stay_prob: float = 0.3
+) -> NDArrayFloat:
+    if not (0 <= stay_prob <= 1) or not (0 <= trans_prob <= 1):
+        raise ValueError("Probabilities must be between 0 and 1.")
+    if stay_prob + trans_prob > 1:
+        raise ValueError("stay_prob + trans_prob must be <= 1.")
+
+    matrix = np.zeros((n_states, n_states), dtype=np.float32)
+
+    for i in range(n_states):
+        if i == n_states - 1:
+            matrix[i, i] = 1.0  # Absorbing state
+            continue
+
+        matrix[i, i] = stay_prob
+        matrix[i, i + 1] = trans_prob
+
+        # Distribute remaining probability over future states beyond i+1
+        remaining_prob = 1.0 - stay_prob - trans_prob
+        if i + 2 < n_states:
+            num_other_states = n_states - (i + 2)
+            uniform_prob = (
+                remaining_prob / num_other_states if num_other_states > 0 else 0
+            )
+            matrix[i, i + 2 :] = uniform_prob
+        else:
+            # If no future states beyond i+1, give all remaining prob to i+1
+            matrix[i, i + 1] += remaining_prob
+
+    return matrix
+
+
 def kalman_transition_matrix(n_states: int, transition_variance: float) -> NDArrayFloat:
     """
     Create a transition matrix based on a Kalman filter model.
@@ -275,22 +316,22 @@ def kalman_transition_matrix(n_states: int, transition_variance: float) -> NDArr
     return transition_matrix
 
 
-def simple_transition_matrix(
-    n_states: int,
-    inserted_states: bool = False,
-    trans_prob=0.7,
-) -> NDArrayFloat:
-    # Initialize a matrix of zeros
-    matrix = np.zeros((n_states, n_states))
+# def simple_transition_matrix(
+#     n_states: int,
+#     inserted_states: bool = False,
+#     trans_prob=0.7,
+# ) -> NDArrayFloat:
+#     # Initialize a matrix of zeros
+#     matrix = np.zeros((n_states, n_states))
 
-    # Set the main diagonal to `1 - trans_prob`
-    np.fill_diagonal(matrix, 1 - trans_prob)
+#     # Set the main diagonal to `1 - trans_prob`
+#     np.fill_diagonal(matrix, 1 - trans_prob)
 
-    # Set the diagonal above the main diagonal to `trans_prob`
-    if n_states > 1:
-        np.fill_diagonal(matrix[:, 1:], trans_prob)
+#     # Set the diagonal above the main diagonal to `trans_prob`
+#     if n_states > 1:
+#         np.fill_diagonal(matrix[:, 1:], trans_prob)
 
-    return matrix
+#     return matrix
 
 
 def gumbel_transition_matrix(  # TODO check works for audio (parameter)
@@ -651,6 +692,7 @@ def compute_exponential_cosine_audio_probabilities(
 
     return obs_prob
 
+
 def compute_gaussian_ioi_observation_probability(
     ioi_obs: float,
     ioi_score: NDArrayFloat,
@@ -815,7 +857,6 @@ class GaussianAudioPitchTempoObservationModel(ObservationModel):
     def __init__(
         self,
         audio_features: NDArrayFloat,
-        ioi_matrix: NDArrayFloat,
         pitch_precision: float = 1,
         ioi_precision: float = 1,
     ):
@@ -835,16 +876,17 @@ class GaussianAudioPitchTempoObservationModel(ObservationModel):
         self.pitch_norm_term = np.sqrt(0.5 * pitch_precision / np.pi)
         self.ioi_norm_term = np.sqrt(0.5 * ioi_precision / np.pi)
         self.ioi_precision = ioi_precision
-        self.ioi_matrix = ioi_matrix
         self.current_state = None
+        self.states = np.arange(len(audio_features))
 
     def __call__(self, observation: NDArrayFloat) -> NDArrayFloat:
 
         pitch_obs, tempo_est = observation
 
-        ioi_idx = self.current_state if self.current_state is not None else 0
-
-        ioi_ref = self.ioi_matrix[ioi_idx]
+        if self.current_state is None:
+            estimated_state = 0
+        else:
+            estimated_state = self.current_state + tempo_est
 
         pitch_prob = compute_gaussian_audio_probabilities(
             audio_obs=pitch_obs,
@@ -853,15 +895,12 @@ class GaussianAudioPitchTempoObservationModel(ObservationModel):
             norm_term=self.pitch_norm_term,
         )
 
-        tempo_prob = compute_gaussian_ioi_observation_probability(
-            ioi_obs=1,
-            ioi_score=ioi_ref,
-            tempo_est=tempo_est,
-            ioi_precision=self.ioi_precision,
-            norm_term=self.ioi_norm_term,
-        )
+        exp_arg = -0.5 * ((self.states - estimated_state) ** 2) * self.ioi_precision
+
+        tempo_prob = self.ioi_norm_term * np.exp(exp_arg)
 
         obs_prob = pitch_prob * tempo_prob
+
 
         return obs_prob
 
@@ -881,7 +920,7 @@ class CosineExpGaussianAudioPitchTempoObservationModel(ObservationModel):
     def __init__(
         self,
         audio_features: NDArrayFloat,
-        ioi_matrix: Optional[NDArrayFloat] = None,
+        # ioi_matrix: Optional[NDArrayFloat] = None,
         pitch_rate: float = 1,
         ioi_precision: float = 1,
     ):
@@ -902,20 +941,24 @@ class CosineExpGaussianAudioPitchTempoObservationModel(ObservationModel):
         self.ioi_norm_term = np.sqrt(0.5 * ioi_precision / np.pi)
         self.ioi_precision = ioi_precision
 
-        if ioi_matrix is None:
-            ioi_matrix = compute_ioi_matrix(
-                unique_onsets=np.arange(len(audio_features))
-            )
-        self.ioi_matrix = ioi_matrix
+        # if ioi_matrix is None:
+        #     ioi_matrix = compute_ioi_matrix(
+        #         unique_onsets=np.arange(len(audio_features))
+        #     )
+        # self.ioi_matrix = ioi_matrix
         self.current_state = None
+        self.states = np.arange(len(audio_features))
 
     def __call__(self, observation: NDArrayFloat) -> NDArrayFloat:
 
         pitch_obs, tempo_est = observation
 
-        ioi_idx = self.current_state if self.current_state is not None else 0
+        # ioi_idx = self.current_state if self.current_state is not None else 0
 
-        ioi_ref = self.ioi_matrix[ioi_idx]
+        if self.current_state is None:
+            estimated_state = 0
+        else:
+            estimated_state = self.current_state + tempo_est
 
         pitch_prob = compute_exponential_cosine_audio_probabilities(
             audio_obs=pitch_obs,
@@ -923,13 +966,9 @@ class CosineExpGaussianAudioPitchTempoObservationModel(ObservationModel):
             rate=self.pitch_rate,
         )
 
-        tempo_prob = compute_gaussian_ioi_observation_probability(
-            ioi_obs=1,
-            ioi_score=ioi_ref,
-            tempo_est=tempo_est,
-            ioi_precision=self.ioi_precision,
-            norm_term=self.ioi_norm_term,
-        )
+        exp_arg = -0.5 * ((self.states - estimated_state) ** 2) * self.ioi_precision
+
+        tempo_prob = self.ioi_norm_term * np.exp(exp_arg)
 
         obs_prob = pitch_prob * tempo_prob
 
@@ -1305,6 +1344,21 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
         return self.warping_path
 
 
+def build_local_transition_matrix(n_states, window):
+    matrix = np.zeros((n_states, n_states))
+
+    for i in range(n_states):
+        # Determine window bounds
+        start = max(0, i - window)
+        end = min(n_states, i + window + 1)
+        width = end - start
+
+        # Uniform probability across window
+        matrix[i, start:end] = 1.0 / width
+
+    return matrix
+
+
 class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
     """
     Audio Gaussian HMM
@@ -1385,10 +1439,10 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
 
         if transition_model is None:
             if transition_matrix is None:
-                transition_matrix = gumbel_transition_matrix(
+                transition_matrix = simple_transition_matrix(
                     n_states=len(reference_features),
-                    inserted_states=False,
-                    scale=0.05,
+                    trans_prob=0.5,
+                    stay_prob=0.5,
                 )
             if initial_probabilities is None:
                 initial_probabilities = gumbel_init_dist(
@@ -1562,11 +1616,28 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
 
         if transition_model is None:
             if transition_matrix is None:
-                transition_matrix = gumbel_transition_matrix(
+                transition_matrix = simple_transition_matrix(
                     n_states=len(reference_features),
-                    inserted_states=False,
-                    scale=transition_scale,
+                    trans_prob=0.475,
+                    stay_prob=0.45,
                 )
+
+                # transition_matrix = build_local_transition_matrix(
+                #     n_states=len(reference_features),
+                #     window=1,
+                # )
+                # transition_matrix = jiang_transition_matrix(
+                #     n_states=len(reference_features),
+                #     trans_prob=0.8,
+                #     # frame_rate=1,
+                #     # sigma=0.5,
+                #     # transition_variance=0.5,
+                # )
+                # transition_matrix = gumbel_transition_matrix(
+                #     n_states=len(reference_features),
+                #     inserted_states=False,
+                #     scale=transition_scale,
+                # )
             if initial_probabilities is None:
                 initial_probabilities = gumbel_init_dist(
                     n_states=len(reference_features)
@@ -1579,10 +1650,6 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
         if observation_model is None:
             observation_model = GaussianAudioPitchTempoObservationModel(
                 audio_features=reference_features,
-                ioi_matrix=compute_ioi_matrix(
-                    np.arange(len(reference_features)),
-                    inserted_states=False,
-                ),
                 pitch_precision=(
                     pitch_precision
                     if pitch_precision is not None
@@ -1596,14 +1663,33 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
             )
 
         if tempo_model is None:
-            tempo_model = KalmanTempoModel(
+            tempo_model = ReactiveTempoModel(
                 init_beat_period=1.0,
                 init_score_onset=0,
-                trans_par=1.0,
-                trans_var=0.03,
-                obs_var=0.0213,
-                init_var=1.0,
             )
+
+            # tempo_model = LinearTempoModel(
+            #     init_beat_period=1.0,
+            #     init_score_onset=0,
+            #     eta_t=0.9,
+            #     eta_p=0.9,
+            #     min_beat_period=0.01,
+            #     max_beat_period=4,
+            # )
+            # tempo_model = MovingAverageTempoModel(
+            #     init_beat_period=1.0,
+            #     init_score_onset=0,
+            #     predict_onset=False,
+            #     alpha=0.1,
+            # )
+            # tempo_model = KalmanTempoModel(
+            #     init_beat_period=1.0,
+            #     init_score_onset=0,
+            #     trans_par=0.9,
+            #     trans_var=0.03,
+            #     obs_var=0.0213,
+            #     init_var=1.0,
+            # )
         self.perf_onset = None
 
         BaseHMM.__init__(
@@ -1636,12 +1722,11 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
         self._warping_path.append((current_state, self.input_index))
         self.input_index = self.input_index + 1 if frame_index is None else frame_index
 
-        if current_state > self.current_state:
+        if current_state >= self.current_state:
             # Only update tempo if jump is forward
             # current_so = self.state_space[current_state]
-
             self.tempo_model.update_beat_period(
-                performed_onset=f_time,
+                performed_onset=self.input_index,
                 score_onset=current_state,
             )
         self.perf_onset = f_time
