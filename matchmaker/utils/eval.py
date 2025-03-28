@@ -63,6 +63,7 @@ def transfer_from_perf_to_predicted_score(wp, perf_annots, frame_rate):
 def get_evaluation_results(
     gt_annots,
     predicted_annots,
+    total_length,
     tolerances=TOLERANCES_IN_MILLISECONDS,
     in_seconds=True,
 ):
@@ -86,9 +87,12 @@ def get_evaluation_results(
     for tau in tolerances:
         if in_seconds:
             results[f"{tau}ms"] = float(
-                f"{np.mean(np.abs(errors_in_delay) <= tau):.4f}"
+                f"{np.sum(np.abs(errors_in_delay) <= tau) / total_length:.4f}"
             )
         else:
-            results[f"{tau}"] = float(f"{np.mean(np.abs(errors_in_delay) <= tau):.4f}")
+            results[f"{tau}"] = (
+                f"{np.sum(np.abs(errors_in_delay) <= tau) / total_length:.4f}"
+            )
     results["count"] = len(filtered_abs_errors_in_delay)
+    results["pcr"] = results[f"{tolerances[-1]}ms"]
     return results
