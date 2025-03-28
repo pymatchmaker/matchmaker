@@ -16,6 +16,7 @@ from matchmaker.features.audio import (
     CQTProcessor,
     MelSpectrogramProcessor,
     MFCCProcessor,
+    LogSpectralEnergyProcessor,
 )
 from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
@@ -135,6 +136,10 @@ class Matchmaker(object):
             )
         elif self.feature_type == "mel":
             self.processor = MelSpectrogramProcessor(
+                sample_rate=sample_rate,
+            )
+        elif self.feature_type == "lse":
+            self.processor = LogSpectralEnergyProcessor(
                 sample_rate=sample_rate,
             )
         elif self.feature_type == "pitchclass":
