@@ -26,6 +26,7 @@ from matchmaker.utils.misc import (
     RECVQueue,
     get_window_indices,
     interleave_with_constant,
+    set_latency_stats,
 )
 from matchmaker.utils.tempo_models import (
     KalmanTempoModel,
@@ -98,6 +99,12 @@ class BaseHMM(HiddenMarkovModel):
         self.queue = queue
         self.patience = patience
         self.current_state = 0
+        self.latency_stats: Dict[str, float] = {
+            "total_latency": 0,
+            "total_frames": 0,
+            "max_latency": 0,
+            "min_latency": float("inf"),
+        }
 
     @property
     def warping_path(self) -> NDArrayInt:
