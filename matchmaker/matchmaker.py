@@ -380,6 +380,7 @@ class Matchmaker(object):
 
         score_annots = self.build_score_annotations(level, musical_beat)
         perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
+        original_perf_annots_length = len(perf_annots)
 
         min_length = min(len(score_annots), len(perf_annots))
         score_annots = score_annots[:min_length]
@@ -393,6 +394,11 @@ class Matchmaker(object):
             self.score_follower.warping_path, perf_annots, frame_rate=self.frame_rate
         )
         score_annots = score_annots[: len(score_annots_predicted)]
+
+        if original_perf_annots_length != len(perf_annots_predicted):
+            print(
+                f"Length of the annotation changed: {original_perf_annots_length} -> {len(perf_annots_predicted)}"
+            )
 
         if debug:
             save_debug_results(
@@ -413,7 +419,8 @@ class Matchmaker(object):
             eval_results = get_evaluation_results(
                 perf_annots,
                 perf_annots_predicted,
-                tolerances,
+                total_length=original_perf_annots_length,
+                tolerances=tolerances,
             )
         else:
             score_annots = self.beats
@@ -425,6 +432,7 @@ class Matchmaker(object):
             eval_results = get_evaluation_results(
                 score_annots,
                 score_annots_predicted,
+                total_length=original_perf_annots_length,
                 tolerances=tolerances,
                 in_seconds=False,
             )
