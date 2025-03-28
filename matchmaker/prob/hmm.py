@@ -4,6 +4,7 @@
 This module implements Hidden Markov Models for score following
 """
 
+import time
 import warnings
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
@@ -44,7 +45,7 @@ DEFAULT_GAUSSIAN_AUDIO_PRECISION = 2.0
 
 DEFAULT_GAUSSIAN_AUDIO_IOI_PRECISION = 2.0
 DEFAULT_GUMBEL_AUDIO_SCALE = 0.05
-
+QUEUE_TIMEOUT = 10
 
 class BaseHMM(HiddenMarkovModel):
     """
@@ -85,6 +86,7 @@ class BaseHMM(HiddenMarkovModel):
         has_insertions: bool = False,
         queue: Optional[RECVQueue] = None,
         patience: int = 10,
+        **kwargs,
     ) -> None:
         HiddenMarkovModel.__init__(
             self,
@@ -1487,6 +1489,9 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
             patience=patience,
         )
 
+        self.input_features = None
+        self.distance_func = "Euclidean"
+
     def __call__(self, input, *args, **kwargs):
         frame_index = args[0] if args else None
         frame, f_time = input
@@ -1510,7 +1515,6 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
         self.observation_model.current_state = state
 
     def run(self, verbose: bool = True):
-        prev_state = self.current_state
         same_state_counter = 0
         empty_counter = 0
         if verbose:
@@ -1520,18 +1524,29 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
             pbar.start()
 
         while self.is_still_following():
-            queue_input = self.queue.get()
+            prev_state = self.current_state
+            queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
+            features, f_time = queue_input
+            self.last_queue_update = time.time()
+            self.input_features = (
+                np.concatenate((self.input_features, features))
+                if self.input_features is not None
+                else features
+            )
             if queue_input is not None:
                 current_state = self(queue_input)
                 empty_counter = 0
                 if current_state == prev_state:
-                    if same_state_counter < 3:  # self.patience:
+                    if same_state_counter < self.patience:
                         same_state_counter += 1
                     else:
                         break
                 else:
                     same_state_counter = 0
-
+                latency = time.time() - self.last_queue_update
+                self.latency_stats = set_latency_stats(
+                    latency, self.latency_stats, self.input_index
+                )
                 if verbose:
                     pbar.update(int(current_state))
                 yield current_state
@@ -1559,7 +1574,7 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
         transition_scale: Optional[float] = DEFAULT_GUMBEL_AUDIO_SCALE,
         initial_probabilities: Optional[np.ndarray] = None,
         state_space: Optional[NDArray] = None,
-        patience: int = 50,
+        patience: int = 200,
     ) -> None:
         """
         Initialize the object.
@@ -1699,6 +1714,9 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
             #     init_var=1.0,
             # )
         self.perf_onset = None
+        self.input_features = None
+        self.distance_func = "Euclidean"
+
 
         BaseHMM.__init__(
             self,
@@ -1751,7 +1769,6 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
         self.observation_model.current_state = state
 
     def run(self, verbose: bool = True):
-        prev_state = self.current_state
         same_state_counter = 0
         empty_counter = 0
         if verbose:
@@ -1761,18 +1778,29 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
             pbar.start()
 
         while self.is_still_following():
-            queue_input = self.queue.get()
+            prev_state = self.current_state
+            queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
+            features, f_time = queue_input
+            self.last_queue_update = time.time()
+            self.input_features = (
+                np.concatenate((self.input_features, features))
+                if self.input_features is not None
+                else features
+            )
             if queue_input is not None:
                 current_state = self(queue_input)
                 empty_counter = 0
                 if current_state == prev_state:
-                    if same_state_counter < 3:  # self.patience:
+                    if same_state_counter < self.patience:
                         same_state_counter += 1
                     else:
                         break
                 else:
                     same_state_counter = 0
-
+                latency = time.time() - self.last_queue_update
+                self.latency_stats = set_latency_stats(
+                    latency, self.latency_stats, self.input_index
+                )
                 if verbose:
                     pbar.update(int(current_state))
                 yield current_state

@@ -20,7 +20,7 @@ from matchmaker.features.audio import (
 from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
-from matchmaker.prob.hmm import GaussianAudioPitchHMM, PitchIOIHMM
+from matchmaker.prob.hmm import CosineExpGaussianAudioPitchTempoObservationModel, GaussianAudioPitchHMM, GaussianAudioPitchTempoHMM, PitchIOIHMM
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
@@ -49,7 +49,7 @@ DEFAULT_METHODS = {
     "midi": "hmm",
 }
 
-AVAILABLE_METHODS = ["arzt", "dixon", "hmm"]
+AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm"]
 
 
 class Matchmaker(object):
@@ -209,12 +209,28 @@ class Matchmaker(object):
             )
         elif method == "hmm" and self.input_type == "audio":
 
-            state_space = self._convert_frame_to_beat(np.arange(len(self.reference_features)))
+            # state_space = self._convert_frame_to_beat(np.arange(len(self.reference_features)))
             self.score_follower = GaussianAudioPitchHMM(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
-                state_space=state_space,
-                patience=50,
+                # state_space=state_space,
+                # patience=50,
+            )
+
+        elif method == "pthmm" and self.input_type == "audio":
+
+            # obs_model = CosineExpGaussianAudioPitchTempoObservationModel(
+            #     audio_features=self.reference_features,
+            #     pitch_rate=0.5,
+            #     ioi_precision=0.05,
+            # )
+            self.score_follower = GaussianAudioPitchTempoHMM(
+                reference_features=self.reference_features,
+                # observation_model=obs_model,
+                queue=self.stream.queue,
+                # pitch_precision=0.5,
+                # ioi_precision=2,
+                transition_scale=0.05,
             )
 
     def preprocess_score(self):
