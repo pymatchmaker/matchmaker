@@ -1320,7 +1320,6 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
         )
 
     def run(self, verbose: bool = True):
-        prev_state = self.current_state
         same_state_counter = 0
         empty_counter = 0
         if verbose:
@@ -1330,6 +1329,8 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             pbar.start()
 
         while self.is_still_following():
+            prev_state = self.current_state
+
             queue_input = self.queue.get()
             if queue_input is not None:
                 current_state = self(queue_input)
