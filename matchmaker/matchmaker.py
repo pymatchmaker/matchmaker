@@ -14,6 +14,7 @@ from matchmaker.features.audio import (
     SAMPLE_RATE,
     ChromagramProcessor,
     CQTProcessor,
+    LogSpectralEnergyProcessor,
     MelSpectrogramProcessor,
     MFCCProcessor,
     LogSpectralEnergyProcessor,
