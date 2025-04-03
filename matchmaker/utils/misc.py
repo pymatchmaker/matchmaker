@@ -321,17 +321,40 @@ def plot_and_save_score_following_result(
     frame_rate,
     name=None,
 ):
+    xmin = 0  # performance range
+    xmax = None
+    ymin = 0  # score range
+    ymax = None
+
+    xmax = xmax if xmax is not None else input_features.shape[0]
+    ymax = ymax if ymax is not None else ref_features.shape[0]
+    x_indices = range(xmin, xmax)
+    y_indices = range(ymin, ymax)
+
     run_name = name or "results"
     save_path = save_dir / f"wp_{run_name}.tsv"
     save_nparray_to_csv(wp.T, save_path.as_posix())
 
     dist = scipy.spatial.distance.cdist(
         ref_features,
-        input_features[: wp[1][-1]],
+        input_features,
         metric=distance_func,
     )  # [d, wy]
+    cropped_dist = dist[y_indices, :][:, x_indices]
     plt.figure(figsize=(10, 10))
-    plt.imshow(dist, aspect="auto", origin="lower", interpolation="nearest")
+    plt.imshow(
+        cropped_dist,
+        aspect="auto",
+        origin="lower",
+        interpolation="nearest",
+        extent=(xmin, xmax, ymin, ymax),
+    )
+    mask_perf = (xmin <= perf_annots * frame_rate) & (perf_annots * frame_rate <= xmax)
+    mask_score = (ymin <= score_annots * frame_rate) & (
+        score_annots * frame_rate <= ymax
+    )
+    cropped_perf_annots = perf_annots[mask_perf]
+    cropped_score_annots = score_annots[mask_score]
     plt.title(
         f"[{save_dir.name}/{run_name}] \n Matchmaker alignment path with ground-truth labels",
         fontsize=15,
@@ -340,14 +363,16 @@ def plot_and_save_score_following_result(
     plt.ylabel("Score Features", fontsize=15)
 
     # plot online DTW path
-    ref_paths, target_paths = wp[0], wp[1]
-    for n in range(len(ref_paths)):
-        plt.plot(
-            target_paths[n], ref_paths[n], ".", color="lime", alpha=0.5, markersize=3
-        )
+    cropped_history = [
+        (ref, target)
+        for (ref, target) in wp.T
+        if xmin <= target <= xmax and ymin <= ref <= ymax
+    ]
+    for ref, target in cropped_history:
+        plt.plot(target, ref, ".", color="lime", alpha=0.5, markersize=3)
 
     # plot ground-truth labels
-    for i, (ref, target) in enumerate(zip(score_annots, perf_annots)):
+    for ref, target in zip(cropped_score_annots, cropped_perf_annots):
         plt.plot(
             target * frame_rate,
             ref * frame_rate,
@@ -355,6 +380,7 @@ def plot_and_save_score_following_result(
             color="r",
             alpha=1,
             markersize=3,
+            markeredgewidth=3,
         )
     plt.savefig(save_dir / f"{run_name}.png")
 
