@@ -326,24 +326,23 @@ def plot_and_save_score_following_result(
     ymin = 0  # score range
     ymax = None
 
-    xmax = xmax if xmax is not None else input_features.shape[0]
-    ymax = ymax if ymax is not None else ref_features.shape[0]
-    x_indices = range(xmin, xmax)
-    y_indices = range(ymin, ymax)
+    xmax = xmax if xmax is not None else input_features.shape[0] - 1
+    ymax = ymax if ymax is not None else ref_features.shape[0] - 1
+    x_indices = range(xmin, xmax + 1)
+    y_indices = range(ymin, ymax + 1)
 
     run_name = name or "results"
     save_path = save_dir / f"wp_{run_name}.tsv"
     save_nparray_to_csv(wp.T, save_path.as_posix())
 
     dist = scipy.spatial.distance.cdist(
-        ref_features,
-        input_features,
+        ref_features[y_indices, :],
+        input_features[x_indices, :],
         metric=distance_func,
     )  # [d, wy]
-    cropped_dist = dist[y_indices, :][:, x_indices]
     plt.figure(figsize=(10, 10))
     plt.imshow(
-        cropped_dist,
+        dist,
         aspect="auto",
         origin="lower",
         interpolation="nearest",
@@ -353,8 +352,6 @@ def plot_and_save_score_following_result(
     mask_score = (ymin <= score_annots * frame_rate) & (
         score_annots * frame_rate <= ymax
     )
-    cropped_perf_annots = perf_annots[mask_perf]
-    cropped_score_annots = score_annots[mask_score]
     plt.title(
         f"[{save_dir.name}/{run_name}] \n Matchmaker alignment path with ground-truth labels",
         fontsize=15,
@@ -372,16 +369,17 @@ def plot_and_save_score_following_result(
         plt.plot(target, ref, ".", color="lime", alpha=0.5, markersize=3)
 
     # plot ground-truth labels
-    for ref, target in zip(cropped_score_annots, cropped_perf_annots):
-        plt.plot(
-            target * frame_rate,
-            ref * frame_rate,
-            "x",
-            color="r",
-            alpha=1,
-            markersize=3,
-            markeredgewidth=3,
-        )
+    for ref, target in zip(score_annots, perf_annots):
+        if (xmin <= target * frame_rate <= xmax) and (ymin <= ref * frame_rate <= ymax):
+            plt.plot(
+                target * frame_rate,
+                ref * frame_rate,
+                "x",
+                color="r",
+                alpha=1,
+                markersize=3,
+                markeredgewidth=3,
+            )
     plt.savefig(save_dir / f"{run_name}.png")
 
 
@@ -396,16 +394,19 @@ def save_debug_results(
     model,
     frame_rate,
     save_dir=None,
-    run_name="",
+    run_name=None,
 ):
     # save score audio with beat annotations
     score_audio_dir = Path("./score_audio")
     score_audio_dir.mkdir(parents=True, exist_ok=True)
+    run_name_suffix = (
+        f"{Path(perf_file).stem}_{run_name}" if run_name else f"{Path(perf_file).stem}"
+    )
     save_mixed_audio(
         score_audio,
         score_annots,
         save_path=score_audio_dir
-        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).parent.name}_{Path(score_file).stem}.wav",
+        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).stem}_{run_name_suffix}.wav",
     )
     # save performance audio with beat annotations
     perf_audio_dir = Path("./performance_audio")
@@ -414,7 +415,7 @@ def save_debug_results(
         perf_file,
         perf_annots,
         save_path=perf_audio_dir
-        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{Path(perf_file).stem}.wav",
+        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{run_name_suffix}.wav",
     )
     # save score audio with predicted beat annotations
     score_predicted_audio_dir = Path("./score_audio_predicted")
@@ -423,7 +424,7 @@ def save_debug_results(
         score_audio,
         score_annots_predicted,
         save_path=score_predicted_audio_dir
-        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).parent.name}_{Path(score_file).stem}.wav",
+        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).parent.name}_{run_name_suffix}.wav",
     )
     # save performance audio with predicted beat annotations
     perf_predicted_audio_dir = Path("./performance_audio_predicted")
@@ -432,7 +433,7 @@ def save_debug_results(
         perf_file,
         perf_annots_predicted,
         save_path=perf_predicted_audio_dir
-        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{Path(perf_file).stem}.wav",
+        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{run_name_suffix}.wav",
     )
     # save score following plot result
     save_dir = save_dir or Path("./tests/results")
