@@ -17,12 +17,16 @@ from matchmaker.features.audio import (
     LogSpectralEnergyProcessor,
     MelSpectrogramProcessor,
     MFCCProcessor,
-    LogSpectralEnergyProcessor,
 )
 from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
-from matchmaker.prob.hmm import CosineExpGaussianAudioPitchTempoObservationModel, GaussianAudioPitchHMM, GaussianAudioPitchTempoHMM, PitchIOIHMM
+from matchmaker.prob.hmm import (
+    CosineExpGaussianAudioPitchTempoObservationModel,
+    GaussianAudioPitchHMM,
+    GaussianAudioPitchTempoHMM,
+    PitchIOIHMM,
+)
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
@@ -214,7 +218,6 @@ class Matchmaker(object):
                 queue=self.stream.queue,
             )
         elif method == "hmm" and self.input_type == "audio":
-
             # state_space = self._convert_frame_to_beat(np.arange(len(self.reference_features)))
             self.score_follower = GaussianAudioPitchHMM(
                 reference_features=self.reference_features,
@@ -224,7 +227,6 @@ class Matchmaker(object):
             )
 
         elif method == "pthmm" and self.input_type == "audio":
-
             # obs_model = CosineExpGaussianAudioPitchTempoObservationModel(
             #     audio_features=self.reference_features,
             #     pitch_rate=0.5,
@@ -352,7 +354,7 @@ class Matchmaker(object):
         debug: bool = False,
         save_dir: PathLike = None,
         run_name: str = None,
-        in_seconds: bool = True,  # 'score' or 'performance'
+        in_seconds: bool = True,  # 'True' for performance-based, 'False' for score-based
     ) -> dict:
         """
         Evaluate the score following process

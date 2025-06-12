@@ -91,9 +91,10 @@ def get_evaluation_results(
                 f"{np.sum(np.abs(errors_in_delay) <= tau) / total_length:.4f}"
             )
         else:
-            results[f"{tau}"] = (
+            results[f"{tau}b"] = float(
                 f"{np.sum(np.abs(errors_in_delay) <= tau) / total_length:.4f}"
             )
     results["count"] = len(filtered_abs_errors_in_delay)
-    results["pcr"] = results[f"{tolerances[-1]}ms"]
+    pcr_threshold = f"{tolerances[-1]}ms" if in_seconds else f"{tolerances[-1]}b"
+    results["pcr"] = results[f"{pcr_threshold}"]
     return results

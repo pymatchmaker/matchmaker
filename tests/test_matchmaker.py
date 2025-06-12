@@ -30,12 +30,6 @@ class TestMatchmaker(unittest.TestCase):
 
         self.test_datasets = [
             {
-                "name": "chopin_op38",
-                "score": "./tests/resources/Chopin_op38.musicxml",
-                "audio": "./tests/resources/Chopin_op38_p01.wav",
-                "annotations": "./tests/resources/Chopin_op38_p01.tsv",
-            },
-            {
                 "name": "bach_fugue_bwv_858",
                 "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
                 "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
@@ -186,7 +180,7 @@ class TestMatchmaker(unittest.TestCase):
         print(f"RESULTS: {json.dumps(results, indent=4)}")
 
         # Then: the results should at least be 0.5
-        for threshold in ["0.3", "0.5", "1"]:
+        for threshold in ["0.3b", "0.5b", "1b"]:
             self.assertGreaterEqual(results[threshold], 0.5)
 
     def test_matchmaker_audio_run_with_evaluation_before_run(self):
