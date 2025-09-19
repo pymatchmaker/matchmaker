@@ -8,23 +8,22 @@ import unittest
 
 import numpy as np
 
-from matchmaker.prob.particle_filter import (
-    InitialModel,
-    TransitionModel,
-    ObservationModel,
+from matchmaker.prob.particle_filter_alt import (
     BasePF,
+    InitialModel,
     MonophonicPitchInitialModel,
+    ObservationModel,
+    TransitionModel,
 )
-
 from tests.utils import generate_example_sequences
 
 RNG = np.random.RandomState(1984)
 
 
 class TestMonophonicPitchInitialModel(unittest.TestCase):
-
-    def test_init(self,) -> None:
-
+    def test_init(
+        self,
+    ) -> None:
         pitch = RNG.randint(0, 127, size=100)
         unique_onsets = np.arange(0, len(pitch))
 
@@ -49,9 +48,7 @@ class TestMonophonicPitchInitialModel(unittest.TestCase):
         self.assertTrue(isinstance(initial_model.initial_position, int))
         self.assertTrue(isinstance(initial_model.initial_position_choices, np.ndarray))
 
-
     def test_generate_given_initial_position(self) -> None:
-        
         # Test giving an initial position
         pitch = RNG.randint(0, 127, size=100)
         unique_onsets = np.arange(0, len(pitch))
@@ -75,9 +72,7 @@ class TestMonophonicPitchInitialModel(unittest.TestCase):
         self.assertTrue(np.all(particles["state"] == initial_position))
         self.assertTrue(len(particles) == n_particles)
 
-
     def test_generate_not_given_initial_position(self) -> None:
-        
         # Test giving an initial position
         pitch = RNG.randint(0, 127, size=100)
         unique_onsets = np.arange(0, len(pitch))
