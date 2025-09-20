@@ -325,24 +325,6 @@ def kalman_transition_matrix(n_states: int, transition_variance: float) -> NDArr
     return transition_matrix
 
 
-# def simple_transition_matrix(
-#     n_states: int,
-#     inserted_states: bool = False,
-#     trans_prob=0.7,
-# ) -> NDArrayFloat:
-#     # Initialize a matrix of zeros
-#     matrix = np.zeros((n_states, n_states))
-
-#     # Set the main diagonal to `1 - trans_prob`
-#     np.fill_diagonal(matrix, 1 - trans_prob)
-
-#     # Set the diagonal above the main diagonal to `trans_prob`
-#     if n_states > 1:
-#         np.fill_diagonal(matrix[:, 1:], trans_prob)
-
-#     return matrix
-
-
 def gumbel_transition_matrix(  # TODO check works for audio (parameter)
     n_states: int,
     mp_trans_state: int = 1,
@@ -542,7 +524,7 @@ def compute_discrete_pitch_profiles(
 
     return pitch_profiles
 
-
+# Old version, to be deprecated.
 def compute_discrete_pitch_profiles_old(
     chord_pitches: NDArrayFloat,
     profile: NDArrayFloat = np.array([0.02, 0.02, 1, 0.02, 0.02], dtype=np.float32),
@@ -1645,22 +1627,6 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
                     stay_prob=0.45,
                 )
 
-                # transition_matrix = build_local_transition_matrix(
-                #     n_states=len(reference_features),
-                #     window=1,
-                # )
-                # transition_matrix = jiang_transition_matrix(
-                #     n_states=len(reference_features),
-                #     trans_prob=0.8,
-                #     # frame_rate=1,
-                #     # sigma=0.5,
-                #     # transition_variance=0.5,
-                # )
-                # transition_matrix = gumbel_transition_matrix(
-                #     n_states=len(reference_features),
-                #     inserted_states=False,
-                #     scale=transition_scale,
-                # )
             if initial_probabilities is None:
                 initial_probabilities = gumbel_init_dist(
                     n_states=len(reference_features)
@@ -1690,29 +1656,6 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
                 init_beat_period=1.0,
                 init_score_onset=0,
             )
-
-            # tempo_model = LinearTempoModel(
-            #     init_beat_period=1.0,
-            #     init_score_onset=0,
-            #     eta_t=0.9,
-            #     eta_p=0.9,
-            #     min_beat_period=0.01,
-            #     max_beat_period=4,
-            # )
-            # tempo_model = MovingAverageTempoModel(
-            #     init_beat_period=1.0,
-            #     init_score_onset=0,
-            #     predict_onset=False,
-            #     alpha=0.1,
-            # )
-            # tempo_model = KalmanTempoModel(
-            #     init_beat_period=1.0,
-            #     init_score_onset=0,
-            #     trans_par=0.9,
-            #     trans_var=0.03,
-            #     obs_var=0.0213,
-            #     init_var=1.0,
-            # )
         self.perf_onset = None
         self.input_features = None
         self.distance_func = "Euclidean"

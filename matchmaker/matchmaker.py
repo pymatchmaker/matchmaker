@@ -227,11 +227,6 @@ class Matchmaker(object):
             )
 
         elif method == "pthmm" and self.input_type == "audio":
-            # obs_model = CosineExpGaussianAudioPitchTempoObservationModel(
-            #     audio_features=self.reference_features,
-            #     pitch_rate=0.5,
-            #     ioi_precision=0.05,
-            # )
             self.score_follower = GaussianAudioPitchTempoHMM(
                 reference_features=self.reference_features,
                 # observation_model=obs_model,
