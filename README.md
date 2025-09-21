@@ -146,24 +146,6 @@ for current_position in mm.run():
 For options regarding the `method`, please refer to the [Alignment Methods](#alignment-methods) section.
 For options regarding the `feature_type`, please refer to the [Features](#features) section.
 
-### Custom Example
-
-If you want to use a different alignment method or custom method, you can do so by importing the specific class and passing the necessary parameters.
-In order to define a custom alignment class, you need to inherit from the Base `OnlineAlignment` class and implement the `run` method. Note that the returned value from the `OnlineAlignment` class should be the current frame number in the reference features, not in beats.
-
-```python
-from matchmaker.dp import OnlineTimeWarpingDixon
-from matchmaker.io.audio import AudioStream
-from matchmaker.features import ChromagramProcessor
-
-feature_processor = ChromagramProcessor()
-reference_features = feature_processor('path/to/score/audio.wav')
-
-with AudioStream(processor=feature_processor) as stream:
-    score_follower = OnlineTimeWarpingDixon(reference_features, stream.queue)
-    for current_frame in score_follower.run():
-        print(current_frame)  # frame number in the reference features
-```
 
 ## Alignment Methods
 
