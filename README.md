@@ -50,8 +50,6 @@ conda install -c conda-forge gcc=12.1.0
 conda install -c conda-forge glib fluidsynth
 ```
 
-If you have a ImportError with 'Fluidsynth' by `pyfluidsynth` library on MacOS, please refer to the following [link](https://stackoverflow.com/a/75339618).
-
 Because of the dependency of `partitura`, which uses `MuseScore_General.sf3` (free soundfont provided by MuseScore) as the default soundfont, the soundfont will be installed automatically inside the `partitura` package. This might take a while for the first time.
 
 ### Known Setup Issues
