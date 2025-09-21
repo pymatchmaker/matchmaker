@@ -49,17 +49,27 @@ def get_audio_devices() -> List[AudioDeviceInfo]:
     -------
     audio_devices : List[AudioDeviceInfo]
         List of available audio devices.
+        Returns empty list if no devices are available or in CI environment.
     """
-    p = pyaudio.PyAudio()
+    try:
+        p = pyaudio.PyAudio()
+        device_count = p.get_device_count()
 
-    device_count = p.get_device_count()
+        audio_devices = []
+        for i in range(device_count):
+            try:
+                device_info = AudioDeviceInfo(p.get_device_info_by_index(i), i)
+                audio_devices.append(device_info)
+            except Exception as e:
+                print(f"Error getting device info: {e}")
+                continue
 
-    audio_devices = []
-    for i in range(device_count):
-        device_info = AudioDeviceInfo(p.get_device_info_by_index(i), i)
-        audio_devices.append(device_info)
-    p.terminate()
-    return audio_devices
+        p.terminate()
+        return audio_devices
+
+    except Exception as e:
+        print(f"Error getting audio devices: {e}")
+        return []
 
 
 def get_default_input_device_index() -> int:

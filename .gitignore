@@ -185,5 +185,13 @@ setup_old.py
 notebook.py
 dev/*
 examples/example_live_audio_oltw.py
+*.mid
 
 .ruff_cache/
+results/
+matchmaker/mtchmkr_alt.py
+score_audio_Bach-fugue_bwv_858.wav
+.gitignore
+score_audio_mozart_k265_var1.wav
+performance_audio*/
+score_audio*/
