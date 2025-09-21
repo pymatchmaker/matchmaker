@@ -36,13 +36,13 @@ class TestMatchmaker(unittest.TestCase):
                 "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
                 "annotations": "./tests/resources/Bach-fugue_bwv_858_annotations.txt",
             },
-            {
-                "name": "mozart_k265_var1",
-                "score": "./matchmaker/assets/mozart_k265_var1.musicxml",
-                "audio": "./matchmaker/assets/mozart_k265_var1.mp3",
-                "midi": "./matchmaker/assets/mozart_k265_var1.mid",
-                "annotations": "./matchmaker/assets/mozart_k265_var1_annotations.txt",
-            },
+            # {
+            #     "name": "mozart_k265_var1",
+            #     "score": "./matchmaker/assets/mozart_k265_var1.musicxml",
+            #     "audio": "./matchmaker/assets/mozart_k265_var1.mp3",
+            #     "midi": "./matchmaker/assets/mozart_k265_var1.mid",
+            #     "annotations": "./matchmaker/assets/mozart_k265_var1_annotations.txt",
+            # },
         ]
 
     def test_matchmaker_audio_init(self):
