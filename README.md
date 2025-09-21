@@ -185,7 +185,7 @@ Initialization parameters for the `Matchmaker` class:
 
 If you find Matchmaker useful, we would appreciate if you could cite us!
 
-```
+```bibtex
 @inproceedings{park_matchmaker_2025,
 	title = {Matchmaker: {An} {Open}-{Source} {Library} for {Real}-{Time} {Piano} {Score} {Following} and {Systematic} {Evaluation}},
 	booktitle = {Proceedings of the 26th {International} {Society} for {Music} {Information} {Retrieval} {Conference} ({ISMIR} 2025)},
@@ -194,6 +194,18 @@ If you find Matchmaker useful, we would appreciate if you could cite us!
 	year = {2025}
 }
 ```
+
+```bibtex
+@inproceedings{matchmaker_lbd,
+  title={{Matchmaker: A Python library for Real-time Music Alignment}},
+  author={Park, Jiyun and Cancino-Chac\'{o}n, Carlos and Kwon, Taegyun and Nam, Juhan},
+  booktitle={{Proceedings of the Late Breaking/Demo Session at the 25th International Society for Music Information Retrieval Conference}},
+  address={San Francisco, USA.},
+  year={2024}
+}
+```
+
+
 
 ## Acknowledgments
 
