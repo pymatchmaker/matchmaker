@@ -9,7 +9,6 @@ from typing import Dict, Optional, Tuple, Union
 import librosa
 import numpy as np
 
-# from madmom.audio.chroma import DeepChromaProcessor
 from matchmaker.utils.processor import Processor
 
 SAMPLE_RATE = 44100
@@ -270,7 +269,6 @@ def compute_features_from_audio(
         "mel": MelSpectrogramProcessor,
         "mfcc": MFCCProcessor,
         "log_spectral": LogSpectralEnergyProcessor,
-        # "deep_chroma": DeepChromaProcessor,
     }
 
     feature_processor = processor_mapping[processor_name](
