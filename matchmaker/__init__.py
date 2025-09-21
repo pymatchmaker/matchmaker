@@ -16,7 +16,7 @@ try:
 
     __version__ = pkg_resources.get_distribution("pymatchmaker").version
 except Exception: # pragma: no cover
-    __version__ = "0.1.3"
+    __version__ = "0.2.0"
 
 EXAMPLE_SCORE = pkg_resources.resource_filename(
     "matchmaker",
