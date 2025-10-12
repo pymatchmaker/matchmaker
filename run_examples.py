@@ -62,7 +62,7 @@ def main():
         json.dump(results, f, indent=4)
 
     print(f"Evaluation Result: {json.dumps(results, indent=4)}")
-    print(f"Detailed evaluation results saved in {ROOT_DIR / "results"}")
+    print(f"Detailed evaluation results saved in {ROOT_DIR / 'results'}")
 
 
 if __name__ == "__main__":
