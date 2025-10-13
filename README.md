@@ -14,7 +14,7 @@ The full documentation for matchmaker is available online at [readthedocs.org](h
 
 ### Prerequisites
 
-- Available Python version: 3.9
+- Available Python version: 3.12
 - [Fluidsynth](https://www.fluidsynth.org/)
 - [PortAudio](http://www.portaudio.com/)
 
@@ -33,7 +33,7 @@ To setup the experiments, use the following script.
 git clone https://github.com/pymatchmaker/matchmaker.git
 
 # Create the conda environment
-conda create -n matchmaker python=3.9
+conda create -n matchmaker python=3.12
 
 conda activate matchmaker
 
@@ -114,18 +114,32 @@ for current_position in mm.run():
 ### Testing with Specific Input Device
 
 To use a specific audio or MIDI device that is not the default device, you can pass the device name or index.
+By default, `input_type` is set to `“audio”`. If you are using a MIDI device, you can change the input type to `“midi”`.
 
 ```python
 from matchmaker import Matchmaker
 
 mm = Matchmaker(
     score_file="path/to/score",
-    input_type="audio",
     device_name_or_index="MacBookPro Microphone",
 )
 for current_position in mm.run():
     print(current_position)
 ```
+
+### Running Examples
+
+The repository includes a ready-to-use example script that demonstrates the complete workflow:
+
+```bash
+# Run with audio input (default)
+python run_examples.py
+
+# Run with MIDI input
+python run_examples.py --midi
+```
+
+This script runs a complete example with score following and evaluation, saving results to the `results/` directory.
 
 ### Testing with Different Methods or Features
 
