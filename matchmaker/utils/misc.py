@@ -24,6 +24,7 @@ from partitura.score import ScoreLike
 
 from matchmaker.features.audio import SAMPLE_RATE
 
+
 # Tempo marking to BPM mapping
 # Reference: https://en.wikipedia.org/wiki/Tempo#Basic_tempo_markings
 TEMPO_MARKING_TO_BPM = {
@@ -324,6 +325,7 @@ def get_tempo_from_score(
     Tries multiple sources in order:
     1. Partitura Tempo objects (explicit BPM)
     2. MusicXML <sound tempo="..."/> element (if score_file provided)
+    3. Text tempo marking (e.g., "Allegro", "Andante") converted to approximate BPM
 
     Parameters
     ----------
@@ -361,6 +363,12 @@ def get_tempo_from_score(
                     return float(tempo_attr)
         except Exception:
             pass
+
+    # Fallback: extract from text tempo marking (e.g., "Allegro", "Andante")
+    if score_file is not None:
+        text_tempo = extract_tempo_marking_from_musicxml(score_file)
+        if text_tempo is not None:
+            return text_tempo
 
     return None
 
@@ -508,6 +516,61 @@ def generate_score_audio(score: ScoreLike, bpm: float, samplerate: int):
     return score_audio
 
 
+def synthesize_single_note_audio_fluidsynth(
+    pitch: int,
+    *,
+    bpm: float,
+    samplerate: int,
+    duration_sec: float = 0.35,
+    velocity: int = 80,
+    program: int = 0,
+    channel: int = 0,
+    ticks_per_beat: int = 480,
+) -> np.ndarray:
+    """
+    Create a single-note MIDI in memory and render it to audio using Partitura+FluidSynth.
+
+    This is useful for regenerating GaussianToneModel templates from a "realistic" piano soundfont,
+    instead of analytic sine/noise synthesis.
+    """
+
+    pitch = int(pitch)
+    velocity = int(np.clip(int(velocity), 1, 127))
+    program = int(np.clip(int(program), 0, 127))
+    channel = int(np.clip(int(channel), 0, 15))
+    ticks_per_beat = int(max(1, ticks_per_beat))
+
+    # Convert duration (sec) -> ticks using requested bpm.
+    dur_beats = float(duration_sec) * float(bpm) / 60.0
+    dur_ticks = int(max(1, round(dur_beats * ticks_per_beat)))
+
+    mid = mido.MidiFile(ticks_per_beat=ticks_per_beat)
+    track = mido.MidiTrack()
+    mid.tracks.append(track)
+
+    # Tempo + instrument
+    track.append(
+        mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(float(bpm)), time=0)
+    )
+    track.append(
+        mido.Message("program_change", program=program, channel=channel, time=0)
+    )
+
+    # Note
+    track.append(
+        mido.Message("note_on", note=pitch, velocity=velocity, channel=channel, time=0)
+    )
+    track.append(
+        mido.Message(
+            "note_off", note=pitch, velocity=0, channel=channel, time=dur_ticks
+        )
+    )
+
+    perf = partitura.load_performance_midi(mid)
+    y = partitura.save_wav_fluidsynth(perf, samplerate=int(samplerate), bpm=float(bpm))
+    return np.asarray(y, dtype=np.float32)
+
+
 def save_nparray_to_csv(array: NDArray, save_path: str):
     with open(save_path, "w") as csvfile:
         writer = csv.writer(csvfile, delimiter="\t")
@@ -604,6 +667,101 @@ def plot_and_save_score_following_result(
                 markeredgewidth=3,
             )
     plt.savefig(save_dir / f"{run_name}.png")
+    plt.close()
+
+
+def plot_and_save_gt_vs_pred_points(
+    perf_annots: np.ndarray,
+    perf_annots_predicted: np.ndarray,
+    save_dir: Path,
+    name: str,
+    *,
+    score_y: Optional[np.ndarray] = None,
+    frame_rate: float = 1.0,
+    x_unit: str = "frames",
+):
+    """
+    Save a simple scatter plot that overlays ground-truth and predicted annotations.
+
+    This is intentionally lightweight and does not depend on score audio or a distance matrix.
+
+    Parameters
+    ----------
+    perf_annots : np.ndarray
+        Ground-truth performance annotation positions (seconds).
+    perf_annots_predicted : np.ndarray
+        Predicted performance annotation positions (seconds).
+    save_dir : Path
+        Directory to save the plot.
+    name : str
+        Base name for the saved file (without extension).
+    score_y : np.ndarray | None
+        Optional y-axis values (e.g., score beats, score timeline seconds, or state indices).
+        If None, uses annotation index.
+    frame_rate : int | float
+        Audio frame rate used to convert seconds -> frames (only used when x_unit="frames").
+    x_unit : {"frames", "seconds"}
+        X-axis unit for performance positions.
+    """
+    save_dir.mkdir(parents=True, exist_ok=True)
+    gt = np.asarray(perf_annots, dtype=float)
+    pred = np.asarray(perf_annots_predicted, dtype=float)
+    n = min(len(gt), len(pred))
+    gt = gt[:n]
+    pred = pred[:n]
+
+    if x_unit not in {"frames", "seconds"}:
+        raise ValueError(f"Invalid x_unit={x_unit!r}. Use 'frames' or 'seconds'.")
+
+    # X: performance axis
+    if x_unit == "frames":
+        x_gt = gt * float(frame_rate)
+        x_pred = pred * float(frame_rate)
+        xlabel = "performance frame index"
+    else:
+        x_gt = gt
+        x_pred = pred
+        xlabel = "performance time (s)"
+
+    # Y: score axis
+    if score_y is None:
+        y = np.arange(n)
+        ylabel = "score annotation index"
+    else:
+        y = np.asarray(score_y, dtype=float)[:n]
+        ylabel = "score position (in beats)"
+
+    fig, ax = plt.subplots(figsize=(30, 30))
+    # GT: red 'x', Pred: blue dots
+    ax.scatter(
+        x_gt,
+        y,
+        label="ground truth",
+        s=28,
+        alpha=0.9,
+        marker="x",
+        color="red",
+    )
+    ax.scatter(
+        x_pred,
+        y,
+        label="predicted",
+        s=18,
+        alpha=0.9,
+        marker="o",
+        color="blue",
+        linewidths=0,
+    )
+    ax.set_title(f"[{save_dir.name}] GT vs Pred (scatter) ({name})")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
+    # Keep a roughly 1:1 *figure* ratio (square canvas) without forcing equal data units,
+    # since x(frames) and y(beats/states) have different scales.
+    ax.grid(True, alpha=0.2)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(save_dir / f"annots_{name}.png", dpi=150)
+    plt.close(fig)
 
 
 def save_debug_results(
@@ -619,56 +777,102 @@ def save_debug_results(
     save_dir=None,
     run_name=None,
 ):
-    # save score audio with beat annotations
-    score_audio_dir = Path("./score_audio")
-    score_audio_dir.mkdir(parents=True, exist_ok=True)
+    # Always produce a lightweight plot that overlays GT vs Pred, even when score_audio is unavailable.
+    save_dir = Path(save_dir) if save_dir is not None else Path("./tests/results")
+    save_dir.mkdir(parents=True, exist_ok=True)
     run_name_suffix = (
         f"{Path(perf_file).stem}_{run_name}" if run_name else f"{Path(perf_file).stem}"
     )
-    save_mixed_audio(
-        score_audio,
-        score_annots,
-        save_path=score_audio_dir
-        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).stem}_{run_name_suffix}.wav",
+
+    # Use score_annots as y-axis when it is the same length and monotonic (beats/seconds).
+    score_y = None
+    try:
+        sx = np.asarray(score_annots, dtype=float)
+        if sx.ndim == 1 and len(sx) == len(perf_annots) and np.all(np.diff(sx) >= 0):
+            score_y = sx
+    except Exception:
+        score_y = None
+
+    plot_and_save_gt_vs_pred_points(
+        perf_annots=perf_annots,
+        perf_annots_predicted=perf_annots_predicted,
+        save_dir=save_dir,
+        name=run_name_suffix,
+        score_y=score_y,
+        frame_rate=frame_rate,
+        x_unit="frames",
     )
-    # save performance audio with beat annotations
-    perf_audio_dir = Path("./performance_audio")
-    perf_audio_dir.mkdir(parents=True, exist_ok=True)
-    save_mixed_audio(
-        perf_file,
-        perf_annots,
-        save_path=perf_audio_dir
-        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{run_name_suffix}.wav",
-    )
-    # save score audio with predicted beat annotations
-    score_predicted_audio_dir = Path("./score_audio_predicted")
-    score_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
-    save_mixed_audio(
-        score_audio,
-        score_annots_predicted,
-        save_path=score_predicted_audio_dir
-        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).parent.name}_{run_name_suffix}.wav",
-    )
-    # save performance audio with predicted beat annotations
-    perf_predicted_audio_dir = Path("./performance_audio_predicted")
-    perf_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
-    save_mixed_audio(
-        perf_file,
-        perf_annots_predicted,
-        save_path=perf_predicted_audio_dir
-        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{run_name_suffix}.wav",
-    )
-    # save score following plot result
-    save_dir = save_dir or Path("./tests/results")
-    save_dir.mkdir(parents=True, exist_ok=True)
-    plot_and_save_score_following_result(
-        model.warping_path,
-        model.reference_features,
-        model.input_features,
-        model.distance_func,
-        save_dir,
-        score_annots,
-        perf_annots,
-        frame_rate,
-        name=run_name,
-    )
+
+    # Optional: keep previous debug artifacts when inputs are available.
+    if score_audio is not None:
+        score_audio_dir = Path("./score_audio")
+        score_audio_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            save_mixed_audio(
+                score_audio,
+                score_annots,
+                save_path=score_audio_dir
+                / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).stem}_{run_name_suffix}.wav",
+            )
+        except Exception:
+            pass
+
+        score_predicted_audio_dir = Path("./score_audio_predicted")
+        score_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            save_mixed_audio(
+                score_audio,
+                score_annots_predicted,
+                save_path=score_predicted_audio_dir
+                / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).parent.name}_{run_name_suffix}.wav",
+            )
+        except Exception:
+            pass
+
+    if perf_file is not None:
+        perf_audio_dir = Path("./performance_audio")
+        perf_audio_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            save_mixed_audio(
+                perf_file,
+                perf_annots,
+                save_path=perf_audio_dir
+                / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{run_name_suffix}.wav",
+            )
+        except Exception:
+            pass
+
+        perf_predicted_audio_dir = Path("./performance_audio_predicted")
+        perf_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            save_mixed_audio(
+                perf_file,
+                perf_annots_predicted,
+                save_path=perf_predicted_audio_dir
+                / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{run_name_suffix}.wav",
+            )
+        except Exception:
+            pass
+
+    # Keep the distance-matrix plot only when the needed model fields exist.
+    if (
+        model is not None
+        and hasattr(model, "warping_path")
+        and hasattr(model, "reference_features")
+        and hasattr(model, "input_features")
+        and hasattr(model, "distance_func")
+    ):
+        try:
+            plot_and_save_score_following_result(
+                model.warping_path,
+                model.reference_features,
+                model.input_features,
+                model.distance_func,
+                save_dir,
+                score_annots,
+                perf_annots,
+                frame_rate,
+                name=run_name,
+            )
+        except Exception:
+            pass

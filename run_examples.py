@@ -1,15 +1,18 @@
 import argparse
 import datetime
 import json
+from _queue import Empty
 from pathlib import Path
 
 from matchmaker import Matchmaker
 
 ROOT_DIR = Path(__file__).parent
-SCORE_FILE = ROOT_DIR / "matchmaker/assets/simple_score.musicxml"
-PERFORMANCE_AUDIO_FILE = ROOT_DIR / "matchmaker/assets/simple_performance.mp3"
-PERFORMANCE_MIDI_FILE = ROOT_DIR / "matchmaker/assets/simple_performance.mid"
-ANNOTATION_FILE = ROOT_DIR / "matchmaker/assets/simple_perf_annotations.txt"
+SCORE_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.musicxml"
+PERFORMANCE_AUDIO_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.mp3"
+PERFORMANCE_MIDI_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.mid"
+ANNOTATION_FILE = (
+    ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1_note_annotations.txt"
+)
 
 
 def select_performance_file(input_mode):
@@ -36,17 +39,30 @@ def main():
     print(f"Running matchmaker with the score file ({SCORE_FILE.name})...")
     print("-" * 50)
 
+    # Use the corresponding score follower for each input mode.
+    # - audio: AudioOuterProductHMM (paper-style HMM / outer-product)
+    # - midi : OuterProductHMM
+    method = "outerhmm" if input_mode == "midi" else "audio_outerhmm"
+    feature_type = "pitchclass" if input_mode == "midi" else "cqt_spectral_flux"
+
     # Initialize matchmaker (simulation mode)
-    mm = Matchmaker(
-        score_file=SCORE_FILE,
-        performance_file=performance_file,
-        input_type=input_mode,
-    )
+    try:
+        mm = Matchmaker(
+            score_file=SCORE_FILE,
+            performance_file=performance_file,
+            input_type=input_mode,
+            method=method,
+            feature_type=feature_type,
+            sample_rate=16000,
+        )
+    except Empty as e:
+        print(f"Error initializing Matchmaker: {e}")
+        return
 
     # Run real-time score following
     for current_position in mm.run(wait=True):
         timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        print(f"[{timestamp}] Current position: {current_position}")
+        print(f"[{timestamp}] Current beat position: {current_position}")
 
     # Run evaluation
     print("-" * 50)
@@ -57,6 +73,7 @@ def main():
         debug=True,
         save_dir=ROOT_DIR / "results",
         run_name="simple_example",
+        level="note",
     )
     with open(ROOT_DIR / "results" / "simple_example.json", "w") as f:
         json.dump(results, f, indent=4)
