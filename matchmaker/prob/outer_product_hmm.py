@@ -1,6 +1,7 @@
 from typing import List
 
 import numpy as np
+import progressbar
 
 from partitura.score import Part, Score, ScoreLike
 
@@ -97,6 +98,20 @@ def compute_OuterProductHMM_pitch_probabilities(
 
 
 def get_chords_from_score(score: ScoreLike) -> List[set]:
+    """
+    Construct a list of chords from a Partitura Score-like object
+
+    Parameters
+    ----------
+    score : ScoreLike
+        The score object
+
+    Returns
+    -------
+    chords: List[set]
+        A list of sets each representing consecutive chords (similar to homophonic slices)
+        in the piece.
+    """
     if isinstance(score, (Score, Part)):
         note_array = score.note_array()
 
@@ -162,6 +177,7 @@ class OuterProductHMM:
         S=None,
         r=None,
         other_prob=1e-6,
+        self_transition_threshold: float = 0.035,
     ):
         """
         chords : list of sets of MIDI pitches (one per score state). Not to be confused with the general definition of a chord!
@@ -181,6 +197,20 @@ class OuterProductHMM:
         self.b_table = compute_OuterProductHMM_pitch_probabilities(
             chords, pitch_error_probs, other_prob
         )
+
+        self.current_chord = {}
+        self.self_transition_threshold = self_transition_threshold
+
+    def __call__(self, input, *args, **kwargs):
+        pitch_obs, ioi_obs = input
+
+        if ioi_obs > self.self_transition_threshold:
+            self.current_chord = {}
+
+        else:
+            self.current_chord.add(pitch_obs)
+            # Self transition goes here
+        # Do something here to capture chords
 
     # Observation likelihood
     def compute_obs_likelihood(self, observation):
@@ -228,3 +258,36 @@ class OuterProductHMM:
                 local_sum += prev_forward[j] * self.alpha[j, i]
             new_forward[i] = b[i] * (local_sum + self.r[i] * skip_sum)
         return new_forward
+
+    # TODO: Adapt this method
+    # def run(self, verbose: bool = True):
+    #     same_state_counter = 0
+    #     empty_counter = 0
+    #     if verbose:
+    #         pbar = progressbar.ProgressBar(
+    #             maxval=self.n_states,  # redirect_stdout=True
+    #         )
+    #         pbar.start()
+
+    #     while self.is_still_following():
+    #         prev_state = self.current_state
+
+    #         queue_input = self.queue.get()
+    #         if queue_input is not None:
+    #             current_state = self(queue_input)
+    #             empty_counter = 0
+    #             if current_state == prev_state:
+    #                 if same_state_counter < self.patience:
+    #                     same_state_counter += 1
+    #                 else:
+    #                     break
+    #             else:
+    #                 same_state_counter = 0
+
+    #             if verbose:
+    #                 pbar.update(int(current_state))
+    #             yield current_state
+
+    #         if verbose:
+    #             pbar.finish()
+    #     return self.warping_path
