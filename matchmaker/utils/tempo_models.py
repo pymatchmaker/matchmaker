@@ -150,9 +150,13 @@ class ReactiveTempoModel(TempoModel):
 
         self.est_onset = performed_onset
         if self.prev_perf_onset:
-            s_ioi = abs(score_onset - self.prev_score_onset)
-            p_ioi = abs(performed_onset - self.prev_perf_onset)
-            self.beat_period = p_ioi / s_ioi
+            s_ioi = score_onset - self.prev_score_onset
+            p_ioi = performed_onset - self.prev_perf_onset
+
+            if s_ioi > 0 and p_ioi > 0:
+                self.beat_period = p_ioi / s_ioi
+            else:
+                self.beat_period *= 0.5
 
         self.prev_score_onset = score_onset
         self.prev_perf_onset = performed_onset
@@ -211,9 +215,13 @@ class MovingAverageTempoModel(TempoModel):
         See documentation in TempoModel above.
         """
         if self.prev_perf_onset:
-            s_ioi = abs(score_onset - self.prev_score_onset)
-            p_ioi = abs(performed_onset - self.prev_perf_onset)
-            beat_period = p_ioi / s_ioi
+            s_ioi = score_onset - self.prev_score_onset
+            p_ioi = performed_onset - self.prev_perf_onset
+
+            if s_ioi > 0:
+                beat_period = p_ioi / s_ioi
+            else:
+                beat_period = self.beat_period
 
             if self.predict_onset:
                 self.est_onset = self.est_onset + self.beat_period * s_ioi
@@ -222,7 +230,6 @@ class MovingAverageTempoModel(TempoModel):
             self.beat_period = (
                 self.alpha * self.beat_period + (1 - self.alpha) * beat_period
             )
-            # print(self.beat_period)
         else:
             self.est_onset = performed_onset
 
@@ -286,6 +293,10 @@ class KalmanTempoModel(TempoModel):
             score_ioi = 0
             performed_ioi = 0
             self.est_onset = performed_onset
+            self.prev_perf_onset = performed_onset
+            self.prev_score_onset = score_onset
+            self.counter += 1
+            return # skip update on first observation
         else:
             performed_ioi = abs(performed_onset - self.prev_perf_onset)
 
@@ -307,6 +318,8 @@ class KalmanTempoModel(TempoModel):
         self.beat_period = period_pred + kalman_gain * err
         self.var_est = (1 - kalman_gain * score_ioi) * var_pred
         self.est_onset += score_ioi * self.beat_period
+        # print("tempo", self.beat_period)
+        self.counter += 1
 
 
 class LinearTempoModel(TempoModel):
@@ -338,6 +351,8 @@ class LinearTempoModel(TempoModel):
         init_score_onset: float = 0,
         eta_t: float = 0.3,
         eta_p: float = 0.7,
+        min_beat_period: float = 0.25,
+        max_beat_period: float = 3,
     ) -> None:
         super().__init__(
             init_beat_period=init_beat_period,
@@ -345,6 +360,8 @@ class LinearTempoModel(TempoModel):
         )
         self.eta_t = eta_t
         self.eta_p = eta_p
+        self.min_beat_period = min_beat_period
+        self.max_beat_period = max_beat_period
 
     def update_beat_period(
         self,
@@ -376,7 +393,7 @@ class LinearTempoModel(TempoModel):
         else:
             beat_period = self.beat_period - 2 * self.eta_t * tempo_correction_term
 
-        if beat_period > 0.25 and beat_period <= 3:
+        if beat_period >= self.min_beat_period and beat_period <= self.max_beat_period:
             self.beat_period = beat_period
 
 

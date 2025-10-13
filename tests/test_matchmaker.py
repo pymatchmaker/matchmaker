@@ -1,5 +1,9 @@
+import json
+import queue
+import traceback
 import unittest
 import warnings
+from pathlib import Path
 
 from matchmaker import Matchmaker
 from matchmaker.dp import OnlineTimeWarpingArzt
@@ -20,6 +24,26 @@ class TestMatchmaker(unittest.TestCase):
         self.score_file = "./tests/resources/Bach-fugue_bwv_858.musicxml"
         self.performance_file_audio = "./tests/resources/Bach-fugue_bwv_858.mp3"
         self.performance_file_midi = "./tests/resources/Bach-fugue_bwv_858.mid"
+        self.performance_file_annotations = (
+            "./tests/resources/Bach-fugue_bwv_858_annotations.txt"
+        )
+
+        self.test_datasets = [
+            {
+                "name": "bach_fugue_bwv_858",
+                "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
+                "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
+                "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
+                "annotations": "./tests/resources/Bach-fugue_bwv_858_annotations.txt",
+            },
+            # {
+            #     "name": "mozart_k265_var1",
+            #     "score": "./matchmaker/assets/mozart_k265_var1.musicxml",
+            #     "audio": "./matchmaker/assets/mozart_k265_var1.mp3",
+            #     "midi": "./matchmaker/assets/mozart_k265_var1.mid",
+            #     "annotations": "./matchmaker/assets/mozart_k265_var1_annotations.txt",
+            # },
+        ]
 
     def test_matchmaker_audio_init(self):
         # When: a Matchmaker instance with audio input
@@ -59,7 +83,7 @@ class TestMatchmaker(unittest.TestCase):
         )
 
         # When: running the alignment process (get the returned result)
-        alignment_results = list(mm.run(verbose=False))
+        alignment_results = list(mm.run())
 
         # Then: the yielded result should be a float values
         for position_in_beat in alignment_results:
@@ -67,6 +91,110 @@ class TestMatchmaker(unittest.TestCase):
 
         # And: the alignment result should be a list
         self.assertIsInstance(alignment_results, list)
+
+    def test_matchmaker_audio_run_with_evaluation(self):
+        for dataset in self.test_datasets:
+            for method in ["arzt", "dixon"]:
+                with self.subTest(dataset=dataset["name"], method=method):
+                    mm = Matchmaker(
+                        score_file=dataset["score"],
+                        performance_file=dataset["audio"],
+                        wait=False,
+                        input_type="audio",
+                        method=method,
+                    )
+
+                    # When: running the alignment process
+                    try:
+                        alignment_positions = list(mm.run())
+                    except queue.Empty as e:
+                        print(f"Error: {type(e)}, {e}")
+                        traceback.print_exc()
+                        mm._has_run = True
+
+                    current_test = f"{dataset['name']}_{method}"
+                    results = mm.run_evaluation(
+                        dataset["annotations"],
+                        debug=True,
+                        save_dir=Path("./tests/results"),
+                        run_name=current_test,
+                    )
+                    print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
+
+                    # Then: the results should at least be 0.5
+                    for threshold in ["300ms", "500ms", "1000ms"]:
+                        self.assertGreaterEqual(results[threshold], 0.5)
+
+    def test_matchmaker_audio_run_with_evaluation_cqt(self):
+        # Given: a Matchmaker instance with audio input
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_audio,
+            wait=False,
+            input_type="audio",
+            feature_type="cqt",
+            distance_func="Cosine",
+            method="arzt",
+        )
+        try:
+            alignment_positions = list(mm.run())
+        except queue.Empty as e:
+            print(f"Error: {type(e)}, {e}")
+            traceback.print_exc()
+            mm._has_run = True
+
+        results = mm.run_evaluation(
+            self.performance_file_annotations,
+            debug=True,
+            save_dir=Path("./tests/results"),
+            run_name="test_matchmaker_audio_run_with_evaluation_cqt",
+        )
+        print(f"RESULTS: {json.dumps(results, indent=4)}")
+
+        # Then: the results should at least be 0.5
+        for threshold in ["300ms", "500ms", "1000ms"]:
+            self.assertGreaterEqual(results[threshold], 0.5)
+
+    def test_matchmaker_audio_run_with_evaluation_in_beats(self):
+        # Given: a Matchmaker instance with audio input
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_audio,
+            wait=False,
+            input_type="audio",
+        )
+        try:
+            alignment_positions = list(mm.run())
+        except queue.Empty as e:
+            print(f"Error: {type(e)}, {e}")
+            traceback.print_exc()
+            mm._has_run = True
+
+        results = mm.run_evaluation(
+            self.performance_file_annotations,
+            debug=True,
+            save_dir=Path("./tests/results"),
+            run_name="test_matchmaker_audio_run_with_evaluation_in_beats",
+            in_seconds=False,
+        )
+        print(f"RESULTS: {json.dumps(results, indent=4)}")
+
+        # Then: the results should at least be 0.5
+        for threshold in ["0.3b", "0.5b", "1b"]:
+            self.assertGreaterEqual(results[threshold], 0.5)
+
+    def test_matchmaker_audio_run_with_evaluation_before_run(self):
+        # Given: a Matchmaker instance with audio input
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_audio,
+            wait=False,
+            input_type="audio",
+        )
+
+        # When: calling run_evaluation before run()
+        with self.assertRaises(ValueError):
+            mm.run_evaluation(self.performance_file_annotations)
 
     def test_matchmaker_audio_dixon_init(self):
         # Given: a Matchmaker instance with audio input and Dixon method
@@ -96,6 +224,20 @@ class TestMatchmaker(unittest.TestCase):
         self.assertIsInstance(mm.stream, AudioStream)
         self.assertIsInstance(mm.score_follower, OnlineTimeWarpingArzt)
 
+    def test_matchmaker_with_frame_rate(self):
+        # Given: a Matchmaker instance with audio input
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_audio,
+            wait=False,
+            input_type="audio",
+            frame_rate=100,
+        )
+
+        # Then: the frame rate should be 100
+        self.assertEqual(mm.frame_rate, 100)
+        self.assertEqual(mm.score_follower.frame_rate, 100)
+
     def test_matchmaker_invalid_input_type(self):
         # Test Matchmaker with invalid input type
         with self.assertRaises(ValueError):
@@ -114,6 +256,18 @@ class TestMatchmaker(unittest.TestCase):
                 input_type="audio",
                 method="invalid",
             )
+
+    def test_matchmaker_audio_run_with_distance_func(self):
+        # Given: a Matchmaker instance with audio input
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_audio,
+            wait=False,
+            input_type="audio",
+        )
+
+        # When & Then: distance function should be manhattan (= L1)
+        self.assertEqual(mm.score_follower.distance_func.__class__.__name__, "L1")
 
     def test_matchmaker_midi_init(self):
         # When: a Matchmaker instance with midi input
@@ -139,7 +293,6 @@ class TestMatchmaker(unittest.TestCase):
         # When & Then: running the alignment process,
         # the yielded result should be a float values
         for position_in_beat in mm.run():
-            print(f"Position in beat: {position_in_beat}")
             self.assertIsInstance(position_in_beat, float)
             if position_in_beat >= 130:
                 break
