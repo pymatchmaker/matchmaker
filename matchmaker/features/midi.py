@@ -52,7 +52,10 @@ class PitchProcessor(Processor):
         self,
         frame: InputMIDIFrame,
     ) -> Optional[Tuple[NDArrayFloat, float]]:
-        data, f_time = frame
+        if isinstance(frame, tuple):
+            data, f_time = frame
+        else:
+            data = frame
         # pitch_obs = []
         pitch_obs = np.zeros(
             128,
@@ -119,7 +122,10 @@ class PitchIOIProcessor(Processor):
         self,
         frame: InputMIDIFrame,
     ) -> Optional[Tuple[NDArrayFloat, float]]:
-        data, f_time = frame
+        if isinstance(frame, tuple):
+            data, f_time = frame
+        else:
+            data = frame
         # pitch_obs = []
         pitch_obs = np.zeros(
             128,
@@ -197,7 +203,10 @@ class PianoRollProcessor(Processor):
     ) -> np.ndarray:
         # initialize piano roll
         piano_roll_slice: np.ndarray = np.zeros(128, dtype=self.dtype)
-        data, f_time = frame
+        if isinstance(frame, tuple):
+            data, f_time = frame
+        else:
+            data = frame
         for msg, m_time in data:
             if msg.type in ("note_on", "note_off"):
                 if msg.type == "note_on" and msg.velocity > 0:
@@ -258,7 +267,10 @@ class PitchClassPianoRollProcessor(Processor):
     ) -> np.ndarray:
         # initialize pitch class
         pitch_class_slice: np.ndarray = np.zeros(12, dtype=self.dtype)
-        data, f_time = frame
+        if isinstance(frame, tuple):
+            data, f_time = frame
+        else:
+            data = frame
         for msg, m_time in data:
             if msg.type in ("note_on", "note_off"):
                 if msg.type == "note_on" and msg.velocity > 0:
