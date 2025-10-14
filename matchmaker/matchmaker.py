@@ -49,14 +49,16 @@ DEFAULT_DISTANCE_FUNCS = {
     "arzt": OnlineTimeWarpingArzt.DEFAULT_DISTANCE_FUNC,
     "dixon": OnlineTimeWarpingDixon.DEFAULT_DISTANCE_FUNC,
     "hmm": None,
+    "outerhmm": None,
+    "pthmm": None,
 }
 
 DEFAULT_METHODS = {
     "audio": "arzt",
-    "midi": "hmm",
+    "midi": "outerhmm",
 }
 
-AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm"]
+AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm", "outerhmm"]
 
 
 class Matchmaker(object):
@@ -176,7 +178,14 @@ class Matchmaker(object):
                 wait=wait,
                 target_sr=SAMPLE_RATE,
             )
-        elif self.input_type == "midi":
+        if self.input_type == "midi" and method == "outerhmm":
+            self.stream = MidiStream(
+                processor=self.processor,
+                port=self.device_name_or_index,
+                file_path=self.performance_file,
+                polling_period=None,
+            )
+        if self.input_type == "midi" and method != "outerhmm":
             self.stream = MidiStream(
                 processor=self.processor,
                 port=self.device_name_or_index,
