@@ -1,6 +1,7 @@
 import os
 from typing import Optional, Union
 
+
 import numpy as np
 import partitura
 from partitura.io.exportaudio import save_wav_fluidsynth
@@ -19,6 +20,7 @@ from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
+from matchmaker.prob.outer_product_hmm import OuterProductHMM
 from matchmaker.utils.misc import is_audio_file, is_midi_file
 
 PathLike = Union[str, bytes, os.PathLike]
@@ -148,6 +150,11 @@ class Matchmaker(object):
             )
         elif method == "hmm" or (method is None and self.input_type == "midi"):
             self.score_follower = PitchIOIHMM(
+                reference_features=self.reference_features,
+                queue=self.stream.queue,
+            )
+        elif method == "outerhmm":
+            self.score_follower = OuterProductHMM(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
             )
