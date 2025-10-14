@@ -1,9 +1,16 @@
-from typing import List
+from typing import List, Optional
+from numpy.typing import NDArray
+
+import progressbar
+from matchmaker.utils.misc import RECVQueue
+from matchmaker.base import OnlineAlignment
 
 import numpy as np
-import progressbar
 
 from partitura.score import Part, Score, ScoreLike
+
+NDArrayFloat = NDArray[np.float32]
+NDArrayInt = NDArray[np.int32]
 
 DEFAULT_PITCH_ERROR_PROBS = {
     "correct_pitch_prob": 0.9497,
@@ -25,6 +32,8 @@ DEFAULT_TRANSITIONS = [
 
 DEFAULT_D1 = 3
 DEFAULT_D2 = 3
+
+IOI_THRESHOLD = 0.035  # seconds
 
 
 def compute_OuterProductHMM_pitch_probabilities(
@@ -97,21 +106,7 @@ def compute_OuterProductHMM_pitch_probabilities(
     return b_table
 
 
-def get_chords_from_score(score: ScoreLike) -> List[set]:
-    """
-    Construct a list of chords from a Partitura Score-like object
-
-    Parameters
-    ----------
-    score : ScoreLike
-        The score object
-
-    Returns
-    -------
-    chords: List[set]
-        A list of sets each representing consecutive chords (similar to homophonic slices)
-        in the piece.
-    """
+def get_chords_from_score(score: ScoreLike, return_unique_onsets: bool = False) -> List[set]:
     if isinstance(score, (Score, Part)):
         note_array = score.note_array()
 
@@ -132,7 +127,10 @@ def get_chords_from_score(score: ScoreLike) -> List[set]:
 
     chords = [set(note_array["pitch"][ui]) for ui in unique_onset_idxs]
 
-    return chords
+    if return_unique_onsets:
+        return chords, unique_onsets
+    else:
+        return chords
 
 
 def compute_transition_matrix(N, transitions=None, D1=DEFAULT_D1, D2=DEFAULT_D2):
@@ -156,7 +154,8 @@ def compute_transition_matrix(N, transitions=None, D1=DEFAULT_D1, D2=DEFAULT_D2)
     if transitions is None:
         transitions = DEFAULT_TRANSITIONS
 
-    alpha = np.zeros((N, N), dtype=float)
+    # intialize transition matrix with epsilons
+    alpha = np.full((N, N), 1e-6, dtype=float)
     for delta, prob in transitions:
         for i in range(N):
             j = i + delta
@@ -171,56 +170,114 @@ def compute_transition_matrix(N, transitions=None, D1=DEFAULT_D1, D2=DEFAULT_D2)
 class OuterProductHMM:
     def __init__(
         self,
-        chords,
-        pitch_error_probs=None,
-        transitions=None,
-        S=None,
-        r=None,
-        other_prob=1e-6,
-        self_transition_threshold: float = 0.035,
-    ):
+        reference_features: np.ndarray,
+        queue: Optional[RECVQueue] = None,
+        transitions: Optional[List[tuple[int, float]]] = None,
+        pitch_error_probs: Optional[dict[str, float]] = None,
+        S: Optional[np.ndarray] = None,
+        r: Optional[np.ndarray] = None,
+        other_prob: float = 1e-6,
+        patience: int = 10,
+    ) -> None:
         """
-        chords : list of sets of MIDI pitches (one per score state). Not to be confused with the general definition of a chord!
-        pitch_error_probs : dict, optional
+        Outer-product Hidden Markov Model for score following.
+
+        Parameters
+        ----------
+        reference_features : ndarray
+            Note array or score like object
+
+        queue : RECVQueue or None
+            Queue for receiving incoming observations
+
+        pitch_error_probs : dict or None
+            If None, uses DEFAULT_PITCH_ERROR_PROBS.   
+
         transitions : list of (delta, prob), optional
+            If None, uses DEFAULT_TRANSITIONS.
+            
         S, r : 1D arrays or None (skip-from and skip-to)
-        other_prob : float, small prob for unmodelled pitches
+            If None, uniform distributions are used.
+
+        other_prob : float 
+            Small prob for unmodelled pitches
+
         """
-        self.N = len(chords)
+
+        self.reference_features = reference_features
+        OnlineAlignment.__init__(
+            self,
+            reference_features=reference_features,
+        )
+        self.queue = queue
+        chords, unique_onsets = get_chords_from_score(self.reference_features, return_unique_onsets=True)
+        self.n_states = len(chords)
+        self.state_space = unique_onsets
+        self.transitions = transitions if transitions is not None else DEFAULT_TRANSITIONS
+        self.pitch_error_probs = (
+            pitch_error_probs if pitch_error_probs is not None else DEFAULT_PITCH_ERROR_PROBS
+        )
+        self.other_prob = other_prob
 
         # Transition setup
-        self.alpha, self.D1, self.D2 = compute_transition_matrix(self.N, transitions)
-        self.S = np.ones(self.N) / self.N if S is None else np.array(S, dtype=float)
-        self.r = np.ones(self.N) / self.N if r is None else np.array(r, dtype=float)
+        self.alpha, self.D1, self.D2 = compute_transition_matrix(self.n_states, transitions)
+        self.S = np.ones(self.n_states) / self.n_states if S is None else np.array(S, dtype=float)
+        self.r = np.ones(self.n_states) / self.n_states if r is None else np.array(r, dtype=float)
 
         # Emission setup
         self.b_table = compute_OuterProductHMM_pitch_probabilities(
             chords, pitch_error_probs, other_prob
         )
 
-        self.current_chord = {}
-        self.self_transition_threshold = self_transition_threshold
+        self.current_state = 0
+        self._warping_path = []
+        self._current_chord = np.zeros(88, dtype=int)
+        self.patience = patience
+        self.state_probabilities = np.ones(self.n_states) / self.n_states
+
+
+    @property
+    def warping_path(self) -> NDArrayInt:
+        return (np.array(self._warping_path).T).astype(np.int32)
+    
+    def is_still_following(self) -> bool:
+        if self.current_state is not None:
+            return self.current_state <= self.n_states - 1
+
+        return False
 
     def __call__(self, input, *args, **kwargs):
-        pitch_obs, ioi_obs = input
-
-        if ioi_obs > self.self_transition_threshold:
-            self.current_chord = {}
-
+        pitch_obs, ioi = input
+        if ioi < IOI_THRESHOLD:
+            self._current_chord = np.maximum(self._current_chord, pitch_obs)
+            return self.current_state
         else:
-            self.current_chord.add(pitch_obs)
-            # Self transition goes here
-        # Do something here to capture chords
+            if self._current_chord.any():
+                self.state_probabilities = self.viterbi_step(
+                    self.state_probabilities, self._current_chord
+                )
+                self.current_state = np.argmax(self.state_probabilities)
+                self._warping_path.append(self.current_state)
 
+            self._current_chord = pitch_obs
+            print('current_state:', self.current_state)  # --- IGNORE ---
+            return self.current_state
+    
     # Observation likelihood
     def compute_obs_likelihood(self, observation):
         """
         Given observed MIDI pitches, return likelihood vector b[i].
         observation: iterable of MIDI note numbers
+
+        Returns
+        -------
+        b : ndarray (N,)
+            b[i] = likelihood of observing `observation` at state i.
         """
-        b = np.ones(self.N, dtype=float)
-        for pitch in observation:
-            b *= self.b_table[:, pitch]
+        b = self.b_table[:, 21:109] * observation
+        # b = np.ones(self.n_states, dtype=float)
+        # for pitch in observation:
+        #     b *= self.b_table[:, pitch]
         return b
 
     # Viterbi update
@@ -229,65 +286,67 @@ class OuterProductHMM:
         b = self.compute_obs_likelihood(observation)
         skip_values = prev_probs * self.S
         global_skip_max = skip_values.max()
-        new_probs = np.zeros(self.N, dtype=float)
-        for i in range(self.N):
+        new_probs = np.zeros(self.n_states, dtype=float)
+        for i in range(self.n_states):
             j_start = max(0, i - self.D2)
-            j_end = min(self.N, i + self.D1 + 1)
+            j_end = min(self.n_states, i + self.D1 + 1)
             local_max = 0.0
             for j in range(j_start, j_end):
                 val = prev_probs[j] * self.alpha[j, i]
                 if val > local_max:
                     local_max = val
             skip_contrib = self.r[i] * global_skip_max
-            new_probs[i] = b[i] * (
+        
+            new_probs[i] = sum(b[i] * (
                 skip_contrib if skip_contrib >= local_max else local_max
-            )
+            ))
         return new_probs
 
-    # --- Forward update ---
-    def forward_step(self, prev_forward, observation):
-        """Fast outer-product forward update."""
-        b = self.compute_obs_likelihood(observation)
-        skip_sum = np.dot(prev_forward, self.S)
-        new_forward = np.zeros(self.N, dtype=float)
-        for i in range(self.N):
-            j_start = max(0, i - self.D2)
-            j_end = min(self.N, i + self.D1 + 1)
-            local_sum = 0.0
-            for j in range(j_start, j_end):
-                local_sum += prev_forward[j] * self.alpha[j, i]
-            new_forward[i] = b[i] * (local_sum + self.r[i] * skip_sum)
-        return new_forward
+    # # --- Forward update ---
+    # def forward_step(self, prev_forward, observation):
+    #     """Fast outer-product forward update."""
+    #     b = self.compute_obs_likelihood(observation)
+    #     skip_sum = np.dot(prev_forward, self.S)
+    #     new_forward = np.zeros(self.n_states, dtype=float)
+    #     for i in range(self.n_states):
+    #         j_start = max(0, i - self.D2)
+    #         j_end = min(self.n_states, i + self.D1 + 1)
+    #         local_sum = 0.0
+    #         for j in range(j_start, j_end):
+    #             local_sum += prev_forward[j] * self.alpha[j, i]
+    #         new_forward[i] = b[i] * (local_sum + self.r[i] * skip_sum)
+    #     return new_forward
 
-    # TODO: Adapt this method
-    # def run(self, verbose: bool = True):
-    #     same_state_counter = 0
-    #     empty_counter = 0
-    #     if verbose:
-    #         pbar = progressbar.ProgressBar(
-    #             maxval=self.n_states,  # redirect_stdout=True
-    #         )
-    #         pbar.start()
+    def run(self, verbose: bool = True):
+        same_state_counter = 0
+        empty_counter = 0
+        if verbose:
+            pbar = progressbar.ProgressBar(
+                maxval=self.n_states,  # redirect_stdout=True
+            )
+            pbar.start()
 
-    #     while self.is_still_following():
-    #         prev_state = self.current_state
+        while self.is_still_following():
+            prev_state = self.current_state
 
-    #         queue_input = self.queue.get()
-    #         if queue_input is not None:
-    #             current_state = self(queue_input)
-    #             empty_counter = 0
-    #             if current_state == prev_state:
-    #                 if same_state_counter < self.patience:
-    #                     same_state_counter += 1
-    #                 else:
-    #                     break
-    #             else:
-    #                 same_state_counter = 0
+            queue_input = self.queue.get()
+            if queue_input is not None:
+                current_state = self(queue_input)
+                empty_counter = 0
+                if current_state == prev_state:
+                    if same_state_counter < self.patience:
+                        same_state_counter += 1
+                    else:
+                        break
+                else:
+                    same_state_counter = 0
 
-    #             if verbose:
-    #                 pbar.update(int(current_state))
-    #             yield current_state
+                if verbose:
+                    # current_state may be None (no state yet); guard the update
+                    if current_state is not None:
+                        pbar.update(int(current_state))
+                yield current_state
 
-    #         if verbose:
-    #             pbar.finish()
-    #     return self.warping_path
+            if verbose:
+                pbar.finish()
+        return self.warping_path
