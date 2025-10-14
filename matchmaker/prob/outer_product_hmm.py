@@ -249,15 +249,15 @@ class OuterProductHMM:
 
     def __call__(self, input, *args, **kwargs):
         pitch_obs, ioi = input
-        if self.is_first_observation:
-            self._current_chord = pitch_obs
-            self.state_probabilities = self.viterbi_step(
-                    self.state_probabilities, self._current_chord
-                )
-            self.current_state = np.argmax(self.state_probabilities)
-            self._warping_path.append(self.current_state)
-            self.is_first_observation = False
-            return self.current_state
+        # if self.is_first_observation:
+        #     self._current_chord = pitch_obs
+        #     self.state_probabilities = self.viterbi_step(
+        #             self.state_probabilities, self._current_chord
+        #         )
+        #     self.current_state = np.argmax(self.state_probabilities)
+        #     self._warping_path.append(self.current_state)
+        #     self.is_first_observation = False
+        #     return self.current_state
 
         if ioi < IOI_THRESHOLD:
             self._current_chord = np.maximum(self._current_chord, pitch_obs)
