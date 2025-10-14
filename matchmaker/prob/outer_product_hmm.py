@@ -234,6 +234,7 @@ class OuterProductHMM:
         self._current_chord = np.zeros(88, dtype=int)
         self.patience = patience
         self.state_probabilities = np.ones(self.n_states) / self.n_states
+        self.is_first_observation = True
 
 
     @property
@@ -248,18 +249,28 @@ class OuterProductHMM:
 
     def __call__(self, input, *args, **kwargs):
         pitch_obs, ioi = input
+        if self.is_first_observation:
+            self._current_chord = pitch_obs
+            self.state_probabilities = self.viterbi_step(
+                    self.state_probabilities, self._current_chord
+                )
+            self.current_state = np.argmax(self.state_probabilities)
+            self._warping_path.append(self.current_state)
+            self.is_first_observation = False
+            return self.current_state
+
         if ioi < IOI_THRESHOLD:
             self._current_chord = np.maximum(self._current_chord, pitch_obs)
             return self.current_state
         else:
-            if self._current_chord.any():
-                self.state_probabilities = self.viterbi_step(
-                    self.state_probabilities, self._current_chord
-                )
-                self.current_state = np.argmax(self.state_probabilities)
-                self._warping_path.append(self.current_state)
-
             self._current_chord = pitch_obs
+            self.state_probabilities = self.viterbi_step(
+                self.state_probabilities, self._current_chord
+            )
+            self.current_state = np.argmax(self.state_probabilities)
+            self._warping_path.append(self.current_state)
+
+            
             print('current_state:', self.current_state)  # --- IGNORE ---
             return self.current_state
     
