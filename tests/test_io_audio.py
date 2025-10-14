@@ -277,19 +277,21 @@ class TestAudioStream(unittest.TestCase):
         }
         status_flag = 0
 
-        output, audio_continue = self.stream._process_frame(
-            data=data,
-            frame_count=frame_count,
-            time_info=time_info,
-            status_flag=status_flag,
-        )
+        # Call _process_frame twice to set last_chunk and process
+        for _ in range(2):
+            output, audio_continue = self.stream._process_frame(
+                data=data,
+                frame_count=frame_count,
+                time_info=time_info,
+                status_flag=status_flag,
+            )
 
         self.assertTrue(output == data)
         self.assertTrue(isinstance(audio_continue, int))
         # There is no live audio here, so this should be 0
         self.assertTrue(audio_continue == 0)
 
-        proc_output, f_time = self.stream.queue.recv()
+        proc_output, f_time = self.stream.queue.get()
 
         expected_output = np.concatenate(
             (np.zeros(self.stream.hop_length, dtype=np.float32), original_data)

@@ -9,7 +9,6 @@ from typing import Dict, Optional, Tuple, Union
 import librosa
 import numpy as np
 
-# from madmom.audio.chroma import DeepChromaProcessor
 from matchmaker.utils.processor import Processor
 
 SAMPLE_RATE = 44100
@@ -21,6 +20,8 @@ N_MFCC = 13
 DCT_TYPE = 2
 NORM = np.inf
 FEATURES = "chroma"
+QUEUE_TIMEOUT = 10
+WINDOW_SIZE = 5
 
 # Type hint for Input Audio frame.
 InputAudioSeries = np.ndarray
@@ -132,8 +133,35 @@ class MFCCProcessor(Processor):
             n_mfcc=self.n_mfcc,
             center=False,
             norm=self.norm,
+            dtype=np.float32,
         )
         return mfcc.T
+
+
+class CQTProcessor(Processor):
+    def __init__(
+        self,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+        norm: Optional[Union[float, str]] = NORM,
+    ):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.hop_length = hop_length
+        self.norm = norm
+
+    def __call__(
+        self,
+        y: InputAudioSeries,
+    ) -> Tuple[Optional[np.ndarray], Dict]:
+        cqt = librosa.cqt(
+            y=y,
+            sr=self.sample_rate,
+            hop_length=self.hop_length,
+            norm=self.norm,
+            dtype=np.float32,
+        )
+        return np.abs(cqt).T[1:-1]
 
 
 class MelSpectrogramProcessor(Processor):
@@ -163,8 +191,8 @@ class MelSpectrogramProcessor(Processor):
             n_mels=self.n_mels,
             norm=self.norm,
             center=False,
+            dtype=np.float32,
         )
-        mel_spectrogram = np.log1p(mel_spectrogram * 5) / 4
 
         return mel_spectrogram.T
 
@@ -190,6 +218,7 @@ class LogSpectralEnergyProcessor(Processor):
             win_length=self.n_fft,
             hop_length=self.hop_length,
             center=False,
+            dtype=np.float32,
         )
         magnitude = np.abs(stft_result)
 
@@ -240,7 +269,6 @@ def compute_features_from_audio(
         "mel": MelSpectrogramProcessor,
         "mfcc": MFCCProcessor,
         "log_spectral": LogSpectralEnergyProcessor,
-        # "deep_chroma": DeepChromaProcessor,
     }
 
     feature_processor = processor_mapping[processor_name](

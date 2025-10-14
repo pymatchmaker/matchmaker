@@ -10,26 +10,20 @@ We aim to provide efficient reference implementations of score followers for use
 
 The full documentation for matchmaker is available online at [readthedocs.org](https://pymatchmaker.readthedocs.io/).
 
-
 ## Setup
 
 ### Prerequisites
 
-- Available Python version: 3.9 (other versions will be supported soon!)
+- Available Python version: 3.12
 - [Fluidsynth](https://www.fluidsynth.org/)
 - [PortAudio](http://www.portaudio.com/)
 
-First, install Fluidsynth, and then install the `pyfluidsynth` Python library. Note that `pyfluidsynth` only provides Python bindings for Fluidsynth; it does not install Fluidsynth itself. Be aware that there is also a `fluidsynth` Python library (without the `py-` prefix), but it is not compatible with `matchmaker`.
+First, install Fluidsynth, and then install the `pyfluidsynth` Python library. We recommend to install Fluidsynth using conda as well (see instructions below).
 
-### Install from PyPI
-
-```bash
-pip install pymatchmaker
-```
+Note that `pyfluidsynth` only provides Python bindings for Fluidsynth; it does not install Fluidsynth itself. Be aware that there is also a `fluidsynth` Python library (without the `py-` prefix), but it is not compatible with `matchmaker`. We recommend installing Fluidsynth using conda
 
 ### Install from source using conda
 
-Please refer to the [requirements.txt](requirements.txt) file for the minimum required versions of the packages.
 Setting up the code as described here requires [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html). Follow the instructions for your OS.
 
 To setup the experiments, use the following script.
@@ -37,25 +31,47 @@ To setup the experiments, use the following script.
 ```bash
 # Clone matchmaker
 git clone https://github.com/pymatchmaker/matchmaker.git
-cd matchmaker
 
 # Create the conda environment
-conda create -n matchmaker python=3.9
+conda create -n matchmaker python=3.12
+
 conda activate matchmaker
 
-# Install matchmaker
-pip install -e .
+# Go to matchmaker directory
+cd ../matchmaker
 
-# Install matchmaker with dev tools
-pip install -e .[dev]
+# Install matchmaker in editable mode
+pip install -e ."[dev]"
 
-# Setup pre-commit
-pre-commit install
+# Install GCC
+conda install -c conda-forge gcc=12.1.0
+
+# Install glib and fluidsynth
+conda install -c conda-forge glib fluidsynth
 ```
 
-If you have a ImportError with 'Fluidsynth' by `pyfluidsynth` library on MacOS, please refer to the following [link](https://stackoverflow.com/a/75339618).
-
 Because of the dependency of `partitura`, which uses `MuseScore_General.sf3` (free soundfont provided by MuseScore) as the default soundfont, the soundfont will be installed automatically inside the `partitura` package. This might take a while for the first time.
+
+### Known Setup Issues
+
+#### Missing Visual C++ build tools (on Windows)
+
+The solution seems to be to download vs_BuildTools.exe from <https://visualstudio.microsoft.com/visual-cpp-build-tools/> and then execute
+
+```bash
+vs_buildtools.exe --norestart --passive --downloadThenInstall --includeRecommended --add Microsoft.VisualStudio.Workload.NativeDesktop --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Workload.MSBuildTools
+```
+
+#### Issues with Fluidsynth and pyfluidsynth on Windows
+
+On Windows, pyfluidsynth expects fluidsynth.exe to be located in `C:\tools\bin` (other users have reported that it is expected in `C:\tools\fluidsynth\bin`). You can fix the issue by
+
+1. Get the ZIP file for your Windows version from <https://github.com/FluidSynth/fluidsynth/releases/latest>
+2. Extract the contents to `C:\tools` (or wherever pyfluidsynth expects the executable to be).
+
+#### Using Fluidsynth installed from Homebrew on MacOS
+
+We recommend to install Fluidsynth from conda in a dedicated environemnt. If however, you want to use the system-wide Fluidsynth installed with homebrew, you might run into an `ImportError("Couldn't find the FluidSynth library.")` with `pyfluidsynth`.  Please refer to the following [link](https://stackoverflow.com/a/75339618).
 
 ## Usage Examples
 
@@ -98,18 +114,32 @@ for current_position in mm.run():
 ### Testing with Specific Input Device
 
 To use a specific audio or MIDI device that is not the default device, you can pass the device name or index.
+By default, `input_type` is set to `“audio”`. If you are using a MIDI device, you can change the input type to `“midi”`.
 
 ```python
 from matchmaker import Matchmaker
 
 mm = Matchmaker(
     score_file="path/to/score",
-    input_type="audio",
     device_name_or_index="MacBookPro Microphone",
 )
 for current_position in mm.run():
     print(current_position)
 ```
+
+### Running Examples
+
+The repository includes a ready-to-use example script that demonstrates the complete workflow:
+
+```bash
+# Run with audio input (default)
+python run_examples.py
+
+# Run with MIDI input
+python run_examples.py --midi
+```
+
+This script runs a complete example with score following and evaluation, saving results to the `results/` directory.
 
 ### Testing with Different Methods or Features
 
@@ -130,24 +160,6 @@ for current_position in mm.run():
 For options regarding the `method`, please refer to the [Alignment Methods](#alignment-methods) section.
 For options regarding the `feature_type`, please refer to the [Features](#features) section.
 
-### Custom Example
-
-If you want to use a different alignment method or custom method, you can do so by importing the specific class and passing the necessary parameters.
-In order to define a custom alignment class, you need to inherit from the Base `OnlineAlignment` class and implement the `run` method. Note that the returned value from the `OnlineAlignment` class should be the current frame number in the reference features, not in beats.
-
-```python
-from matchmaker.dp import OnlineTimeWarpingDixon
-from matchmaker.io.audio import AudioStream
-from matchmaker.features import ChromagramProcessor
-
-feature_processor = ChromagramProcessor()
-reference_features = feature_processor('path/to/score/audio.wav')
-
-with AudioStream(processor=feature_processor) as stream:
-    score_follower = OnlineTimeWarpingDixon(reference_features, stream.queue)
-    for current_frame in score_follower.run():
-        print(current_frame)  # frame number in the reference features
-```
 
 ## Alignment Methods
 
@@ -187,7 +199,17 @@ Initialization parameters for the `Matchmaker` class:
 
 If you find Matchmaker useful, we would appreciate if you could cite us!
 
+```bibtex
+@inproceedings{park_matchmaker_2025,
+	title = {Matchmaker: {An} {Open}-{Source} {Library} for {Real}-{Time} {Piano} {Score} {Following} and {Systematic} {Evaluation}},
+	booktitle = {Proceedings of the 26th {International} {Society} for {Music} {Information} {Retrieval} {Conference} ({ISMIR} 2025)},
+	author = {Park, Jiyun and Cancino-Chacón, Carlos and Chiruthapudi, Suhit and Nam, Juhan},
+    address = {Daejeon, South Korea}
+	year = {2025}
+}
 ```
+
+```bibtex
 @inproceedings{matchmaker_lbd,
   title={{Matchmaker: A Python library for Real-time Music Alignment}},
   author={Park, Jiyun and Cancino-Chac\'{o}n, Carlos and Kwon, Taegyun and Nam, Juhan},
@@ -196,6 +218,8 @@ If you find Matchmaker useful, we would appreciate if you could cite us!
   year={2024}
 }
 ```
+
+
 
 ## Acknowledgments
 
