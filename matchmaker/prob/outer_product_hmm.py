@@ -37,25 +37,30 @@ IOI_THRESHOLD = 0.035  # seconds
 
 
 def compute_OuterProductHMM_pitch_probabilities(
-    chords, pitch_error_probs=None, other_prob=1e-6
-):
+    chords: List[set], 
+    pitch_error_probs: dict = None, 
+    other_prob: float = 1e-6,
+) -> NDArrayFloat:
     """
-    Precompute emission probabilities for OuterProductHMM states.
+    Precompute emission probabilities corresponding to neighbouring pitches for OuterProductHMM states.
+    This function takes into consideration pitch errors such as semitone, whole tone, octave, and within one octave errors.
 
     Parameters
     ----------
     chords : list of sets
-        chords[i] contains MIDI pitches (0–127) for score chord at state i.
+        chords[i] contains MIDI pitches (0–127) for score chord at state i. 
+        A chord is defined as all notes with the same onset time.
     pitch_error_probs : dict or None
-        If None, uses DEFAULT_PITCH_ERROR_PROBS.
+        If None, uses DEFAULT_PITCH_ERROR_PROBS. These are the probabilities assigned to different pitch error categories.
     other_prob : float
-        Probability assigned to any pitch not falling into error categories.
+        Probability assigned to any pitch not falling into error categories. Default is 1e-6.
 
     Returns
     -------
     b_table : ndarray (N x 128)
         b_table[i, p] = probability of observing pitch p at state i.
     """
+
     if pitch_error_probs is None:
         pitch_error_probs = DEFAULT_PITCH_ERROR_PROBS
 
@@ -106,7 +111,28 @@ def compute_OuterProductHMM_pitch_probabilities(
     return b_table
 
 
-def get_chords_from_score(score: ScoreLike, return_unique_onsets: bool = False) -> List[set]:
+def get_chords_from_score(
+        score: ScoreLike, 
+        return_unique_onsets: bool = False,
+        ) -> List[set]:
+    """
+    Extract chords from a score-like object.
+    A chord is defined as all notes with the same onset time.
+
+    Parameters
+    ----------
+    score : ScoreLike
+        The score-like object to extract chords from.
+
+    return_unique_onsets : bool
+        If True, also return the unique onset times.
+
+    Returns
+    -------
+    List[set]
+        A list of sets, each containing the MIDI pitches for a chord.
+    """
+
     if isinstance(score, (Score, Part)):
         note_array = score.note_array()
 
@@ -133,7 +159,13 @@ def get_chords_from_score(score: ScoreLike, return_unique_onsets: bool = False) 
         return chords
 
 
-def compute_transition_matrix(N, transitions=None, D1=DEFAULT_D1, D2=DEFAULT_D2):
+def compute_transition_matrix(
+        N: int, 
+        transitions: list[tuple[int, float]] = None, 
+        D1: int = DEFAULT_D1, 
+        D2: int = DEFAULT_D2,
+        ) -> tuple[NDArrayFloat, int, int]:
+    
     """
     Construct banded transition matrix (α) from transition deltas and probabilities.
 
@@ -209,6 +241,7 @@ class OuterProductHMM:
             self,
             reference_features=reference_features,
         )
+
         self.queue = queue
         chords, unique_onsets = get_chords_from_score(self.reference_features, return_unique_onsets=True)
         self.n_states = len(chords)
@@ -220,7 +253,7 @@ class OuterProductHMM:
         self.other_prob = other_prob
 
         # Transition setup
-        self.alpha, self.D1, self.D2 = compute_transition_matrix(self.n_states, transitions)
+        self.alpha, self.D1, self.D2 = compute_transition_matrix(self.n_states, self.transitions)
         self.S = np.ones(self.n_states) / self.n_states if S is None else np.array(S, dtype=float)
         self.r = np.ones(self.n_states) / self.n_states if r is None else np.array(r, dtype=float)
 
@@ -247,17 +280,12 @@ class OuterProductHMM:
 
         return False
 
-    def __call__(self, input, *args, **kwargs):
+    def __call__(
+            self, 
+            input: tuple[np.ndarray, float],
+            *args, **kwargs
+            ) -> Optional[int]:
         pitch_obs, ioi = input
-        # if self.is_first_observation:
-        #     self._current_chord = pitch_obs
-        #     self.state_probabilities = self.viterbi_step(
-        #             self.state_probabilities, self._current_chord
-        #         )
-        #     self.current_state = np.argmax(self.state_probabilities)
-        #     self._warping_path.append(self.current_state)
-        #     self.is_first_observation = False
-        #     return self.current_state
 
         if ioi < IOI_THRESHOLD:
             self._current_chord = np.maximum(self._current_chord, pitch_obs)
@@ -270,14 +298,18 @@ class OuterProductHMM:
             self.current_state = np.argmax(self.state_probabilities)
             self._warping_path.append(self.current_state)
 
-            
-            print('current_state:', self.current_state)  # --- IGNORE ---
             return self.current_state
     
     # Observation likelihood
-    def compute_obs_likelihood(self, observation):
+    def compute_obs_likelihood(
+            self, 
+            observation: np.ndarray,
+            ) -> NDArrayFloat:
         """
         Given observed MIDI pitches, return likelihood vector b[i].
+
+        Parameters
+        ----------
         observation: iterable of MIDI note numbers
 
         Returns
@@ -285,15 +317,30 @@ class OuterProductHMM:
         b : ndarray (N,)
             b[i] = likelihood of observing `observation` at state i.
         """
+
         b = self.b_table[:, 21:109] * observation
-        # b = np.ones(self.n_states, dtype=float)
-        # for pitch in observation:
-        #     b *= self.b_table[:, pitch]
         return b
 
     # Viterbi update
-    def viterbi_step(self, prev_probs, observation):
-        """Fast outer-product Viterbi update."""
+    def viterbi_step(
+            self, 
+            prev_probs: NDArrayFloat, 
+            observation: NDArrayFloat,
+            ) -> NDArrayFloat:
+        """
+        This function performs a fast outer-product Viterbi update.
+        Parameters
+        ----------
+        prev_probs : ndarray (N,)
+            Previous state probabilities.
+        observation : ndarray (88,)
+            Current observed MIDI pitches (88 keys from A0 to C8).
+        Returns
+        -------
+        new_probs : ndarray (N,)
+            Updated state probabilities after the Viterbi step.
+        """
+
         b = self.compute_obs_likelihood(observation)
         skip_values = prev_probs * self.S
         global_skip_max = skip_values.max()
@@ -313,22 +360,10 @@ class OuterProductHMM:
             ))
         return new_probs
 
-    # # --- Forward update ---
-    # def forward_step(self, prev_forward, observation):
-    #     """Fast outer-product forward update."""
-    #     b = self.compute_obs_likelihood(observation)
-    #     skip_sum = np.dot(prev_forward, self.S)
-    #     new_forward = np.zeros(self.n_states, dtype=float)
-    #     for i in range(self.n_states):
-    #         j_start = max(0, i - self.D2)
-    #         j_end = min(self.n_states, i + self.D1 + 1)
-    #         local_sum = 0.0
-    #         for j in range(j_start, j_end):
-    #             local_sum += prev_forward[j] * self.alpha[j, i]
-    #         new_forward[i] = b[i] * (local_sum + self.r[i] * skip_sum)
-    #     return new_forward
-
-    def run(self, verbose: bool = True):
+    def run(
+            self, 
+            verbose: bool = True,
+            ) -> NDArrayInt:
         same_state_counter = 0
         empty_counter = 0
         if verbose:
