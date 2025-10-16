@@ -7,8 +7,17 @@ import partitura as pt
 from matchmaker.prob.outer_product_hmm import (
     compute_OuterProductHMM_pitch_probabilities,
     get_chords_from_score,
+    compute_transition_matrix,
+    OuterProductHMM,
 )
+
+from matchmaker.features.midi import PitchIOIProcessor
+
 from partitura.utils.music import generate_random_performance_note_array
+
+from matchmaker import EXAMPLE_MATCH
+
+from utils import process_midi_offline
 
 
 class TestUtils(unittest.TestCase):
@@ -53,3 +62,40 @@ class TestUtils(unittest.TestCase):
 
         self.assertTrue(b_table[0].argmax() == 69)
         self.assertTrue(b_table[0, 72] == b_table[0, 76])
+
+    def test_compute_transition_matrix(self):
+        score = pt.load_musicxml(pt.EXAMPLE_MUSICXML)
+
+        # pass a score
+        chords = get_chords_from_score(score)
+
+        A, D1, D2 = compute_transition_matrix(len(chords))
+
+        self.assertTrue(A.shape == (2, 2))
+        self.assertTrue(D1 == 3)
+        self.assertTrue(D2 == 3)
+        self.assertTrue(np.allclose(A.sum(axis=1), 1.0))
+
+
+class TestOuterProductHMM(unittest.TestCase):
+
+    def test_outer_product_hmm(self):
+        self.perf, _, self.score = pt.load_match(EXAMPLE_MATCH, create_score=True)
+
+        snote_array = self.score.note_array()
+
+        self.unique_sonsets = np.unique(snote_array["onset_beat"])
+
+        observations = process_midi_offline(
+            perf_info=self.perf,
+            processor=PitchIOIProcessor(piano_range=True),
+        )
+
+        self.outerhmm = OuterProductHMM(reference_features=self.score)
+
+        for obs in observations:
+            if obs is not None:
+                current_state = self.outerhmm(obs)
+                self.assertTrue(self.outerhmm.state_space[current_state] in self.unique_sonsets)
+
+        self.assertTrue(isinstance(self.outerhmm.warping_path, np.ndarray))
