@@ -5,6 +5,13 @@ import progressbar
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.base import OnlineAlignment
 
+from outer_product_hmm import viterbi_step_cy
+try:
+    # import the compiled function (name depends on your .pyx)
+    from outer_product_hmm import viterbi_step_cy
+except Exception:
+    viterbi_step_cy = None
+
 import numpy as np
 
 from partitura.score import Part, Score, ScoreLike
@@ -342,6 +349,22 @@ class OuterProductHMM:
         """
 
         b = self.compute_obs_likelihood(observation)
+
+        if viterbi_step_cy is not None:
+            prev = np.ascontiguousarray(prev_probs, dtype=np.float64)
+            alpha = np.ascontiguousarray(self.alpha, dtype=np.float64)
+            S = np.ascontiguousarray(self.S, dtype=np.float64)
+            r = np.ascontiguousarray(self.r, dtype=np.float64)
+            b_cy = np.ascontiguousarray(b, dtype=np.float64)
+
+            # D1, D2 must be ints
+            D1 = int(self.D1)
+            D2 = int(self.D2)
+
+            # Call cython function and return its result
+            # viterbi_step_cy(prev, alpha, S, r, b, D1, D2) -> numpy array
+            return viterbi_step_cy(prev, alpha, S, r, b_cy, D1, D2)
+
         skip_values = prev_probs * self.S
         global_skip_max = skip_values.max()
         new_probs = np.zeros(self.n_states, dtype=float)
