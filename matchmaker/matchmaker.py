@@ -241,7 +241,7 @@ class Matchmaker(object):
             if self.performance_file is not None:
                 # tempo is slightly adjusted to reflect the tempo of the performance audio
                 self.tempo = adjust_tempo_for_performance_audio(
-                    self.score_part, self.performance_file
+                    self.score_part, self.performance_file, self.tempo
                 )
 
             # generate score audio

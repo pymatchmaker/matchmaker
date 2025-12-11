@@ -191,7 +191,9 @@ def interleave_with_constant(
     return interleaved_array
 
 
-def adjust_tempo_for_performance_audio(score: ScoreLike, performance_audio: Path):
+def adjust_tempo_for_performance_audio(
+    score: ScoreLike, performance_audio: Path, default_tempo: int = 120
+):
     """
     Adjust the tempo of the score part to match the performance audio.
     We round up the tempo to the nearest 20 bpm to avoid too much optimization.
@@ -202,26 +204,16 @@ def adjust_tempo_for_performance_audio(score: ScoreLike, performance_audio: Path
         The score to adjust the tempo of.
     performance_audio : Path
         The performance audio file to adjust the tempo to.
+    default_tempo : int
+        The default tempo of the score.
     """
-    default_tempo = 120
-    # score_midi = partitura.save_score_midi(score, out=None)
-    # tmp_score_path = "score.mid"
-    # partitura.save_score_midi(score, out=tmp_score_path)
-    # source_length = mido.MidiFile(tmp_score_path).length
-
-    sna = score.note_array()
-    pna = performance_notearray_from_score_notearray(
-        snote_array=sna,
-        bpm=default_tempo,
-    )
-
-    source_length = np.max(pna["onset_sec"] + pna["duration_sec"])
+    score_midi = partitura.save_score_midi(score, out=None)
+    source_length = score_midi.length
     target_length = librosa.get_duration(path=str(performance_audio))
     ratio = target_length / source_length
     rounded_tempo = int(
         (default_tempo / ratio + 19) // 20 * 20
     )  # round up to nearest 20
-    # rounded_tempo = round(default_tempo / ratio / 20) * 20
     print(
         f"default tempo: {default_tempo} (score length: {source_length}) -> adjusted_tempo: {rounded_tempo} (perf length: {target_length})"
     )
