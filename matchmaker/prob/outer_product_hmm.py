@@ -5,10 +5,9 @@ import progressbar
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.base import OnlineAlignment
 
-from outer_product_hmm import viterbi_step_cy
 try:
     # import the compiled function (name depends on your .pyx)
-    from outer_product_hmm import viterbi_step_cy
+    from viterbi_step import viterbi_step_cy
 except Exception:
     viterbi_step_cy = None
 

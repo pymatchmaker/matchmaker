@@ -1,8 +1,8 @@
 from matchmaker import Matchmaker
 
 mm = Matchmaker(
-    score_file="/home/suhit/JKU/Repos/matchmaker/matchmaker/assets/mozart_k265_var1.musicxml",
-    performance_file="/home/suhit/JKU/Repos/matchmaker/matchmaker/assets/mozart_k265_var1.mid",
+    score_file="matchmaker/assets/mozart_k265_var1.musicxml",
+    performance_file="matchmaker/assets/mozart_k265_var1.mid",
     input_type="midi",
     feature_type="pitchclass",
     method="outerhmm",

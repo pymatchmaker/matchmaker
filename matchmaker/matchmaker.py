@@ -185,7 +185,7 @@ class Matchmaker(object):
                 file_path=self.performance_file,
                 polling_period=None,
             )
-        if self.input_type == "midi" and method != "outerhmm":
+        elif self.input_type == "midi" and method != "outerhmm":
             self.stream = MidiStream(
                 processor=self.processor,
                 port=self.device_name_or_index,

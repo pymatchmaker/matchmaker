@@ -23,8 +23,8 @@ extensions = [
         language="c",
     ),
     Extension(
-        "matchmaker.prob.outer_product_hmm",
-        ["matchmaker/prob/outer_product_hmm.pyx"],
+        "matchmaker.prob.viterbi_step",
+        ["matchmaker/prob/viterbi_step.pyx"],
         include_dirs=[np.get_include()],
         define_macros=[("NPY_NO_DEPRECATED_API", "NPY_1_7_API_VERSION")],
         language="c",
