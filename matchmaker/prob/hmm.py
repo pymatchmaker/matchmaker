@@ -152,35 +152,207 @@ class BaseHMM(HiddenMarkovModel):
         return False
 
 
-class PitchHMM(BaseHMM):
+class PitchHMM(OnlineAlignment, BaseHMM):
     """
-    A simple HMM that uses pitch information (symbolic or spectrograms)
-    as input. This model does not include temporal information.
+    Implements the behavior of a HiddenMarkovModel, specifically designed for
+    the task of score following.
 
-    This model is meant to be used as a baseline only,
-    and is not expected to have a good performance other
-    than in very simple idealized cases.
+    Parameters
+    ----------
+    _transition_matrix : numpy.ndarray
+        Matrix for computations of state transitions within the HMM.
+
+    _observation_model : ObservationModel
+        Object responsible for computing the observation probabilities for each
+        state of the HMM.
+
+    initial_distribution : numpy array
+        The initial distribution of the model. If not given, it is assumed to
+        be uniform.
+
+    forward_variable : numpy array
+        The current (latest) value of the forward variable.
+
+    _variation_coeff : float
+        The normalized coefficient of variation of the current (latest) forward
+        variable. Used to determine the confidence of the prediction of the HMM.
+
+    current_state : int
+        The index of the current state of the HMM.
     """
 
     def __init__(
         self,
-        observation_model: ObservationModel,
-        transition_matrix: NDArrayFloat,
-        score_onsets: NDArrayFloat,
-        initial_probabilities: Optional[NDArrayFloat] = None,
-        has_insertions: bool = False,
+        reference_features: np.ndarray,  # snote_array
+        queue: Optional[RECVQueue] = None,
+        tempo_model: TempoModel = None,
+        transition_model: Optional[TransitionModel] = None,
+        observation_model: Optional[ObservationModel] = None,
+        transition_matrix: Optional[NDArrayFloat] = None,
+        pitch_obs_prob_func: Optional[Callable[..., NDArrayFloat]] = None,
+        pitch_prob_args: Optional[Dict[str, Any]] = None,
+        initial_probabilities: Optional[np.ndarray] = None,
+        has_insertions: bool = True,
+        piano_range: bool = True,
     ) -> None:
-        transition_model = ConstantTransitionModel(
-            transition_probabilities=transition_matrix,
-            init_probabilities=initial_probabilities,
+        """
+        Initialize the object.
+
+        Parameters
+        ----------
+        transition_matrix : numpy array
+            The Tranistion probability matrix of HMM.
+
+        pitch_profiles : numpy array
+            The pre-computed pitch profiles, for each separate possible pitch
+            in the MIDI range. Used in calculating the pitch observation
+            probabilities.
+
+        ioi_matrix : numpy array
+            The pre-computed score IOI values in beats, from each unique state
+            to all other states, stored in a matrix.
+
+        ioi_precision : float
+            The precision parameter for computing the IOI observation
+            probability.
+
+        score_onsets : numpy array
+
+        initial_distribution : numpy array
+            The initial distribution of the model. If not given, it is asumed to
+            be uniform.
+            Default = None.
+        """
+        OnlineAlignment.__init__(
+            self,
+            reference_features=reference_features,
         )
+        self.reference_features = reference_features
+        (
+            observation_model,
+            transition_matrix,
+            initial_probabilities,
+            unique_onsets,
+        ) = self._build_hmm_modules(
+            inserted_states=has_insertions,
+            piano_range=piano_range,
+        )
+
+        if transition_model is not None and transition_matrix is not None:
+            warnings.warn(
+                "Both `transition_model` and `transition_matrix` were "
+                "provided. Only `transition_model` will be used."
+            )
+        obs_model_params_given = [
+            pitch_obs_prob_func is not None,
+            pitch_prob_args is not None,
+        ]
+        if observation_model is not None and any(obs_model_params_given):
+            warnings.warn(
+                "`observation_model` and params were provided. "
+                "Only `observation_model` will be used."
+            )
+
+        if observation_model is None and not all(obs_model_params_given):
+            missing_params = [
+                pn
+                for pn, given in zip(
+                    [
+                        "pitch_obs_prob_func",
+                        "pitch_prob_args",
+                    ],
+                    obs_model_params_given,
+                )
+                if not given
+            ]
+            raise ValueError(missing_params)
+
+        if transition_model is None:
+            transition_model = ConstantTransitionModel(
+                transition_probabilities=transition_matrix,
+                init_probabilities=initial_probabilities,
+            )
+
         BaseHMM.__init__(
             self,
             observation_model=observation_model,
             transition_model=transition_model,
-            state_space=score_onsets,
-            tempo_model=None,
+            state_space=unique_onsets,
             has_insertions=has_insertions,
+            queue=queue,
+        )
+
+    def __call__(self, input, *args, **kwargs):
+        frame_index = args[0] if args else None
+        
+        pitch_obs = input
+            
+        current_state = self.forward_algorithm_step(
+            observation=pitch_obs,
+            log_probabilities=False,
+        )
+        self._warping_path.append((current_state, self.input_index))
+        self.input_index = self.input_index + 1 if frame_index is None else frame_index
+
+        self.current_state = current_state
+
+        return self.current_state
+
+    @property
+    def current_state(self):
+        return self.observation_model.current_state
+
+    @current_state.setter
+    def current_state(self, state):
+        self.observation_model.current_state = state
+
+    def _build_hmm_modules(
+        self,
+        piano_range: bool = True,
+        inserted_states: bool = True,
+    ):
+        snote_array = self.reference_features
+        unique_sonsets = np.unique(snote_array["onset_beat"])
+        unique_sonset_idxs = [
+            np.where(snote_array["onset_beat"] == ui)[0] for ui in unique_sonsets
+        ]
+        chord_pitches = [snote_array["pitch"][uix] for uix in unique_sonset_idxs]
+        pitch_profiles = compute_discrete_pitch_profiles(
+            chord_pitches=chord_pitches,
+            piano_range=piano_range,
+            inserted_states=inserted_states,
+        )
+
+        # observation model
+        observation_model = BernoulliPitchObservationModel(
+            pitch_profiles=pitch_profiles,
+        )
+
+        if inserted_states:
+            unique_onsets_s = np.insert(
+                unique_sonsets,
+                np.arange(1, len(unique_sonsets)),
+                (unique_sonsets[:-1] + 0.5 * np.diff(unique_sonsets)),
+            )
+        else:
+            unique_onsets_s = unique_sonsets
+
+        transition_matrix = stable_transition_matrix(
+            n_states=len(unique_onsets_s),
+            dist=gumbel_l,
+            scale=1.0,#0.5,
+            inserted_states=inserted_states,
+        )
+        initial_probabilities = init_dist(
+            n_states=len(unique_onsets_s),
+            dist=gumbel_l,
+        )
+
+        return (
+            observation_model,
+            transition_matrix,
+            initial_probabilities,
+            unique_onsets_s,
         )
 
 
@@ -376,15 +548,104 @@ def gumbel_transition_matrix(  # TODO check works for audio (parameter)
                     np.arange(n_states), loc=i + mp_trans_state * 2 - 1, scale=scale
                 )
         else:
-            transition_matrix[i] = gumbel_l.pdf(
-                np.arange(n_states), loc=i + mp_trans_state * 2 - 1, scale=scale
-            )
+            transition_matrix[i] = gumbel_l.pdf(np.arange(n_states), loc=i + mp_trans_state * 2 - 1, scale=scale)
 
     # Normalize transition matrix (so that it is a proper stochastic matrix):
     transition_matrix /= transition_matrix.sum(1, keepdims=True)
 
     # Return the computed transition matrix:
     return transition_matrix
+
+def stable_transition_matrix(  # TODO check works for audio (parameter)
+    n_states: int,
+    mp_trans_state: int = 1,
+    dist = gumbel_l,
+    scale: float = 0.5,
+    inserted_states: bool = False,
+) -> NDArrayFloat:
+    """
+    Compute a transiton matrix, where each row follows a normalized Gumbel
+    distribution.
+
+    Parameters
+    ----------
+    n_states : int
+        The number of states in the Hidden Markov Model (HMM), which is required
+        for the size of the matrix.
+
+    mp_trans_state : int
+        Which state should have the largest probability to be transitioned into
+        from the current state the model is in.
+        Default = 1, which means that the model would prioritize transitioning
+        into the state that is next in line, e.g. from State 3 to State 4.
+
+    scale : float
+        The scale parameter of the distribution.
+        Default = 0.5
+
+    inserted_states : boolean
+        Indicates whether the HMM includes inserted states (intermediary states
+        between chords for errors and insertions in the score following).
+        Default = True
+
+    Returns
+    -------
+    transition_matrix : numpy array
+        The computed transition matrix for the HMM.
+    """
+    # Initialize transition matrix:
+    transition_matrix = np.zeros((n_states, n_states), dtype="f8")
+    # Compute transition matrix:
+    for i in range(n_states):
+        if inserted_states:
+            if np.mod(i, 2) == 0:
+                transition_matrix[i] = dist.pdf(
+                    np.arange(n_states), loc=i + mp_trans_state * 2, scale=scale
+                )
+            else:
+                transition_matrix[i] = dist.pdf(
+                    np.arange(n_states), loc=i + mp_trans_state * 2 - 1, scale=scale
+                )
+        else:
+            transition_matrix[i] = dist.pdf(np.arange(n_states), loc=i + mp_trans_state * 2 - 1, scale=scale)
+
+    # Normalize transition matrix (so that it is a proper stochastic matrix):
+    transition_matrix /= transition_matrix.sum(1, keepdims=True)
+
+    # Return the computed transition matrix:
+    return transition_matrix
+
+def init_dist(
+    n_states: int,
+    dist=gumbel_l,
+    loc: int = 0,
+    scale: float = 10,
+) -> NDArrayFloat:
+    """
+    Compute the initial probabilites for all states in the Hidden Markov Model
+    (HMM), which follow a Gumbel distribution.
+
+    Parameters
+    ----------
+    n_states : int
+        The number of states in the Hidden Markov Model (HMM), which is required
+        for the size of the initial probabilites vector.
+
+    Returns
+    -------
+    init_probs : numpy array
+        The computed initial probabilities in the form of a vector.
+    """
+
+    prob_scale: float = scale if scale < n_states else n_states / 10
+
+    init_probs: np.ndarray = dist.pdf(
+        np.arange(n_states),
+        loc=loc,
+        scale=prob_scale,
+    )
+
+    return init_probs
 
 
 def gumbel_init_dist(
@@ -1038,6 +1299,151 @@ class BernoulliGaussianPitchIOIObservationModel(PitchIOIObservationModel):
             ioi_prob_args=ioi_prob_args,
         )
 
+class ACCPitchIOIObservationModel(ObservationModel):
+    """
+    Computes the probabilities that an observation was emitted, i.e. the
+    likelihood of observing performed notes at the current moment/state.
+
+    Parameters
+    ----------
+    _pitch_profiles : numpy array
+        he pre-computed pitch profiles, for each separate possible pitch
+        in the MIDI range. Used in calculating the pitch observation
+        probabilities.
+
+    _ioi_matrix : numpy array
+        The pre-computed score IOI values in beats, from each unique state
+        to all other states, stored in a matrix.
+
+    _ioi_precision : float
+        The precision parameter for computing the IOI observation probability.
+
+    _ioi_norm_term : float
+        The normalization term of the Gaussian distribution used for the
+        computation of the IOI probabilities.
+
+    TODO
+    ----
+    * Implement log probabilities
+    """
+
+    def __init__(self, pitch_profiles, ioi_matrix, ioi_precision, piano_range=False):
+        """
+        The initialization method.
+
+        Parameters
+        ----------
+        pitch_profiles : numpy array
+            he pre-computed pitch profiles, for each separate possible pitch
+            in the MIDI range. Used in calculating the pitch observation
+            probabilities.
+
+        ioi_matrix : numpy array
+            The pre-computed score IOI values in beats, from each unique state
+            to all other states, stored in a matrix.
+
+        ioi_precision : float
+            The precision parameter for computing the IOI observation
+            probability.
+        """
+        super().__init__(use_log_probabilities=False)
+        # Store the parameters of the object:
+        self._pitch_profiles = pitch_profiles
+        self._ioi_matrix = ioi_matrix
+        self._ioi_precision = ioi_precision
+        # Compute the IOI normalization term:
+        self._ioi_norm_term = np.sqrt(0.5 * self._ioi_precision / np.pi)
+        self.current_state = None
+        self.piano_range = piano_range
+
+    def compute_pitch_observation_probability(self, pitch_obs):
+        """
+        Compute the pitch observation probability.
+
+        Parameters
+        ----------
+        pitch_obs : numpy array
+            All the MIDI pitch values in an observation.
+
+        Returns
+        -------
+        pitch_obs_prob : numpy array
+            The computed pitch observation probabilities for all states.
+        """
+        # Use Bernouli distribution to compute the prob:
+        # Binary piano-roll observation:
+        pitch_prof_obs = np.zeros((1, 128))
+        if self.piano_range:
+            pitch_prof_obs = np.zeros((1, 88))
+        pitch_prof_obs[0, pitch_obs.astype(int)] = 1
+
+        # Compute Bernoulli probability:
+        pitch_prob = (self._pitch_profiles**pitch_prof_obs) * (
+            (1 - self._pitch_profiles) ** (1 - pitch_prof_obs)
+        )
+
+        # Return the values:
+        return np.prod(pitch_prob, 1)
+
+    def compute_ioi_observation_probability(self, ioi_obs, current_state, tempo_est):
+        """
+        Compute the IOI observation probability.
+
+        Parameters
+        ----------
+        ioi_obs : numpy array
+            All the observed IOI.
+
+        current_state : int
+            The current state of the Score HMM.
+
+        tempo_est : float
+            The tempo estimation.
+
+        Returns
+        -------
+        ioi_obs_prob : numpy array
+            The computed IOI observation probabilities for each state.
+        """
+        # Use Gaussian distribution:
+        ioi_idx = current_state if current_state is not None else 0
+        # Compute the expected argument:
+        exp_arg = (
+            -0.5
+            * ((tempo_est * self._ioi_matrix[ioi_idx] - ioi_obs) ** 2)
+            * self._ioi_precision
+        )
+
+        # Return the value:
+        return self._ioi_norm_term * np.exp(exp_arg)
+
+    def get_score_ioi(self, current_state):
+        """
+        Get the score inter onset interval (IOI) between the current state and
+        the previous state in beats.
+
+        Parameters
+        ----------
+        current_state : int
+            The current state of the Score HMM.
+
+        Returns
+        -------
+        state_ioi : numpy.int
+            The IOI in beats.
+        """
+        # Return the specific value:
+        return self._ioi_matrix[current_state]
+
+    def __call__(self, observation):
+        pitch_obs, ioi_obs, tempo_est = observation
+        observation_prob = self.compute_pitch_observation_probability(
+            pitch_obs
+        ) * self.compute_ioi_observation_probability(
+            ioi_obs=ioi_obs, current_state=self.current_state, tempo_est=tempo_est
+        )
+        return observation_prob
+
 
 class PitchIOIHMM(OnlineAlignment, BaseHMM):
     """
@@ -1082,8 +1488,8 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
         pitch_prob_args: Optional[Dict[str, Any]] = None,
         ioi_prob_args: Optional[Dict[str, Any]] = None,
         initial_probabilities: Optional[np.ndarray] = None,
-        has_insertions: bool = True,
-        piano_range: bool = True,
+        has_insertions: bool = False,
+        piano_range: bool = False,
     ) -> None:
         """
         Initialize the object.
@@ -1118,6 +1524,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             self,
             reference_features=reference_features,
         )
+        self.reference_features = reference_features
 
         (
             observation_model,
@@ -1128,6 +1535,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
         ) = self._build_hmm_modules(
             inserted_states=has_insertions,
             piano_range=piano_range,
+            tempo_model=tempo_model,
         )
 
         if transition_model is not None and transition_matrix is not None:
@@ -1247,15 +1655,19 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
 
     def _build_hmm_modules(
         self,
-        piano_range: bool = True,
+        piano_range: bool = False,
         inserted_states: bool = True,
+        observation_model = ACCPitchIOIObservationModel,
+        tempo_model = KalmanTempoModel,
     ):
         snote_array = self.reference_features
+        
         unique_sonsets = np.unique(snote_array["onset_beat"])
         unique_sonset_idxs = [
             np.where(snote_array["onset_beat"] == ui)[0] for ui in unique_sonsets
         ]
         chord_pitches = [snote_array["pitch"][uix] for uix in unique_sonset_idxs]
+        
         pitch_profiles = compute_discrete_pitch_profiles(
             chord_pitches=chord_pitches,
             piano_range=piano_range,
@@ -1265,12 +1677,12 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             unique_onsets=unique_sonsets,
             inserted_states=inserted_states,
         )
-
-        # observation model
-        observation_model = BernoulliGaussianPitchIOIObservationModel(
+        
+        observation_model = observation_model(
             pitch_profiles=pitch_profiles,
             ioi_matrix=ioi_matrix,
             ioi_precision=1,
+            piano_range=piano_range,
         )
 
         if inserted_states:
@@ -1282,17 +1694,26 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
         else:
             unique_onsets_s = unique_sonsets
 
-        # tempo model
-        tempo_model = KalmanTempoModel(
-            init_score_onset=unique_sonsets.min(),
-            init_beat_period=60 / 100,
-        )
-        transition_matrix = gumbel_transition_matrix(
+        if tempo_model == KalmanTempoModel:
+            tempo_model = tempo_model(
+                init_beat_period=60 / 100,
+                init_score_onset=unique_sonsets.min(),
+            )
+        else:
+            tempo_model = tempo_model(
+                init_score_onset=unique_sonsets.min(),
+                init_beat_period=60 / 100,
+            )
+            
+        transition_matrix = stable_transition_matrix(
             n_states=len(ioi_matrix[0]),
-            inserted_states=True,
+            dist=gumbel_l,
+            scale=1.0,#0.5,
+            inserted_states=inserted_states,
         )
-        initial_probabilities = gumbel_init_dist(
+        initial_probabilities = init_dist(
             n_states=len(ioi_matrix[0]),
+            dist=gumbel_l,
         )
 
         return (
@@ -1306,6 +1727,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
     def run(self, verbose: bool = True):
         same_state_counter = 0
         empty_counter = 0
+        verbose = False
         if verbose:
             pbar = progressbar.ProgressBar(
                 maxval=self.n_states,  # redirect_stdout=True
@@ -1314,10 +1736,18 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
 
         while self.is_still_following():
             prev_state = self.current_state
+            # TODO: check self.queue.get() format. maybe this should actually be a tuple
+            try:
+                queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
+                #features, f_time = queue_input
+                #print(f'{features=}, {f_time=}')
+            except:
+                break
+            #TODO: try MidiStream.return_midi_messages = True
 
-            queue_input = self.queue.get()
             if queue_input is not None:
-                current_state = self(queue_input)
+                #print(f'pitch_ioi: {queue_input=}')
+                current_state = self.__call__(queue_input)
                 empty_counter = 0
                 if current_state == prev_state:
                     if same_state_counter < self.patience:
@@ -1326,6 +1756,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
                         break
                 else:
                     same_state_counter = 0
+                
 
                 if verbose:
                     pbar.update(int(current_state))

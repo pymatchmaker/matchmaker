@@ -5,13 +5,16 @@ import progressbar
 from matchmaker.utils.misc import RECVQueue
 from matchmaker.base import OnlineAlignment
 
+#from viterbi_step import viterbi_step_cy
 try:
     # import the compiled function (name depends on your .pyx)
-    from viterbi_step import viterbi_step_cy
+    from .viterbi_step import viterbi_step_cy
 except Exception:
     viterbi_step_cy = None
+    print("---------------\nCYTHON IMPORT FAILED\n------------------")
 
 import numpy as np
+import pdb
 
 from partitura.score import Part, Score, ScoreLike
 
@@ -40,6 +43,8 @@ DEFAULT_D1 = 3
 DEFAULT_D2 = 3
 
 IOI_THRESHOLD = 0.035  # seconds
+
+QUEUE_TIMEOUT = 10
 
 
 def compute_OuterProductHMM_pitch_probabilities(
@@ -216,6 +221,7 @@ class OuterProductHMM:
         r: Optional[np.ndarray] = None,
         other_prob: float = 1e-6,
         patience: int = 10,
+        piano_range: bool = True,
     ) -> None:
         """
         Outer-product Hidden Markov Model for score following.
@@ -270,10 +276,12 @@ class OuterProductHMM:
 
         self.current_state = 0
         self._warping_path = []
-        self._current_chord = np.zeros(88, dtype=int)
+        self._current_chord = np.zeros(88, dtype=int) if piano_range else np.zeros(128, dtype=int)
+        self.piano_range = piano_range
         self.patience = patience
         self.state_probabilities = np.ones(self.n_states) / self.n_states
         self.is_first_observation = True
+        self.input_index = 0
 
 
     @property
@@ -291,7 +299,8 @@ class OuterProductHMM:
             input: tuple[np.ndarray, float],
             *args, **kwargs
             ) -> Optional[int]:
-        pitch_obs, ioi = input
+        pitch_obs, ioi = input # only works when using PitchIOIProcessor
+        frame_index = args[0] if args else None
 
         if ioi < IOI_THRESHOLD:
             self._current_chord = np.maximum(self._current_chord, pitch_obs)
@@ -302,8 +311,11 @@ class OuterProductHMM:
                 self.state_probabilities, self._current_chord
             )
             self.current_state = np.argmax(self.state_probabilities)
-            self._warping_path.append(self.current_state)
+            #self._warping_path.append((self.state_space[self.current_state],self.input_index))
+            self._warping_path.append((self.current_state,self.input_index))
+            self.input_index = self.input_index + 1 if frame_index is None else frame_index
 
+            #return self.state_space[self.current_state] # (=current_position)
             return self.current_state
     
     # Observation likelihood
@@ -323,8 +335,10 @@ class OuterProductHMM:
         b : ndarray (N,)
             b[i] = likelihood of observing `observation` at state i.
         """
-
-        b = self.b_table[:, 21:109] * observation
+        if self.piano_range:
+            b = self.b_table[:, 21:109] * observation
+        else:
+            b = self.b_table * observation
         return b
 
     # Viterbi update
@@ -352,7 +366,7 @@ class OuterProductHMM:
         if viterbi_step_cy is not None:
             prev = np.ascontiguousarray(prev_probs, dtype=np.float64)
             alpha = np.ascontiguousarray(self.alpha, dtype=np.float64)
-            S = np.ascontiguousarray(self.S, dtype=np.float64)
+            S = np.ascontiguousarray(self.S, dtype=np.float64) # transition matrix
             r = np.ascontiguousarray(self.r, dtype=np.float64)
             b_cy = np.ascontiguousarray(b, dtype=np.float64)
 
@@ -396,8 +410,10 @@ class OuterProductHMM:
 
         while self.is_still_following():
             prev_state = self.current_state
-
-            queue_input = self.queue.get()
+            try:
+                queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
+            except: # it raises 'Empty' when there is no queue input anymore
+                break
             if queue_input is not None:
                 current_state = self(queue_input)
                 empty_counter = 0
