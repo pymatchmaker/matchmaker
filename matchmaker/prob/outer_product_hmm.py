@@ -362,7 +362,13 @@ class OuterProductHMM:
 
             # Call cython function and return its result
             # viterbi_step_cy(prev, alpha, S, r, b, D1, D2) -> numpy array
-            return viterbi_step_cy(prev, alpha, S, r, b_cy, D1, D2)
+            new_probs = viterbi_step_cy(prev, alpha, S, r, b_cy, D1, D2)
+            # TODO: integrate the normalization directly into the cython version
+            if np.sum(new_probs) > 0:
+                new_probs /= np.sum(new_probs)
+            else:
+                new_probs = np.ones(self.n_states) / self.n_states
+            return new_probs
 
         skip_values = prev_probs * self.S
         global_skip_max = skip_values.max()
@@ -380,6 +386,10 @@ class OuterProductHMM:
             new_probs[i] = sum(b[i] * (
                 skip_contrib if skip_contrib >= local_max else local_max
             ))
+        if np.sum(new_probs) > 0:
+                new_probs /= np.sum(new_probs)
+        else:
+            new_probs = np.ones(self.n_states) / self.n_states
         return new_probs
 
     def run(
