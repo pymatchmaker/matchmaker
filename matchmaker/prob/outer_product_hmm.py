@@ -363,11 +363,7 @@ class OuterProductHMM:
             # Call cython function and return its result
             # viterbi_step_cy(prev, alpha, S, r, b, D1, D2) -> numpy array
             new_probs = viterbi_step_cy(prev, alpha, S, r, b_cy, D1, D2)
-            # TODO: integrate the normalization directly into the cython version
-            if np.sum(new_probs) > 0:
-                new_probs /= np.sum(new_probs)
-            else:
-                new_probs = np.ones(self.n_states) / self.n_states
+            
             return new_probs
 
         skip_values = prev_probs * self.S
