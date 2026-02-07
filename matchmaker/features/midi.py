@@ -20,6 +20,10 @@ from matchmaker.utils.symbolic import (
 )
 from matchmaker.utils.typing import InputMIDIFrame, NDArrayFloat
 
+WINDOW_SIZE_MIDI = 200
+START_WINDOW_SIZE_MIDI = 200
+STEP_SIZE_MIDI = 5
+
 
 class PitchProcessor(Processor):
     """

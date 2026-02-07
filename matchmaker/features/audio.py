@@ -22,6 +22,8 @@ NORM = np.inf
 FEATURES = "chroma"
 QUEUE_TIMEOUT = 10
 WINDOW_SIZE = 5
+STEP_SIZE = 5
+START_WINDOW_SIZE = 0.25
 
 # Type hint for Input Audio frame.
 InputAudioSeries = np.ndarray

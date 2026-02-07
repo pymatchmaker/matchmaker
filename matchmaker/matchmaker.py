@@ -7,18 +7,27 @@ import numpy as np
 import partitura
 from partitura.io.exportmidi import get_ppq
 from partitura.score import Part
+from partitura.musicanalysis.performance_codec import get_time_maps_from_alignment
 
 from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
 from matchmaker.features.audio import (
     FRAME_RATE,
     SAMPLE_RATE,
+    WINDOW_SIZE,
+    STEP_SIZE,
     ChromagramProcessor,
     CQTProcessor,
     LogSpectralEnergyProcessor,
     MelSpectrogramProcessor,
     MFCCProcessor,
 )
-from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
+from matchmaker.features.midi import (
+    WINDOW_SIZE_MIDI,
+    START_WINDOW_SIZE_MIDI,
+    STEP_SIZE_MIDI,
+    PianoRollProcessor, 
+    PitchIOIProcessor,
+)
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import (
@@ -35,7 +44,7 @@ from matchmaker.utils.eval import (
     transfer_from_score_to_predicted_perf,
 )
 from matchmaker.utils.misc import (
-    adjust_tempo_for_performance_audio,
+    adjust_tempo_for_performance_file,
     generate_score_audio,
     is_audio_file,
     is_midi_file,
@@ -48,14 +57,16 @@ DEFAULT_DISTANCE_FUNCS = {
     "arzt": OnlineTimeWarpingArzt.DEFAULT_DISTANCE_FUNC,
     "dixon": OnlineTimeWarpingDixon.DEFAULT_DISTANCE_FUNC,
     "hmm": None,
+    "outerhmm": None,
+    "pthmm": None,
 }
 
 DEFAULT_METHODS = {
     "audio": "arzt",
-    "midi": "hmm",
+    "midi": "outerhmm",
 }
 
-AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm"]
+AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm", "outerhmm"]
 
 
 class Matchmaker(object):
@@ -101,7 +112,7 @@ class Matchmaker(object):
         )
         self.input_type = input_type
         self.feature_type = feature_type
-        self.frame_rate = frame_rate
+        self.frame_rate = frame_rate if input_type == "audio" else 1
         self.score_part: Optional[Part] = None
         self.distance_func = distance_func
         self.device_name_or_index = device_name_or_index
@@ -118,14 +129,23 @@ class Matchmaker(object):
             raise ValueError("Score file is required")
 
         try:
-            self.score_part = partitura.load_score_as_part(self.score_file)
-
+            self.score_part = partitura.load_score_as_part(self.score_file) 
+            # if score_file is an xml file, load_score_as_part() uses load_score() -> load_musicxml() which imports invisible objects (e.g. trills) by default
+            # load_score_part() doesn't support an 'ignore_invisible_objects' parameter yet, thus we have to bypass this issue in the following way:
+            # TODO: find a better solution: 
+            unfold = True
+            if self.score_file.endswith('musicxml'):
+                self.score_part = partitura.load_musicxml(self.score_file, ignore_invisible_objects=True)
+                if unfold:
+                    self.score_part = partitura.score.unfold_part_maximal(self.score_part).parts[0]
+                else:
+                    self.score_part = self.score_part.parts[0]
         except Exception as e:
             raise ValueError(f"Invalid score file: {e}")
 
         # setup feature processor
         if self.feature_type is None:
-            self.feature_type = "chroma" if input_type == "audio" else "pitchclass"
+            self.feature_type = "chroma" if input_type == "audio" else "pitch_ioi"
 
         if self.feature_type == "chroma":
             self.processor = ChromagramProcessor(
@@ -147,8 +167,10 @@ class Matchmaker(object):
             self.processor = LogSpectralEnergyProcessor(
                 sample_rate=sample_rate,
             )
-        elif self.feature_type == "pitchclass":
+        elif self.feature_type == "pitch_ioi":
             self.processor = PitchIOIProcessor(piano_range=True)
+        elif self.feature_type == "pitchclass":    
+            self.processor = PitchClassPianoRollProcessor()
         elif self.feature_type == "pianoroll":
             self.processor = PianoRollProcessor(piano_range=True)
         else:
@@ -165,7 +187,17 @@ class Matchmaker(object):
                 raise ValueError(
                     f"Invalid performance file. Expected MIDI file, but got {self.performance_file}"
                 )
+            
+        # validate method first
+        if method is None:
+            method = DEFAULT_METHODS[self.input_type]
+        elif method not in AVAILABLE_METHODS:
+            raise ValueError(f"Invalid method. Available methods: {AVAILABLE_METHODS}")
 
+        # setup distance function
+        if distance_func is None:
+            distance_func = DEFAULT_DISTANCE_FUNCS[method]
+        
         # setup stream device
         if self.input_type == "audio":
             self.stream = AudioStream(
@@ -175,7 +207,14 @@ class Matchmaker(object):
                 wait=wait,
                 target_sr=SAMPLE_RATE,
             )
-        elif self.input_type == "midi":
+        elif self.input_type == "midi" and method == "outerhmm":
+            self.stream = MidiStream(
+                processor=self.processor,
+                port=self.device_name_or_index,
+                file_path=self.performance_file,
+                polling_period=None,
+            )
+        elif self.input_type == "midi" and method != "outerhmm":
             self.stream = MidiStream(
                 processor=self.processor,
                 port=self.device_name_or_index,
@@ -187,23 +226,21 @@ class Matchmaker(object):
         # preprocess score (setting reference features, tempo)
         self.preprocess_score()
 
-        # validate method first
-        if method is None:
-            method = DEFAULT_METHODS[self.input_type]
-        elif method not in AVAILABLE_METHODS:
-            raise ValueError(f"Invalid method. Available methods: {AVAILABLE_METHODS}")
-
-        # setup distance function
-        if distance_func is None:
-            distance_func = DEFAULT_DISTANCE_FUNCS[method]
-
         # setup score follower
         if method == "arzt":
+            alignment = [{"label" : "match", "score_id" : nid, "performance_id": nid} for nid in self.score_part.note_array()["id"]]
+            state_to_ref_time_map, ref_to_state_time_map = get_time_maps_from_alignment(self.ppart.note_array(), self.score_part.note_array(), alignment)
             self.score_follower = OnlineTimeWarpingArzt(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
                 distance_func=distance_func,
                 frame_rate=self.frame_rate,
+                window_size=WINDOW_SIZE if self.input_type == "audio" else WINDOW_SIZE_MIDI,
+                start_window_size=START_WINDOW_SIZE if self.input_type == "audio" else START_WINDOW_SIZE_MIDI,
+                state_to_ref_time_map=state_to_ref_time_map,
+                ref_to_state_time_map=ref_to_state_time_map,
+                step_size=STEP_SIZE if self.input_type == "audio" else STEP_SIZE_MIDI,
+                state_space=np.unique(self.score_part.note_array()["onset_beat"])
             )
         elif method == "dixon":
             self.score_follower = OnlineTimeWarpingDixon(
@@ -235,12 +272,29 @@ class Matchmaker(object):
                 # ioi_precision=2,
                 transition_scale=0.05,
             )
+        elif method == "pthmm" and self.input_type == "midi":
+            self.score_follower = PitchHMM(
+                reference_features=self.reference_features,
+                # observation_model=obs_model,
+                queue=self.stream.queue,
+                tempo_model=tempo_model,
+                has_insertions=True,
+                piano_range=piano_range,
+            )
+        elif method == "outerhmm" and self.input_type == "midi":
+            self.score_follower = OuterProductHMM(
+                reference_features=self.reference_features,
+                queue=self.stream.queue,
+                piano_range=piano_range,
+            )
+        else:
+            raise ValueError("Invalid method")
 
     def preprocess_score(self):
         if self.input_type == "audio":
             if self.performance_file is not None:
                 # tempo is slightly adjusted to reflect the tempo of the performance audio
-                self.tempo = adjust_tempo_for_performance_audio(
+                self.tempo = adjust_tempo_for_performance_file(
                     self.score_part, self.performance_file, self.tempo
                 )
 
@@ -252,7 +306,28 @@ class Matchmaker(object):
             reference_features = self.processor(self.score_audio)
             self.reference_features = reference_features
         else:
-            self.reference_features = self.score_part.note_array()
+            if self.method == "arzt":
+                if self.performance_file is not None:
+                    # tempo is slightly adjusted to reflect the tempo of the performance midi
+                    self.tempo = adjust_tempo_for_performance_file(
+                        self.score_part, self.performance_file, self.tempo
+                    )
+                self.ppart = partitura.utils.music.performance_from_part(self.score_part, bpm=self.tempo)
+                self.ppart.sustain_pedal_threshold = 127
+                polling_period = 0.01
+                self.reference_features = (
+                    partitura.utils.music.compute_pianoroll(
+                        note_info=self.ppart,
+                        time_unit="sec",
+                        time_div=int(np.round(1 / polling_period)),
+                        binary=True,
+                        piano_range=True,
+                    )
+                    .toarray()
+                    .T
+                ).astype(np.float32)
+            else:
+                self.reference_features = self.score_part.note_array()
 
     def _convert_frame_to_beat(self, current_frame: int) -> float:
         """
@@ -398,21 +473,21 @@ class Matchmaker(object):
                 f"Length of the annotation changed: {original_perf_annots_length} -> {len(perf_annots_predicted)}"
             )
 
-        if debug:
-            save_debug_results(
-                self.score_file,
-                self.score_audio,
-                score_annots,
-                score_annots_predicted,
-                self.performance_file,
-                perf_annots,
-                perf_annots_predicted,
-                self.score_follower,
-                self.frame_rate,
-                save_dir,
-                run_name,
-            )
-
+        if self.input_type == 'audio':
+            if debug:
+                save_debug_results(
+                    self.score_file,
+                    self.score_audio if self.input_type=="audio" else None,
+                    score_annots,
+                    score_annots_predicted,
+                    self.performance_file,
+                    perf_annots,
+                    perf_annots_predicted,
+                    self.score_follower,
+                    self.frame_rate,
+                    save_dir,
+                    run_name,
+                )
         if in_seconds:
             eval_results = get_evaluation_results(
                 perf_annots,
@@ -434,9 +509,9 @@ class Matchmaker(object):
                 tolerances=tolerances,
                 in_seconds=False,
             )
-
-        latency_results = self.get_latency_stats()
-        eval_results.update(latency_results)
+        if self.input_type == 'audio':
+            latency_results = self.get_latency_stats()
+            eval_results.update(latency_results)
         return eval_results
 
     def run(self, verbose: bool = True, wait: bool = True):
