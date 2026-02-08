@@ -97,6 +97,16 @@
           <line>4</line>
           </clef>
         </attributes>
+      <direction placement="above" system="only-top">
+        <direction-type>
+          <metronome parentheses="no" default-x="-38.52" relative-y="20">
+            <beat-unit>quarter</beat-unit>
+            <per-minute>70</per-minute>
+            </metronome>
+          </direction-type>
+        <staff>1</staff>
+        <sound tempo="70"/>
+        </direction>
       <note id="r1">
         <rest>
           <display-step>A</display-step>
