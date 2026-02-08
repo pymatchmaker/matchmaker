@@ -7,23 +7,146 @@ Miscellaneous utilities
 import csv
 import numbers
 import os
+import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from queue import Empty, Queue
 from typing import Any, Dict, Iterable, List, Optional, Union
 
 import librosa
-import mido
 import numpy as np
 import partitura
 import scipy
 import soundfile as sf
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
-from partitura.io.exportmidi import get_ppq
 from partitura.score import ScoreLike
-from partitura.utils.music import performance_notearray_from_score_notearray
 
 from matchmaker.features.audio import SAMPLE_RATE
+
+# Tempo marking to BPM mapping
+# Reference: https://en.wikipedia.org/wiki/Tempo#Basic_tempo_markings
+TEMPO_MARKING_TO_BPM = {
+    # Very slow (24-40 BPM)
+    "larghissimo": 24,
+    "grave": 30,
+    # Slow (40-66 BPM)
+    "largo": 40,
+    "larghetto": 50,
+    "lento": 60,
+    # Slow-moderate (44-80 BPM)
+    "adagio": 60,
+    "adagietto": 70,
+    # Walking pace (56-108 BPM)
+    "andante": 80,
+    "andantino": 90,
+    # Moderate (86-126 BPM)
+    "moderato": 110,
+    "allegretto": 120,
+    # Fast (100-156 BPM)
+    "allegro": 130,
+    # Very fast (136-200+ BPM)
+    "vivace": 150,
+    "vivacissimo": 170,
+    "presto": 180,
+    "prestissimo": 200,
+}
+
+
+def extract_tempo_marking_from_musicxml(
+    score_file: Union[str, Path],
+) -> Optional[float]:
+    """
+    Extract tempo from text tempo marking (e.g., "Allegro", "Andante") in MusicXML.
+
+    Parses <direction-type><words>...</words></direction-type> elements and
+    matches against known tempo markings. The tempo is adjusted based on the
+    time signature to return quarter-note BPM.
+
+    Handles both simple and compound meters:
+    - Simple meters (2/2, 4/4, etc.): beat is the note indicated by denominator
+    - Compound meters (6/8, 9/8, 12/8): beat is a dotted note (3 subdivisions)
+
+    For example:
+    - 2/2 "Allegro" (130 half notes/min) → 260 quarter-note BPM
+    - 6/8 "Presto" (180 dotted-quarters/min) → 270 quarter-note BPM
+
+    Parameters
+    ----------
+    score_file : str or Path
+        Path to the MusicXML file
+
+    Returns
+    -------
+    float or None
+        Quarter-note BPM based on tempo marking, or None if not found
+    """
+    try:
+        tree = ET.parse(str(score_file))
+        root = tree.getroot()
+
+        # Track current time signature
+        # Default to 4/4 (simple meter, quarter note beat)
+        current_beats = 4
+        current_beat_type = 4
+
+        # Process measures in order to track time signature changes
+        for part in root.iter("part"):
+            for measure in part.iter("measure"):
+                # Check for time signature change in this measure
+                for attributes in measure.iter("attributes"):
+                    for time_elem in attributes.iter("time"):
+                        beats_elem = time_elem.find("beats")
+                        beat_type_elem = time_elem.find("beat-type")
+                        if beats_elem is not None and beats_elem.text:
+                            current_beats = int(beats_elem.text)
+                        if beat_type_elem is not None and beat_type_elem.text:
+                            current_beat_type = int(beat_type_elem.text)
+
+                # Look for tempo marking in this measure
+                for direction in measure.iter("direction"):
+                    for direction_type in direction.iter("direction-type"):
+                        for words in direction_type.iter("words"):
+                            if words.text:
+                                text = words.text.lower().strip()
+                                # Check each tempo marking
+                                for marking, bpm in TEMPO_MARKING_TO_BPM.items():
+                                    # Match if marking appears at the start of the text
+                                    if re.match(rf"^{marking}\b", text):
+                                        # Check if compound meter (6/8, 9/8, 12/8, etc.)
+                                        # Compound meter: numerator divisible by 3 and >= 6
+                                        is_compound = (
+                                            current_beats >= 6
+                                            and current_beats % 3 == 0
+                                        )
+
+                                        if is_compound:
+                                            # Compound meter: beat is dotted note
+                                            # e.g., 6/8: dotted quarter = 3 eighth notes
+                                            # To maintain the same "feel" as simple meter:
+                                            # - In 4/4 "Andante=80": quarter = 0.75s
+                                            # - In 6/8 we want dotted quarter as beat
+                                            # - dotted quarter = 1.5 × quarter
+                                            # - So dotted quarter BPM = quarter BPM / 1.5
+                                            quarter_note_bpm = bpm / 1.5
+                                        else:
+                                            # Simple meter: beat-type indicates beat note
+                                            # Convert to quarter-note BPM
+                                            # beat-type 2 (half note): multiply by 2
+                                            # beat-type 4 (quarter note): no change
+                                            # beat-type 8 (eighth note): divide by 2
+                                            quarter_note_bpm = bpm * (
+                                                4.0 / current_beat_type
+                                            )
+
+                                        return float(quarter_note_bpm)
+
+                # Only process first part to avoid duplicates
+                break
+    except Exception:
+        pass
+
+    return None
 
 
 class MatchmakerInvalidParameterTypeError(Exception):
