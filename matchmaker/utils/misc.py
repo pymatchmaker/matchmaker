@@ -9,7 +9,7 @@ import numbers
 import os
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Any, Dict, Iterable, List, Union
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 import librosa
 import mido
@@ -189,6 +189,114 @@ def interleave_with_constant(
     interleaved_array[1::2] = constant_row
 
     return interleaved_array
+
+
+def get_tempo_from_score(
+    score_part: ScoreLike,
+    score_file: Optional[Union[str, Path]] = None,
+) -> Optional[float]:
+    """
+    Extract first tempo marking from score if available.
+
+    Tries multiple sources in order:
+    1. Partitura Tempo objects (explicit BPM)
+    2. MusicXML <sound tempo="..."/> element (if score_file provided)
+
+    Parameters
+    ----------
+    score_part : ScoreLike
+        Partitura score part
+    score_file : str or Path, optional
+        Path to the score file. Used as fallback to parse MusicXML directly
+        when partitura doesn't extract tempo.
+
+    Returns
+    -------
+    float or None
+        Tempo in BPM if found in score, None otherwise.
+    """
+    # Try partitura Tempo objects first
+    if score_part is not None:
+        try:
+            for tempo_obj in score_part.iter_all(partitura.score.Tempo):
+                if hasattr(tempo_obj, "bpm") and tempo_obj.bpm is not None:
+                    return float(tempo_obj.bpm)
+        except Exception:
+            pass
+
+    # Fallback: parse MusicXML directly for <sound tempo="..."/>
+    if score_file is not None:
+        try:
+            import xml.etree.ElementTree as ET
+
+            tree = ET.parse(str(score_file))
+            root = tree.getroot()
+
+            for sound_elem in root.iter("sound"):
+                tempo_attr = sound_elem.get("tempo")
+                if tempo_attr is not None:
+                    return float(tempo_attr)
+        except Exception:
+            pass
+
+    return None
+
+
+def get_tempo_at_beat(
+    score_part: ScoreLike,
+    beat: float,
+    default_tempo: float = 120.0,
+) -> float:
+    """
+    Get tempo (BPM) at a specific beat position in the score.
+
+    Uses score tempo markings if available. Falls back to default_tempo otherwise.
+
+    Parameters
+    ----------
+    score_part : ScoreLike
+        Partitura score part
+    beat : float
+        Beat position in the score
+    default_tempo : float
+        Default tempo to use if no tempo markings found
+
+    Returns
+    -------
+    float
+        Tempo in BPM at the given beat position
+    """
+    if score_part is None:
+        return default_tempo
+
+    # Collect all tempo markings with their positions
+    tempo_changes = []
+    try:
+        for tempo_obj in score_part.iter_all(partitura.score.Tempo):
+            if hasattr(tempo_obj, "bpm") and tempo_obj.bpm is not None:
+                # Get beat position of tempo marking
+                start_time = getattr(tempo_obj, "start", None)
+                if start_time is not None:
+                    tempo_beat = score_part.beat_map(start_time.t)
+                    tempo_changes.append((tempo_beat, float(tempo_obj.bpm)))
+    except Exception:
+        pass
+
+    if not tempo_changes:
+        return default_tempo
+
+    # Sort by beat position
+    tempo_changes.sort(key=lambda x: x[0])
+
+    # Find the tempo at the given beat (last tempo marking before or at beat)
+    current_tempo = default_tempo
+    for tempo_beat, bpm in tempo_changes:
+        if tempo_beat <= beat:
+            current_tempo = bpm
+        else:
+            break
+
+    return current_tempo
 
 
 def adjust_tempo_for_performance_audio(
