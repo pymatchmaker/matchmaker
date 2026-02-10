@@ -128,7 +128,7 @@ class Matchmaker(object):
 
         # setup feature processor
         if self.feature_type is None:
-            self.feature_type = "chroma" if input_type == "audio" else "pitchclass"
+            self.feature_type = "chroma" if input_type == "audio" else "pitch_ioi"
 
         if self.feature_type == "chroma":
             self.processor = ChromagramProcessor(
@@ -150,7 +150,7 @@ class Matchmaker(object):
             self.processor = LogSpectralEnergyProcessor(
                 sample_rate=sample_rate,
             )
-        elif self.feature_type == "pitchclass":
+        elif self.feature_type == "pitch_ioi":
             self.processor = PitchIOIProcessor(piano_range=True)
         elif self.feature_type == "pianoroll":
             self.processor = PianoRollProcessor(piano_range=True)
