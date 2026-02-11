@@ -63,6 +63,7 @@ def transfer_from_perf_to_predicted_score(wp, perf_annots, frame_rate):
 def get_evaluation_results(
     gt_annots,
     predicted_annots,
+    total_length,
     tolerances=TOLERANCES_IN_MILLISECONDS,
     in_seconds=True,
 ):
@@ -71,24 +72,28 @@ def get_evaluation_results(
     else:
         errors_in_delay = gt_annots - predicted_annots
 
-    absolute_errors_in_delay = np.abs(errors_in_delay)
-    filtered_abs_errors_in_delay = absolute_errors_in_delay[
-        absolute_errors_in_delay <= tolerances[-1]
+    filtered_errors_in_delay = errors_in_delay[
+        np.abs(errors_in_delay) <= tolerances[-1]
     ]
+    filtered_abs_errors_in_delay = np.abs(filtered_errors_in_delay)
 
     results = {
-        "mean": float(f"{np.mean(filtered_abs_errors_in_delay):.4f}"),
-        "median": float(f"{np.median(filtered_abs_errors_in_delay):.4f}"),
-        "std": float(f"{np.std(filtered_abs_errors_in_delay):.4f}"),
-        "skewness": float(f"{scipy.stats.skew(filtered_abs_errors_in_delay):.4f}"),
-        "kurtosis": float(f"{scipy.stats.kurtosis(filtered_abs_errors_in_delay):.4f}"),
+        "mean": float(f"{np.nanmean(filtered_abs_errors_in_delay):.4f}"),
+        "median": float(f"{np.nanmedian(filtered_abs_errors_in_delay):.4f}"),
+        "std": float(f"{np.nanstd(filtered_abs_errors_in_delay):.4f}"),
+        "skewness": float(f"{scipy.stats.skew(filtered_errors_in_delay):.4f}"),
+        "kurtosis": float(f"{scipy.stats.kurtosis(filtered_errors_in_delay):.4f}"),
     }
     for tau in tolerances:
         if in_seconds:
             results[f"{tau}ms"] = float(
-                f"{np.mean(absolute_errors_in_delay <= tau):.4f}"
+                f"{np.sum(np.abs(errors_in_delay) <= tau) / total_length:.4f}"
             )
         else:
-            results[f"{tau}"] = float(f"{np.mean(absolute_errors_in_delay <= tau):.4f}")
+            results[f"{tau}b"] = float(
+                f"{np.sum(np.abs(errors_in_delay) <= tau) / total_length:.4f}"
+            )
     results["count"] = len(filtered_abs_errors_in_delay)
+    pcr_threshold = f"{tolerances[-1]}ms" if in_seconds else f"{tolerances[-1]}b"
+    results["pcr"] = results[f"{pcr_threshold}"]
     return results

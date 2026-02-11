@@ -11,6 +11,7 @@ import numpy as np
 import partitura as pt
 from numpy.typing import NDArray
 from partitura.performance import Performance, PerformanceLike, PerformedPart
+from partitura.score import Part, Score, ScoreLike
 
 
 class Buffer(object):
@@ -452,3 +453,59 @@ def panic_button() -> None:
             print(f"Resetting port {pn}")
             outport.reset()
         outport.close()
+
+
+def get_chords_from_score(
+        score: ScoreLike, 
+        return_unique_onsets: bool = False,
+        return_one_hot: bool = False,
+        ) -> List[any]:
+    """
+    Extract chords from a score-like object.
+    A chord is defined as all notes with the same onset time.
+
+    Parameters
+    ----------
+    score : ScoreLike
+        The score-like object to extract chords from.
+
+    return_unique_onsets : bool
+        If True, also return the unique onset times.
+
+    Returns
+    -------
+    List[any]
+        A list of sets, each containing the MIDI pitches for a chord.
+        If `return_unique_onsets` is True, also returns a list of unique onset times.
+    """
+
+    if isinstance(score, (Score, Part)):
+        note_array = score.note_array()
+
+    if isinstance(score, np.ndarray):
+        note_array = score
+
+        if "onset_beat" not in note_array.dtype.names:
+            raise ValueError("`score` is not a valid note array")
+
+    # This code does not handle ornaments
+    # We are using score-like objects, but we might want to have this to be more general
+
+    unique_onsets = np.unique(note_array["onset_beat"])
+
+    unique_onset_idxs = [
+        np.where(note_array["onset_beat"] == uo)[0] for uo in unique_onsets
+    ]
+
+    chords = [set(note_array["pitch"][ui]) for ui in unique_onset_idxs]
+
+    if return_one_hot:
+        one_hot_chords = np.zeros((len(chords), 128), dtype=int)
+        for chord in chords:
+            one_hot_chords[chords.index(chord), list(chord)] = 1
+        chords = one_hot_chords
+
+    if return_unique_onsets:
+        return chords, unique_onsets
+    else:
+        return chords

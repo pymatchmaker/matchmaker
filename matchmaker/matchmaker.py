@@ -21,6 +21,7 @@ from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import GaussianAudioPitchHMM, PitchIOIHMM
+from matchmaker.prob.particle_filter_midi import ParticleFilterMIDI
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
@@ -42,14 +43,15 @@ DEFAULT_DISTANCE_FUNCS = {
     "arzt": OnlineTimeWarpingArzt.DEFAULT_DISTANCE_FUNC,
     "dixon": OnlineTimeWarpingDixon.DEFAULT_DISTANCE_FUNC,
     "hmm": None,
+    "pf": None,
 }
 
 DEFAULT_METHODS = {
     "audio": "arzt",
-    "midi": "hmm",
+    "midi": "pf",
 }
 
-AVAILABLE_METHODS = ["arzt", "dixon", "hmm"]
+AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pf"]
 
 
 class Matchmaker(object):
@@ -137,8 +139,8 @@ class Matchmaker(object):
             self.processor = MelSpectrogramProcessor(
                 sample_rate=sample_rate,
             )
-        elif self.feature_type == "pitchclass":
-            self.processor = PitchIOIProcessor(piano_range=True)
+        elif self.feature_type == "pitch_ioi":
+            self.processor = PitchIOIProcessor(piano_range=False)
         elif self.feature_type == "pianoroll":
             self.processor = PianoRollProcessor(piano_range=True)
         else:
@@ -215,6 +217,14 @@ class Matchmaker(object):
                 queue=self.stream.queue,
                 state_space=state_space,
                 patience=50,
+            )
+
+        elif method == "pf" and self.input_type == "midi":
+            self.score_follower = ParticleFilterMIDI(
+                num_particles=1000,
+                reference_features=self.reference_features,
+                queue=self.stream.queue,
+                patience=10,
             )
 
     def preprocess_score(self):
