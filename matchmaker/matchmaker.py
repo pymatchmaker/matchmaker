@@ -22,9 +22,6 @@ from matchmaker.features.audio import (
     MFCCProcessor,
 )
 from matchmaker.features.midi import (
-    WINDOW_SIZE_MIDI,
-    START_WINDOW_SIZE_MIDI,
-    STEP_SIZE_MIDI,
     PianoRollProcessor, 
     PitchIOIProcessor,
 )
@@ -36,6 +33,8 @@ from matchmaker.prob.hmm import (
     GaussianAudioPitchTempoHMM,
     PitchIOIHMM,
 )
+from matchmaker.utils.tempo_models import KalmanTempoModel
+
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
@@ -68,6 +67,45 @@ DEFAULT_METHODS = {
 
 AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm", "outerhmm"]
 
+KWARGS = {
+    "audio":
+        {"arzt":
+            {"window_size": 5,
+             "start_window_size": 0.25,
+             "step_size" : 5,
+             },
+        "dixon":
+            {"window_size": 10,
+             },
+        },
+    "midi": 
+        {"arzt": 
+            {"processor": "pianoroll",
+             "piano_range": True,
+             "window_size": 200,
+             "start_window_size": 200,
+             "step_size": 5,
+             },
+        "dixon":
+            {"processor": "pianoroll",
+             "piano_range": True,
+             "window_size": 30,
+             },
+        "hmm": 
+            {"processor": "pitch_ioi",
+             "tempo_model": KalmanTempoModel,
+             "piano_range": True,
+             },
+        "pthmm":
+            {"processor": "pitch_ioi",
+             "piano_range": True,
+             },
+        "outerhmm":
+            {"processor": "pitch_ioi",
+             "piano_range": True,
+             },
+        },
+}
 
 class Matchmaker(object):
     """
@@ -105,6 +143,8 @@ class Matchmaker(object):
         device_name_or_index: Union[str, int] = None,
         sample_rate: int = SAMPLE_RATE,
         frame_rate: int = FRAME_RATE,
+        kwargs = KWARGS,
+        unfold_score = True,
     ):
         self.score_file = str(score_file)
         self.performance_file = (
@@ -123,21 +163,18 @@ class Matchmaker(object):
         self.tempo = DEFAULT_TEMPO  # bpm for quarter note
         self._has_run = False
         self.method = method
+        self.config = kwargs[input_type][method]
 
         # setup score file
         if score_file is None:
             raise ValueError("Score file is required")
 
         try:
-            self.score_part = partitura.load_score_as_part(self.score_file) 
-            # if score_file is an xml file, load_score_as_part() uses load_score() -> load_musicxml() which imports invisible objects (e.g. trills) by default
-            # load_score_part() doesn't support an 'ignore_invisible_objects' parameter yet, thus we have to bypass this issue in the following way:
             # TODO: find a better solution: 
-            unfold = True
             if self.score_file.endswith('musicxml'):
-                self.score_part = partitura.load_musicxml(self.score_file, ignore_invisible_objects=True)
-                if unfold:
-                    self.score_part = partitura.score.unfold_part_maximal(self.score_part).parts[0]
+                self.score_part = partitura.load_musicxml(self.score_file, force_note_ids=True, ignore_invisible_objects=True)
+                if unfold_score:
+                    self.score_part = partitura.score.unfold_part_maximal(self.score_part, ignore_leaps = False).parts[0]
                 else:
                     self.score_part = self.score_part.parts[0]
         except Exception as e:
@@ -228,18 +265,17 @@ class Matchmaker(object):
 
         # setup score follower
         if method == "arzt":
-            alignment = [{"label" : "match", "score_id" : nid, "performance_id": nid} for nid in self.score_part.note_array()["id"]]
-            state_to_ref_time_map, ref_to_state_time_map = get_time_maps_from_alignment(self.ppart.note_array(), self.score_part.note_array(), alignment)
+            state_to_ref_time_map, ref_to_state_time_map = self.get_time_maps()
             self.score_follower = OnlineTimeWarpingArzt(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
                 distance_func=distance_func,
                 frame_rate=self.frame_rate,
-                window_size=WINDOW_SIZE if self.input_type == "audio" else WINDOW_SIZE_MIDI,
-                start_window_size=START_WINDOW_SIZE if self.input_type == "audio" else START_WINDOW_SIZE_MIDI,
+                window_size=self.config["window_size"],
+                start_window_size=self.config["start_window_size"],
                 state_to_ref_time_map=state_to_ref_time_map,
                 ref_to_state_time_map=ref_to_state_time_map,
-                step_size=STEP_SIZE if self.input_type == "audio" else STEP_SIZE_MIDI,
+                step_size=self.config["step_size"],
                 state_space=np.unique(self.score_part.note_array()["onset_beat"])
             )
         elif method == "dixon":
@@ -297,7 +333,8 @@ class Matchmaker(object):
                 self.tempo = adjust_tempo_for_performance_file(
                     self.score_part, self.performance_file, self.tempo
                 )
-
+            self.ppart = partitura.utils.music.performance_from_part(self.score_part, bpm=self.tempo) # needed for time maps
+            self.ppart.sustain_pedal_threshold = 127
             # generate score audio
             self.score_audio = generate_score_audio(
                 self.score_part, self.tempo, SAMPLE_RATE
@@ -328,6 +365,10 @@ class Matchmaker(object):
                 ).astype(np.float32)
             else:
                 self.reference_features = self.score_part.note_array()
+
+    def get_time_maps(self):
+        alignment = [{"label" : "match", "score_id" : nid, "performance_id": nid} for nid in self.score_part.note_array()["id"]]
+        return get_time_maps_from_alignment(self.ppart.note_array(), self.score_part.note_array(), alignment)
 
     def _convert_frame_to_beat(self, current_frame: int) -> float:
         """
