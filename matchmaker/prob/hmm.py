@@ -185,7 +185,6 @@ class PitchHMM(OnlineAlignment, BaseHMM):
         self,
         reference_features: np.ndarray,  # snote_array
         queue: Optional[RECVQueue] = None,
-        tempo_model: TempoModel = None,
         transition_model: Optional[TransitionModel] = None,
         observation_model: Optional[ObservationModel] = None,
         transition_matrix: Optional[NDArrayFloat] = None,

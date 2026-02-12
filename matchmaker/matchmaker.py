@@ -1,11 +1,11 @@
-import csv
 import os
-from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
 
 import partitura
+from partitura.io.exportmidi import get_ppq
+
 from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
 from matchmaker.features.audio import (
     FRAME_RATE,
@@ -41,15 +41,8 @@ from matchmaker.utils.misc import (
     is_midi_file,
     save_debug_results,
 )
-from matchmaker.utils.tempo_models import (
-    KalmanTempoModel,
-    LinearTempoModel,
-    MovingAverageTempoModel,
-    ReactiveTempoModel,
-    TempoModel,
-)
+from matchmaker.utils.tempo_models import KalmanTempoModel
 
-from partitura.io.exportmidi import get_ppq
 
 PathLike = Union[str, bytes, os.PathLike]
 DEFAULT_TEMPO = 120
@@ -68,6 +61,37 @@ DEFAULT_METHODS = {
 
 AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm", "outerhmm"]
 
+KWARGS = {
+    "audio":
+        {"dixon":
+            {"window_size": 10,
+             }
+        },
+    "midi": 
+        {"arzt": 
+            {"processor": "pianoroll",
+             "piano_range": True,
+             },
+        "dixon":
+            {"processor": "pianoroll",
+             "piano_range": True,
+             "window_size": 30,
+             },
+        "hmm": 
+            {"processor": "pitch_ioi",
+             "tempo_model": KalmanTempoModel,
+             "piano_range": True,
+             },
+        "pthmm":
+            {"processor": "pitch_ioi",
+             "piano_range": True,
+             },
+        "outerhmm":
+            {"processor": "pitch_ioi",
+             "piano_range": True,
+             },
+        },
+}
 
 class Matchmaker(object):
     """
@@ -105,9 +129,8 @@ class Matchmaker(object):
         device_name_or_index: Union[str, int] = None,
         sample_rate: int = SAMPLE_RATE,
         frame_rate: int = FRAME_RATE,
-        tempo_model = KalmanTempoModel,
-        piano_range: bool = True,
-        unfold = True
+        kwargs = KWARGS,
+        unfold_score = True
     ):
         self.score_file = str(score_file)
         self.performance_file = (
@@ -126,20 +149,18 @@ class Matchmaker(object):
         self.tempo = DEFAULT_TEMPO  # bpm for quarter note
         self._has_run = False
         self.method = method
+        self.config = kwargs[input_type][method]
 
         # setup score file
         if score_file is None:
             raise ValueError("Score file is required")
 
         try:
-            self.score_part = partitura.load_score_as_part(self.score_file) 
-            # if score_file is an xml file, load_score_as_part() uses load_score() -> load_musicxml() which imports invisible objects (e.g. trills) by default
-            # load_score_part() doesn't support an 'ignore_invisible_objects' parameter yet, thus we have to bypass this issue in the following way:
             # TODO: find a better solution: 
             if self.score_file.endswith('musicxml'):
                 self.score_part = partitura.load_musicxml(self.score_file, ignore_invisible_objects=True)
-                if unfold:
-                    self.score_part = partitura.score.unfold_part_maximal(self.score_part).parts[0]
+                if unfold_score:
+                    self.score_part = partitura.score.unfold_part_maximal(self.score_part, ignore_leaps = False).parts[0]
                 else:
                     self.score_part = self.score_part.parts[0]
         except Exception as e:
@@ -170,11 +191,11 @@ class Matchmaker(object):
                 sample_rate=sample_rate,
             )
         elif self.feature_type == "pitch_ioi":
-            self.processor = PitchIOIProcessor(piano_range=piano_range)
+            self.processor = PitchIOIProcessor(piano_range=self.config["piano_range"])
         elif self.feature_type == "pitchclass":    
             self.processor = PitchClassPianoRollProcessor()
         elif self.feature_type == "pianoroll":
-            self.processor = PianoRollProcessor(piano_range=piano_range)
+            self.processor = PianoRollProcessor(piano_range=self.config["piano_range"])
         else:
             raise ValueError("Invalid feature type")
 
@@ -247,9 +268,9 @@ class Matchmaker(object):
             self.score_follower = PitchIOIHMM(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
-                tempo_model=tempo_model,
+                tempo_model=self.config["tempo_model"],
                 has_insertions=True,
-                piano_range=piano_range,
+                piano_range=self.config["piano_range"],
             )
 
         elif method == "hmm" and self.input_type == "audio":
@@ -274,15 +295,14 @@ class Matchmaker(object):
                 reference_features=self.reference_features,
                 # observation_model=obs_model,
                 queue=self.stream.queue,
-                tempo_model=tempo_model,
                 has_insertions=True,
-                piano_range=piano_range,
+                piano_range=self.config["piano_range"],
             )
         elif method == "outerhmm" and self.input_type == "midi":
             self.score_follower = OuterProductHMM(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
-                piano_range=piano_range,
+                piano_range=self.config["piano_range"],
             )
         else:
             raise ValueError("Invalid method")
