@@ -5,6 +5,7 @@ import numpy as np
 import partitura
 from partitura.io.exportmidi import get_ppq
 from partitura.score import Part
+from partitura.musicanalysis.performance_codec import get_time_maps_from_alignment
 
 from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
 from matchmaker.features.audio import (
@@ -24,6 +25,8 @@ from matchmaker.prob.hmm import (
     GaussianAudioPitchTempoHMM,
     PitchIOIHMM,
 )
+from matchmaker.utils.tempo_models import KalmanTempoModel
+
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
@@ -32,7 +35,7 @@ from matchmaker.utils.eval import (
     transfer_from_score_to_predicted_perf,
 )
 from matchmaker.utils.misc import (
-    adjust_tempo_for_performance_audio,
+    adjust_tempo_for_performance_file,
     generate_score_audio,
     get_tempo_from_score,
     is_audio_file,
@@ -55,6 +58,37 @@ DEFAULT_METHODS = {
 
 AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm"]
 
+KWARGS = {
+    "audio":
+        {"dixon":
+            {"window_size": 10,
+             }
+        },
+    "midi": 
+        {"arzt": 
+            {"processor": "pianoroll",
+             "piano_range": True,
+             },
+        "dixon":
+            {"processor": "pianoroll",
+             "piano_range": True,
+             "window_size": 30,
+             },
+        "hmm": 
+            {"processor": "pitch_ioi",
+             "tempo_model": KalmanTempoModel,
+             "piano_range": True,
+             },
+        "pthmm":
+            {"processor": "pitch_ioi",
+             "piano_range": True,
+             },
+        "outerhmm":
+            {"processor": "pitch_ioi",
+             "piano_range": True,
+             },
+        },
+}
 
 class Matchmaker(object):
     """
@@ -100,6 +134,8 @@ class Matchmaker(object):
         frame_rate: int = FRAME_RATE,
         tempo: Optional[float] = None,
         adjust_tempo: bool = False,
+        kwargs = KWARGS,
+        unfold_score = True,
     ):
         self.score_file = str(score_file)
         self.performance_file = (
@@ -107,7 +143,7 @@ class Matchmaker(object):
         )
         self.input_type = input_type
         self.feature_type = feature_type
-        self.frame_rate = frame_rate
+        self.frame_rate = frame_rate if input_type == "audio" else 1
         self.score_part: Optional[Part] = None
         self.distance_func = distance_func
         self.device_name_or_index = device_name_or_index
@@ -118,14 +154,20 @@ class Matchmaker(object):
         self._has_run = False
         self.method = method
         self.adjust_tempo = adjust_tempo
+        self.config = kwargs[input_type][method]
 
         # setup score file
         if score_file is None:
             raise ValueError("Score file is required")
 
         try:
-            self.score_part = partitura.load_score_as_part(self.score_file)
-
+            # TODO: find a better solution: 
+            if self.score_file.endswith('musicxml'):
+                self.score_part = partitura.load_musicxml(self.score_file, force_note_ids=True, ignore_invisible_objects=True)
+                if unfold_score:
+                    self.score_part = partitura.score.unfold_part_maximal(self.score_part, ignore_leaps = False).parts[0]
+                else:
+                    self.score_part = self.score_part.parts[0]
         except Exception as e:
             raise ValueError(f"Invalid score file: {e}")
 
@@ -141,7 +183,7 @@ class Matchmaker(object):
 
         # setup feature processor
         if self.feature_type is None:
-            self.feature_type = "chroma" if input_type == "audio" else "pitchclass"
+            self.feature_type = "chroma" if input_type == "audio" else "pitch_ioi"
 
         if self.feature_type == "chroma":
             self.processor = ChromagramProcessor(
@@ -163,7 +205,7 @@ class Matchmaker(object):
             self.processor = LogSpectralEnergyProcessor(
                 sample_rate=sample_rate,
             )
-        elif self.feature_type == "pitchclass":
+        elif self.feature_type == "pitch_ioi":
             self.processor = PitchIOIProcessor(piano_range=True)
         elif self.feature_type == "pianoroll":
             self.processor = PianoRollProcessor(piano_range=True)
@@ -222,11 +264,16 @@ class Matchmaker(object):
                 frame_rate=self.frame_rate,
             )
         elif method == "dixon":
+            state_to_ref_time_map, ref_to_state_time_map = self.get_time_maps()
             self.score_follower = OnlineTimeWarpingDixon(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
                 distance_func=distance_func,
                 frame_rate=self.frame_rate,
+                window_size=self.config["window_size"],
+                state_to_ref_time_map=state_to_ref_time_map,
+                ref_to_state_time_map=ref_to_state_time_map,
+                state_space=np.unique(self.score_part.note_array()["onset_beat"])
             )
         elif method == "hmm" and self.input_type == "midi":
             self.score_follower = PitchIOIHMM(
@@ -256,10 +303,11 @@ class Matchmaker(object):
         if self.input_type == "audio":
             # Adjust tempo based on performance audio if requested
             if self.adjust_tempo and self.performance_file is not None:
-                self.tempo = adjust_tempo_for_performance_audio(
+                self.tempo = adjust_tempo_for_performance_file(
                     self.score_part, self.performance_file, self.tempo
                 )
-
+            self.ppart = partitura.utils.music.performance_from_part(self.score_part, bpm=self.tempo) # needed for time maps
+            self.ppart.sustain_pedal_threshold = 127
             # generate score audio
             self.score_audio = generate_score_audio(
                 self.score_part, self.tempo, SAMPLE_RATE
@@ -269,7 +317,32 @@ class Matchmaker(object):
             self.reference_features = reference_features
             self.processor.reset()
         else:
-            self.reference_features = self.score_part.note_array()
+            if self.method in ["arzt", "dixon"]:
+                if self.performance_file is not None:
+                    # tempo is slightly adjusted to reflect the tempo of the performance midi
+                    self.tempo = adjust_tempo_for_performance_file(
+                        self.score_part, self.performance_file, self.tempo
+                    )
+                self.ppart = partitura.utils.music.performance_from_part(self.score_part, bpm=self.tempo)
+                self.ppart.sustain_pedal_threshold = 127
+                polling_period = 0.01
+                self.reference_features = (
+                    partitura.utils.music.compute_pianoroll(
+                        note_info=self.ppart,
+                        time_unit="sec",
+                        time_div=int(np.round(1 / polling_period)),
+                        binary=True,
+                        piano_range=True,
+                    )
+                    .toarray()
+                    .T
+                ).astype(np.float32)
+            else:
+                self.reference_features = self.score_part.note_array()
+
+    def get_time_maps(self):
+        alignment = [{"label" : "match", "score_id" : nid, "performance_id": nid} for nid in self.score_part.note_array()["id"]]
+        return get_time_maps_from_alignment(self.ppart.note_array(), self.score_part.note_array(), alignment)
 
     def _convert_frame_to_beat(self, current_frame: int) -> float:
         """
@@ -419,7 +492,7 @@ class Matchmaker(object):
                 f"Length of the annotation changed: {original_perf_annots_length} -> {len(perf_annots_predicted)}"
             )
 
-        if debug:
+        if debug and self.input_type == "audio":
             save_debug_results(
                 self.score_file,
                 self.score_audio,
