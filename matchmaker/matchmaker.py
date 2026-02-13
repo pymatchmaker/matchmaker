@@ -22,6 +22,7 @@ from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import GaussianAudioPitchHMM, PitchIOIHMM
 from matchmaker.prob.particle_filter_midi import ParticleFilterMIDI
+from matchmaker.prob.particle_filter_audio import ParticleFilterAudio
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
@@ -227,6 +228,19 @@ class Matchmaker(object):
                 patience=10,
             )
 
+        elif method == "pf" and self.input_type == "audio":
+            state_space = self._convert_frame_to_beat(np.arange(len(self.reference_features)))
+            score_boundaries = self.get_score_onsets_in_beats(self.score_part)
+            self.score_follower = ParticleFilterAudio(
+                reference_features=self.reference_features,
+                score_beats=state_space,
+                score_boundaries=score_boundaries,
+                notated_tempo=self.tempo,
+                hop_size=1.0 / self.frame_rate,
+                queue=self.stream.queue,
+                num_particles=1000
+            )
+
     def preprocess_score(self):
         if self.input_type == "audio":
             if self.performance_file is not None:
@@ -263,6 +277,24 @@ class Matchmaker(object):
             decimals=2,
         )
         return beat_position
+    
+    def get_score_onsets_in_beats(self, score_part: Part) -> np.ndarray:
+        """
+        Get the beat positions of note onsets in the score.
+
+        Parameters
+        ----------
+        score_part : Part
+            Partitura Part object representing the score
+
+        Returns
+        -------
+        np.ndarray
+            Array of beat positions corresponding to note onsets
+        """
+        note_array = score_part.note_array()
+        onset_beats = note_array["onset_beat"]
+        return np.unique(onset_beats)
 
     def run(self, verbose: bool = True, wait: bool = True):
         """

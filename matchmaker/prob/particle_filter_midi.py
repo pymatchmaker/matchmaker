@@ -27,6 +27,7 @@ class ParticleFilterMIDI(OnlineAlignment):
             reference_features: np.ndarray,
             init_tempo: float = 120.0,
             tempo_std: float = 5.0,
+            beat_std: float = 0.0625,
             queue: Optional[RECVQueue] = None,
             other_prob: float = 1e-6,
             patience: int = 10
@@ -37,13 +38,16 @@ class ParticleFilterMIDI(OnlineAlignment):
             reference_features: Note array or score like object.
             init_tempo: Initial tempo in BPM for the particles.
             tempo_std: Standard deviation for tempo noise.
+            beat_std: Standard deviation for beat noise.
             queue: Optional queue for receiving real-time performance features.
             other_prob: Small probability for unseen events in likelihood calculation.
         """
         self.num_particles = num_particles
         self.reference_features = reference_features
         self.init_tempo = init_tempo
+        self.current_tempo = init_tempo
         self.tempo_std = tempo_std
+        self.beat_std = beat_std
         self.other_prob = other_prob
         OnlineAlignment.__init__(
             self,
@@ -66,7 +70,7 @@ class ParticleFilterMIDI(OnlineAlignment):
         self._current_chord = np.zeros(128, dtype=int)
 
         self.particles = np.zeros((self.num_particles, 2))
-        self.particles[:, 0] = np.zeros(self.num_particles)  # Initial position (time)
+        self.particles[:, 0] = RNG.uniform(0, 1, self.num_particles)  # Initialize positions uniformly across states
         self.particles[:, 1] = RNG.normal(self.init_tempo, self.tempo_std, self.num_particles)
 
         self.weights = np.ones(self.num_particles) / self.num_particles
@@ -93,22 +97,25 @@ class ParticleFilterMIDI(OnlineAlignment):
     def predict(self, ioi: float):
         # Update particle states based on their tempo
         beats_step = self.seconds_to_beats(ioi, self.particles[:, 1])
-        step_noise = RNG.normal(0, self.tempo_std, self.num_particles)
+        step_noise = RNG.normal(0, self.beat_std, self.num_particles)
         self.particles[:, 0] += beats_step + step_noise
+        self.particles[:, 0] = np.minimum(self.particles[:, 0], self.n_states - 1)  # Ensure particles don't go beyond the last state
 
     def pitch_likelihood(
             self, 
             pitch: np.ndarray, 
             pitch_profile: np.ndarray) -> NDArrayFloat:
-        # Simple likelihood based on pitch profile matching
-        # Assuming pitch and pitch_profile are binary vectors indicating active pitches
-        pitch_prob = compute_bernoulli_pitch_probabilities(pitch, pitch_profile)
-        print(len(pitch_prob))
+        pitch_prob = (pitch_profile**pitch) * ((1 - pitch_profile) ** (1 - pitch))
+        pitch_prob = np.prod(pitch_prob)
+        pitch_prob = max(pitch_prob, self.other_prob)  # Avoid zero probability
         return pitch_prob
         
     def timing_likelihood(self, ioi: float, idx: int):
         beat_diff = abs(self.state_space[idx] - self.state_space[idx - 1])
-        expected_ioi = self.beats_to_seconds(beat_diff, self.init_tempo)
+        expected_ioi = self.beats_to_seconds(beat_diff, self.current_tempo)
+        tempo_estimate = 60.0 * beat_diff / max(ioi, 1e-6)
+        alpha = 0.2
+        self.particles[:, 1] += alpha * (tempo_estimate - self.particles[:, 1])  # Update tempo estimates
         return np.exp(-0.5 * ((ioi - expected_ioi) / self.tempo_std) ** 2)
     
     def update(self, pitch: np.ndarray, ioi: float):
@@ -117,8 +124,13 @@ class ParticleFilterMIDI(OnlineAlignment):
         for i in range(self.num_particles):
             # Find the closest state index for the particle's position
             idx = np.argmin(np.abs(self.state_space - self.particles[i, 0]))
-            pitch_likelihood = self.pitch_likelihood(pitch, self.pitch_profiles)
-            timing_likelihood = self.timing_likelihood(ioi, idx)
+            pitch_likelihood = self.pitch_likelihood(pitch, self.pitch_profiles[idx])
+            if idx == 0:
+                # If we're at the first state, we can't compute timing likelihood based on previous state
+                timing_likelihood = 1.0
+            else:
+                timing_likelihood = self.timing_likelihood(ioi, idx)
+            
             likelihoods[i] = pitch_likelihood * timing_likelihood
         
         # Update weights
@@ -136,14 +148,16 @@ class ParticleFilterMIDI(OnlineAlignment):
         self.predict(ioi)
         self.update(pitch, ioi)
         self.resample()
-        self._current_position = min(float(np.median(self.particles[:, 0])), self.n_states - 1)  # Ensure we don't go beyond the last state
+        self._current_position_in_beats = min((np.median(self.particles[:, 0])), self.n_states - 1)  # Ensure we don't go beyond the last state
+        # Map the current position in beats to the corresponding state index
+        self._current_position = np.argmin(np.abs(self.state_space - self._current_position_in_beats))
         return self._current_position  # Return median position as current alignment estimate
     
     def __call__(
             self, 
             input: tuple[np.ndarray, float],
             *args, **kwargs
-            ) -> float:
+            ) -> int:
         pitch, ioi = input
         
         if ioi < IOI_THRESHOLD: 
@@ -158,7 +172,7 @@ class ParticleFilterMIDI(OnlineAlignment):
     def run(
             self, 
             verbose: bool = True,
-            ) -> NDArrayFloat:
+            ) -> NDArrayInt:
         same_state_counter = 0
         if verbose:
             pbar = progressbar.ProgressBar(
@@ -171,7 +185,7 @@ class ParticleFilterMIDI(OnlineAlignment):
 
             queue_input = self.queue.get()
             if queue_input is not None:
-                self.current_state = round(self(queue_input))
+                self.current_state = self(queue_input)
                 print(f"Current state: {self.current_state}")
                 if self.current_state == prev_state:
                     if same_state_counter < self.patience:
