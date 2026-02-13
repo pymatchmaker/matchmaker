@@ -33,6 +33,7 @@ dependencies = [
     "numpy>=1.26.3,<2.0",
     "scipy>=1.11.4,<1.15",
     "librosa>=0.10.1",
+    "pandas>=2.0.0",
     "partitura>=1.7.0",
     "progressbar2>=4.2.0",
     "python-hiddenmarkov>=0.1.3",
