@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Optional, Union
 
 import numpy as np
@@ -47,6 +48,8 @@ from matchmaker.utils.tempo_models import KalmanTempoModel
 from partitura.io.exportmidi import get_ppq
 from partitura.score import Part
 
+sys.setrecursionlimit(10_000)
+
 PathLike = Union[str, bytes, os.PathLike]
 DEFAULT_TEMPO = 120
 DEFAULT_DISTANCE_FUNCS = {
@@ -68,7 +71,8 @@ KWARGS = {
     "audio": {
         "dixon": {
             "window_size": 10,
-        }
+        },
+        "arzt": {},
     },
     "midi": {
         "arzt": {
@@ -148,6 +152,9 @@ class Matchmaker(object):
         self.performance_file = (
             str(performance_file) if performance_file is not None else None
         )
+
+        # if input_type not in ("audio", "midi"):
+        #     raise ValueError(f"Invalid input_type {input_type}")
         self.input_type = input_type
         self.feature_type = feature_type
         self.frame_rate = frame_rate
@@ -159,8 +166,16 @@ class Matchmaker(object):
         self.score_follower = None
         self.reference_features = None
         self._has_run = False
+
+        if method is None:
+            # set a default method
+            method = DEFAULT_METHODS[self.input_type]
         self.method = method
-        self.config = kwargs[input_type][method]
+
+        try:
+            self.config = kwargs[input_type][method]
+        except KeyError:
+            raise ValueError(f"Invalid method {method}")
         self.adjust_tempo = adjust_tempo
 
         # setup score file
