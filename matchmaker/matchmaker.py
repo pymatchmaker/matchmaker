@@ -16,7 +16,11 @@ from matchmaker.features.audio import (
     MelSpectrogramProcessor,
     MFCCProcessor,
 )
-from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
+from matchmaker.features.midi import (
+    PianoRollProcessor,
+    PitchClassPianoRollProcessor,
+    PitchIOIProcessor,
+)
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import (
@@ -154,8 +158,10 @@ class Matchmaker(object):
             self.processor = PitchIOIProcessor(piano_range=True)
         elif self.feature_type == "pianoroll":
             self.processor = PianoRollProcessor(piano_range=True)
+        elif self.feature_type == "pitchclass":
+            self.processor = PitchClassPianoRollProcessor()
         else:
-            raise ValueError("Invalid feature type")
+            raise ValueError(f"Invalid feature type `{self.feature_type}`")
 
         # validate performance file and input_type
         if self.performance_file is not None:
@@ -178,7 +184,7 @@ class Matchmaker(object):
                 wait=wait,
                 target_sr=SAMPLE_RATE,
             )
-        if self.input_type == "midi" and method == "outerhmm":
+        elif self.input_type == "midi" and method == "outerhmm":
             self.stream = MidiStream(
                 processor=self.processor,
                 port=self.device_name_or_index,
@@ -192,7 +198,7 @@ class Matchmaker(object):
                 file_path=self.performance_file,
             )
         else:
-            raise ValueError("Invalid input type")
+            raise ValueError(f"Invalid input type {self.input_type}")
 
         # preprocess score (setting reference features, tempo)
         self.preprocess_score()

@@ -13,6 +13,7 @@ from matchmaker.features.midi import PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
+from matchmaker.prob.outer_product_hmm import OuterProductHMM
 
 warnings.filterwarnings("ignore", module="partitura")
 warnings.filterwarnings("ignore", module="librosa")
@@ -279,7 +280,7 @@ class TestMatchmaker(unittest.TestCase):
 
         # Then: the Matchmaker instance should be correctly initialized
         self.assertIsInstance(mm.stream, MidiStream)
-        self.assertIsInstance(mm.score_follower, PitchIOIHMM)
+        self.assertIsInstance(mm.score_follower, OuterProductHMM)
         self.assertIsInstance(mm.processor, PitchIOIProcessor)
 
     def test_matchmaker_midi_run(self):
