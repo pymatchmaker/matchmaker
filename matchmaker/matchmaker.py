@@ -22,7 +22,6 @@ from matchmaker.features.midi import (
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import (
-    CosineExpGaussianAudioPitchTempoObservationModel,
     GaussianAudioPitchHMM,
     GaussianAudioPitchTempoHMM,
     PitchHMM,
@@ -39,6 +38,7 @@ from matchmaker.utils.eval import (
 from matchmaker.utils.misc import (
     adjust_tempo_for_performance_audio,
     generate_score_audio,
+    get_tempo_from_score,
     is_audio_file,
     is_midi_file,
     save_debug_results,
@@ -118,6 +118,12 @@ class Matchmaker(object):
     device_name_or_index : Union[str, int]
         Name or index of the audio device to be used.
         Ignored if `file_path` is given.
+    tempo : float, optional
+        Tempo in BPM. If None, reads from score; if score has no tempo marking,
+        defaults to 120 BPM.
+    adjust_tempo : bool (default: False)
+        If True and performance_file is provided, adjusts tempo based on
+        performance audio analysis. Applies to all methods.
 
     """
 
@@ -135,6 +141,8 @@ class Matchmaker(object):
         frame_rate: int = FRAME_RATE,
         kwargs=KWARGS,
         unfold_score=True,
+        tempo: Optional[float] = None,
+        adjust_tempo: bool = False,
     ):
         self.score_file = str(score_file)
         self.performance_file = (
@@ -150,10 +158,10 @@ class Matchmaker(object):
         self.stream = None
         self.score_follower = None
         self.reference_features = None
-        self.tempo = DEFAULT_TEMPO  # bpm for quarter note
         self._has_run = False
         self.method = method
         self.config = kwargs[input_type][method]
+        self.adjust_tempo = adjust_tempo
 
         # setup score file
         if score_file is None:
@@ -173,6 +181,16 @@ class Matchmaker(object):
                     self.score_part = self.score_part.parts[0]
         except Exception as e:
             raise ValueError(f"Invalid score file: {e}")
+
+        # Set tempo: user-provided > score marking > default (120 BPM)
+        # _user_specified_tempo: if True, use uniform tempo; if False, use score tempo map
+        if tempo is not None:
+            self.tempo = float(tempo)
+            self._user_specified_tempo = True
+        else:
+            self._user_specified_tempo = False
+            score_tempo = get_tempo_from_score(self.score_part, self.score_file)
+            self.tempo = score_tempo if score_tempo is not None else DEFAULT_TEMPO
 
         # setup feature processor
         if self.feature_type is None:
@@ -317,10 +335,10 @@ class Matchmaker(object):
 
     def preprocess_score(self):
         if self.input_type == "audio":
-            if self.performance_file is not None:
-                # tempo is slightly adjusted to reflect the tempo of the performance audio
+            # Adjust tempo based on performance audio if requested
+            if self.adjust_tempo and self.performance_file is not None:
                 self.tempo = adjust_tempo_for_performance_audio(
-                    self.score_part, self.performance_file
+                    self.score_part, self.performance_file, self.tempo
                 )
 
             # generate score audio
