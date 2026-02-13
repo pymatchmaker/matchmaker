@@ -146,8 +146,6 @@ class Matchmaker(object):
         device_name_or_index: Union[str, int] = None,
         sample_rate: int = SAMPLE_RATE,
         frame_rate: int = FRAME_RATE,
-        kwargs=KWARGS,
-        unfold_score=True,
         tempo: Optional[float] = None,
         adjust_tempo: bool = False,
         kwargs = KWARGS,
