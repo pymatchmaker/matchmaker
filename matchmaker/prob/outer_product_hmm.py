@@ -1,9 +1,10 @@
 from typing import List, Optional
-from numpy.typing import NDArray
 
 import progressbar
-from matchmaker.utils.misc import RECVQueue
+from numpy.typing import NDArray
+
 from matchmaker.base import OnlineAlignment
+from matchmaker.utils.misc import RECVQueue
 
 try:
     # import the compiled function (name depends on your .pyx)
@@ -43,8 +44,8 @@ IOI_THRESHOLD = 0.035  # seconds
 
 
 def compute_OuterProductHMM_pitch_probabilities(
-    chords: List[set], 
-    pitch_error_probs: dict = None, 
+    chords: List[set],
+    pitch_error_probs: dict = None,
     other_prob: float = 1e-6,
 ) -> NDArrayFloat:
     """
@@ -54,7 +55,7 @@ def compute_OuterProductHMM_pitch_probabilities(
     Parameters
     ----------
     chords : list of sets
-        chords[i] contains MIDI pitches (0–127) for score chord at state i. 
+        chords[i] contains MIDI pitches (0–127) for score chord at state i.
         A chord is defined as all notes with the same onset time.
     pitch_error_probs : dict or None
         If None, uses DEFAULT_PITCH_ERROR_PROBS. These are the probabilities assigned to different pitch error categories.
@@ -118,9 +119,9 @@ def compute_OuterProductHMM_pitch_probabilities(
 
 
 def get_chords_from_score(
-        score: ScoreLike, 
-        return_unique_onsets: bool = False,
-        ) -> List[set]:
+    score: ScoreLike,
+    return_unique_onsets: bool = False,
+) -> List[set]:
     """
     Extract chords from a score-like object.
     A chord is defined as all notes with the same onset time.
@@ -166,12 +167,11 @@ def get_chords_from_score(
 
 
 def compute_transition_matrix(
-        N: int, 
-        transitions: list[tuple[int, float]] = None, 
-        D1: int = DEFAULT_D1, 
-        D2: int = DEFAULT_D2,
-        ) -> tuple[NDArrayFloat, int, int]:
-    
+    N: int,
+    transitions: list[tuple[int, float]] = None,
+    D1: int = DEFAULT_D1,
+    D2: int = DEFAULT_D2,
+) -> tuple[NDArrayFloat, int, int]:
     """
     Construct banded transition matrix (α) from transition deltas and probabilities.
 
@@ -205,7 +205,7 @@ def compute_transition_matrix(
     return alpha, D1, D2
 
 
-class OuterProductHMM:
+class OuterProductHMM(OnlineAlignment):
     def __init__(
         self,
         reference_features: np.ndarray,
@@ -229,15 +229,15 @@ class OuterProductHMM:
             Queue for receiving incoming observations
 
         pitch_error_probs : dict or None
-            If None, uses DEFAULT_PITCH_ERROR_PROBS.   
+            If None, uses DEFAULT_PITCH_ERROR_PROBS.
 
         transitions : list of (delta, prob), optional
             If None, uses DEFAULT_TRANSITIONS.
-            
+
         S, r : 1D arrays or None (skip-from and skip-to)
             If None, uniform distributions are used.
 
-        other_prob : float 
+        other_prob : float
             Small prob for unmodelled pitches
 
         """
@@ -249,19 +249,35 @@ class OuterProductHMM:
         )
 
         self.queue = queue
-        chords, unique_onsets = get_chords_from_score(self.reference_features, return_unique_onsets=True)
+        chords, unique_onsets = get_chords_from_score(
+            self.reference_features, return_unique_onsets=True
+        )
         self.n_states = len(chords)
         self.state_space = unique_onsets
-        self.transitions = transitions if transitions is not None else DEFAULT_TRANSITIONS
+        self.transitions = (
+            transitions if transitions is not None else DEFAULT_TRANSITIONS
+        )
         self.pitch_error_probs = (
-            pitch_error_probs if pitch_error_probs is not None else DEFAULT_PITCH_ERROR_PROBS
+            pitch_error_probs
+            if pitch_error_probs is not None
+            else DEFAULT_PITCH_ERROR_PROBS
         )
         self.other_prob = other_prob
 
         # Transition setup
-        self.alpha, self.D1, self.D2 = compute_transition_matrix(self.n_states, self.transitions)
-        self.S = np.ones(self.n_states) / self.n_states if S is None else np.array(S, dtype=float)
-        self.r = np.ones(self.n_states) / self.n_states if r is None else np.array(r, dtype=float)
+        self.alpha, self.D1, self.D2 = compute_transition_matrix(
+            self.n_states, self.transitions
+        )
+        self.S = (
+            np.ones(self.n_states) / self.n_states
+            if S is None
+            else np.array(S, dtype=float)
+        )
+        self.r = (
+            np.ones(self.n_states) / self.n_states
+            if r is None
+            else np.array(r, dtype=float)
+        )
 
         # Emission setup
         self.b_table = compute_OuterProductHMM_pitch_probabilities(
@@ -275,11 +291,10 @@ class OuterProductHMM:
         self.state_probabilities = np.ones(self.n_states) / self.n_states
         self.is_first_observation = True
 
-
     @property
     def warping_path(self) -> NDArrayInt:
         return (np.array(self._warping_path).T).astype(np.int32)
-    
+
     def is_still_following(self) -> bool:
         if self.current_state is not None:
             return self.current_state <= self.n_states - 1
@@ -287,10 +302,8 @@ class OuterProductHMM:
         return False
 
     def __call__(
-            self, 
-            input: tuple[np.ndarray, float],
-            *args, **kwargs
-            ) -> Optional[int]:
+        self, input: tuple[np.ndarray, float], *args, **kwargs
+    ) -> Optional[int]:
         pitch_obs, ioi = input
 
         if ioi < IOI_THRESHOLD:
@@ -305,12 +318,12 @@ class OuterProductHMM:
             self._warping_path.append(self.current_state)
 
             return self.current_state
-    
+
     # Observation likelihood
     def compute_obs_likelihood(
-            self, 
-            observation: np.ndarray,
-            ) -> NDArrayFloat:
+        self,
+        observation: np.ndarray,
+    ) -> NDArrayFloat:
         """
         Given observed MIDI pitches, return likelihood vector b[i].
 
@@ -329,10 +342,10 @@ class OuterProductHMM:
 
     # Viterbi update
     def viterbi_step(
-            self, 
-            prev_probs: NDArrayFloat, 
-            observation: NDArrayFloat,
-            ) -> NDArrayFloat:
+        self,
+        prev_probs: NDArrayFloat,
+        observation: NDArrayFloat,
+    ) -> NDArrayFloat:
         """
         This function performs a fast outer-product Viterbi update.
         Parameters
@@ -363,7 +376,7 @@ class OuterProductHMM:
             # Call cython function and return its result
             # viterbi_step_cy(prev, alpha, S, r, b, D1, D2) -> numpy array
             new_probs = viterbi_step_cy(prev, alpha, S, r, b_cy, D1, D2)
-            
+
             return new_probs
 
         skip_values = prev_probs * self.S
@@ -378,20 +391,20 @@ class OuterProductHMM:
                 if val > local_max:
                     local_max = val
             skip_contrib = self.r[i] * global_skip_max
-        
-            new_probs[i] = sum(b[i] * (
-                skip_contrib if skip_contrib >= local_max else local_max
-            ))
+
+            new_probs[i] = sum(
+                b[i] * (skip_contrib if skip_contrib >= local_max else local_max)
+            )
         if np.sum(new_probs) > 0:
-                new_probs /= np.sum(new_probs)
+            new_probs /= np.sum(new_probs)
         else:
             new_probs = np.ones(self.n_states) / self.n_states
         return new_probs
 
     def run(
-            self, 
-            verbose: bool = True,
-            ) -> NDArrayInt:
+        self,
+        verbose: bool = True,
+    ) -> NDArrayInt:
         same_state_counter = 0
         empty_counter = 0
         if verbose:
