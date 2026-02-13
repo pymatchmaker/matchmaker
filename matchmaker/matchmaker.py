@@ -167,15 +167,14 @@ class Matchmaker(object):
         self.reference_features = None
         self._has_run = False
 
+        # validate method first
         if method is None:
-            # set a default method
             method = DEFAULT_METHODS[self.input_type]
-        self.method = method
+        elif method not in AVAILABLE_METHODS:
+            raise ValueError(f"Invalid method. Available methods: {AVAILABLE_METHODS}")
 
-        try:
-            self.config = kwargs[input_type][method]
-        except KeyError:
-            raise ValueError(f"Invalid method {method}")
+        self.method = method
+        self.config = kwargs[input_type][self.method]
         self.adjust_tempo = adjust_tempo
 
         # setup score file
@@ -253,12 +252,6 @@ class Matchmaker(object):
                 raise ValueError(
                     f"Invalid performance file. Expected MIDI file, but got {self.performance_file}"
                 )
-
-        # validate method first
-        if method is None:
-            method = DEFAULT_METHODS[self.input_type]
-        elif method not in AVAILABLE_METHODS:
-            raise ValueError(f"Invalid method. Available methods: {AVAILABLE_METHODS}")
 
         # setup distance function
         if distance_func is None:

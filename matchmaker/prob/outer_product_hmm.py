@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Union
 
 import progressbar
 from numpy.typing import NDArray
@@ -208,7 +208,7 @@ def compute_transition_matrix(
 class OuterProductHMM(OnlineAlignment):
     def __init__(
         self,
-        reference_features: np.ndarray,
+        reference_features: Union[np.ndarray, ScoreLike],
         queue: Optional[RECVQueue] = None,
         transitions: Optional[List[tuple[int, float]]] = None,
         pitch_error_probs: Optional[dict[str, float]] = None,
@@ -222,7 +222,7 @@ class OuterProductHMM(OnlineAlignment):
 
         Parameters
         ----------
-        reference_features : ndarray
+        reference_features : ndarray or ScoreLike
             Note array or score like object
 
         queue : RECVQueue or None
