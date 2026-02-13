@@ -18,8 +18,18 @@ def viterbi_step_cy(
     ----------
     prev_probs : ndarray (N,)
         Previous state probabilities.
-    observation : ndarray (88,)
-        Current observed MIDI pitches (88 keys from A0 to C8).
+    alpha : ndarray (N, N)
+        Transition probabilities between states.
+    S : ndarray (N,)
+        Skip probabilities for each state.
+    r : ndarray (N,)
+        Resumption probabilities for each state.
+    b : ndarray (N,)
+        Emission probabilities for each state.
+    D1 : int
+        Maximum forward transition distance.
+    D2 : int
+        Maximum backward transition distance.
     Returns
     -------
     new_probs : ndarray (N,)
@@ -45,4 +55,9 @@ def viterbi_step_cy(
                 local_max = val
         skip_contrib = r[i] * global_skip_max
         new_probs[i] = b[i] * (skip_contrib if skip_contrib >= local_max else local_max)
+
+    if np.sum(new_probs) > 0:
+        new_probs /= np.sum(new_probs)
+    else:
+        new_probs = np.ones(n_states) / n_states
     return new_probs

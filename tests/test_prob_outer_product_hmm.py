@@ -4,20 +4,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import partitura as pt
-from matchmaker.prob.outer_product_hmm import (
-    compute_OuterProductHMM_pitch_probabilities,
-    get_chords_from_score,
-    compute_transition_matrix,
-    OuterProductHMM,
-)
-
-from matchmaker.features.midi import PitchIOIProcessor
-
-from partitura.utils.music import generate_random_performance_note_array
-
 from matchmaker import EXAMPLE_MATCH
-
-from utils import process_midi_offline
+from matchmaker.features.midi import PitchIOIProcessor
+from matchmaker.prob.outer_product_hmm import (
+    OuterProductHMM,
+    compute_OuterProductHMM_pitch_probabilities,
+    compute_transition_matrix,
+    get_chords_from_score,
+)
+from partitura.utils.music import generate_random_performance_note_array
+from tests.utils import process_midi_offline
 
 
 class TestUtils(unittest.TestCase):
@@ -78,7 +74,6 @@ class TestUtils(unittest.TestCase):
 
 
 class TestOuterProductHMM(unittest.TestCase):
-
     def test_outer_product_hmm(self):
         self.perf, _, self.score = pt.load_match(EXAMPLE_MATCH, create_score=True)
 
@@ -96,6 +91,8 @@ class TestOuterProductHMM(unittest.TestCase):
         for obs in observations:
             if obs is not None:
                 current_state = self.outerhmm(obs)
-                self.assertTrue(self.outerhmm.state_space[current_state] in self.unique_sonsets)
+                self.assertTrue(
+                    self.outerhmm.state_space[current_state] in self.unique_sonsets
+                )
 
         self.assertTrue(isinstance(self.outerhmm.warping_path, np.ndarray))

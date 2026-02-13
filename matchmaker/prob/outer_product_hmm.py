@@ -1,20 +1,18 @@
-from typing import List, Optional
-from numpy.typing import NDArray
+from typing import List, Optional, Union
 
 import progressbar
-from matchmaker.utils.misc import RECVQueue
-from matchmaker.base import OnlineAlignment
+from numpy.typing import NDArray
 
-#from viterbi_step import viterbi_step_cy
+from matchmaker.base import OnlineAlignment
+from matchmaker.utils.misc import RECVQueue
+
 try:
     # import the compiled function (name depends on your .pyx)
-    from .viterbi_step import viterbi_step_cy
+    from viterbi_step import viterbi_step_cy
 except Exception:
     viterbi_step_cy = None
-    print("---------------\nCYTHON IMPORT FAILED\n------------------")
 
 import numpy as np
-import pdb
 
 from partitura.score import Part, Score, ScoreLike
 
@@ -44,12 +42,10 @@ DEFAULT_D2 = 3
 
 IOI_THRESHOLD = 0.035  # seconds
 
-QUEUE_TIMEOUT = 10
-
 
 def compute_OuterProductHMM_pitch_probabilities(
-    chords: List[set], 
-    pitch_error_probs: dict = None, 
+    chords: List[set],
+    pitch_error_probs: dict = None,
     other_prob: float = 1e-6,
 ) -> NDArrayFloat:
     """
@@ -59,7 +55,7 @@ def compute_OuterProductHMM_pitch_probabilities(
     Parameters
     ----------
     chords : list of sets
-        chords[i] contains MIDI pitches (0–127) for score chord at state i. 
+        chords[i] contains MIDI pitches (0–127) for score chord at state i.
         A chord is defined as all notes with the same onset time.
     pitch_error_probs : dict or None
         If None, uses DEFAULT_PITCH_ERROR_PROBS. These are the probabilities assigned to different pitch error categories.
@@ -123,9 +119,9 @@ def compute_OuterProductHMM_pitch_probabilities(
 
 
 def get_chords_from_score(
-        score: ScoreLike, 
-        return_unique_onsets: bool = False,
-        ) -> List[set]:
+    score: ScoreLike,
+    return_unique_onsets: bool = False,
+) -> List[set]:
     """
     Extract chords from a score-like object.
     A chord is defined as all notes with the same onset time.
@@ -171,12 +167,11 @@ def get_chords_from_score(
 
 
 def compute_transition_matrix(
-        N: int, 
-        transitions: list[tuple[int, float]] = None, 
-        D1: int = DEFAULT_D1, 
-        D2: int = DEFAULT_D2,
-        ) -> tuple[NDArrayFloat, int, int]:
-    
+    N: int,
+    transitions: list[tuple[int, float]] = None,
+    D1: int = DEFAULT_D1,
+    D2: int = DEFAULT_D2,
+) -> tuple[NDArrayFloat, int, int]:
     """
     Construct banded transition matrix (α) from transition deltas and probabilities.
 
@@ -210,10 +205,10 @@ def compute_transition_matrix(
     return alpha, D1, D2
 
 
-class OuterProductHMM:
+class OuterProductHMM(OnlineAlignment):
     def __init__(
         self,
-        reference_features: np.ndarray,
+        reference_features: Union[np.ndarray, ScoreLike],
         queue: Optional[RECVQueue] = None,
         transitions: Optional[List[tuple[int, float]]] = None,
         pitch_error_probs: Optional[dict[str, float]] = None,
@@ -221,29 +216,28 @@ class OuterProductHMM:
         r: Optional[np.ndarray] = None,
         other_prob: float = 1e-6,
         patience: int = 10,
-        piano_range: bool = True,
     ) -> None:
         """
         Outer-product Hidden Markov Model for score following.
 
         Parameters
         ----------
-        reference_features : ndarray
+        reference_features : ndarray or ScoreLike
             Note array or score like object
 
         queue : RECVQueue or None
             Queue for receiving incoming observations
 
         pitch_error_probs : dict or None
-            If None, uses DEFAULT_PITCH_ERROR_PROBS.   
+            If None, uses DEFAULT_PITCH_ERROR_PROBS.
 
         transitions : list of (delta, prob), optional
             If None, uses DEFAULT_TRANSITIONS.
-            
+
         S, r : 1D arrays or None (skip-from and skip-to)
             If None, uniform distributions are used.
 
-        other_prob : float 
+        other_prob : float
             Small prob for unmodelled pitches
 
         """
@@ -255,19 +249,35 @@ class OuterProductHMM:
         )
 
         self.queue = queue
-        chords, unique_onsets = get_chords_from_score(self.reference_features, return_unique_onsets=True)
+        chords, unique_onsets = get_chords_from_score(
+            self.reference_features, return_unique_onsets=True
+        )
         self.n_states = len(chords)
         self.state_space = unique_onsets
-        self.transitions = transitions if transitions is not None else DEFAULT_TRANSITIONS
+        self.transitions = (
+            transitions if transitions is not None else DEFAULT_TRANSITIONS
+        )
         self.pitch_error_probs = (
-            pitch_error_probs if pitch_error_probs is not None else DEFAULT_PITCH_ERROR_PROBS
+            pitch_error_probs
+            if pitch_error_probs is not None
+            else DEFAULT_PITCH_ERROR_PROBS
         )
         self.other_prob = other_prob
 
         # Transition setup
-        self.alpha, self.D1, self.D2 = compute_transition_matrix(self.n_states, self.transitions)
-        self.S = np.ones(self.n_states) / self.n_states if S is None else np.array(S, dtype=float)
-        self.r = np.ones(self.n_states) / self.n_states if r is None else np.array(r, dtype=float)
+        self.alpha, self.D1, self.D2 = compute_transition_matrix(
+            self.n_states, self.transitions
+        )
+        self.S = (
+            np.ones(self.n_states) / self.n_states
+            if S is None
+            else np.array(S, dtype=float)
+        )
+        self.r = (
+            np.ones(self.n_states) / self.n_states
+            if r is None
+            else np.array(r, dtype=float)
+        )
 
         # Emission setup
         self.b_table = compute_OuterProductHMM_pitch_probabilities(
@@ -276,18 +286,15 @@ class OuterProductHMM:
 
         self.current_state = 0
         self._warping_path = []
-        self._current_chord = np.zeros(88, dtype=int) if piano_range else np.zeros(128, dtype=int)
-        self.piano_range = piano_range
+        self._current_chord = np.zeros(88, dtype=int)
         self.patience = patience
         self.state_probabilities = np.ones(self.n_states) / self.n_states
         self.is_first_observation = True
-        self.input_index = 0
-
 
     @property
     def warping_path(self) -> NDArrayInt:
         return (np.array(self._warping_path).T).astype(np.int32)
-    
+
     def is_still_following(self) -> bool:
         if self.current_state is not None:
             return self.current_state <= self.n_states - 1
@@ -295,12 +302,9 @@ class OuterProductHMM:
         return False
 
     def __call__(
-            self, 
-            input: tuple[np.ndarray, float],
-            *args, **kwargs
-            ) -> Optional[int]:
-        pitch_obs, ioi = input # only works when using PitchIOIProcessor
-        frame_index = args[0] if args else None
+        self, input: tuple[np.ndarray, float], *args, **kwargs
+    ) -> Optional[int]:
+        pitch_obs, ioi = input
 
         if ioi < IOI_THRESHOLD:
             self._current_chord = np.maximum(self._current_chord, pitch_obs)
@@ -311,18 +315,15 @@ class OuterProductHMM:
                 self.state_probabilities, self._current_chord
             )
             self.current_state = np.argmax(self.state_probabilities)
-            #self._warping_path.append((self.state_space[self.current_state],self.input_index))
-            self._warping_path.append((self.current_state,self.input_index))
-            self.input_index = self.input_index + 1 if frame_index is None else frame_index
+            self._warping_path.append(self.current_state)
 
-            #return self.state_space[self.current_state] # (=current_position)
             return self.current_state
-    
+
     # Observation likelihood
     def compute_obs_likelihood(
-            self, 
-            observation: np.ndarray,
-            ) -> NDArrayFloat:
+        self,
+        observation: np.ndarray,
+    ) -> NDArrayFloat:
         """
         Given observed MIDI pitches, return likelihood vector b[i].
 
@@ -335,18 +336,16 @@ class OuterProductHMM:
         b : ndarray (N,)
             b[i] = likelihood of observing `observation` at state i.
         """
-        if self.piano_range:
-            b = self.b_table[:, 21:109] * observation
-        else:
-            b = self.b_table * observation
+
+        b = self.b_table[:, 21:109] * observation
         return b
 
     # Viterbi update
     def viterbi_step(
-            self, 
-            prev_probs: NDArrayFloat, 
-            observation: NDArrayFloat,
-            ) -> NDArrayFloat:
+        self,
+        prev_probs: NDArrayFloat,
+        observation: NDArrayFloat,
+    ) -> NDArrayFloat:
         """
         This function performs a fast outer-product Viterbi update.
         Parameters
@@ -366,7 +365,7 @@ class OuterProductHMM:
         if viterbi_step_cy is not None:
             prev = np.ascontiguousarray(prev_probs, dtype=np.float64)
             alpha = np.ascontiguousarray(self.alpha, dtype=np.float64)
-            S = np.ascontiguousarray(self.S, dtype=np.float64) # transition matrix
+            S = np.ascontiguousarray(self.S, dtype=np.float64)
             r = np.ascontiguousarray(self.r, dtype=np.float64)
             b_cy = np.ascontiguousarray(b, dtype=np.float64)
 
@@ -376,7 +375,9 @@ class OuterProductHMM:
 
             # Call cython function and return its result
             # viterbi_step_cy(prev, alpha, S, r, b, D1, D2) -> numpy array
-            return viterbi_step_cy(prev, alpha, S, r, b_cy, D1, D2)
+            new_probs = viterbi_step_cy(prev, alpha, S, r, b_cy, D1, D2)
+
+            return new_probs
 
         skip_values = prev_probs * self.S
         global_skip_max = skip_values.max()
@@ -390,16 +391,20 @@ class OuterProductHMM:
                 if val > local_max:
                     local_max = val
             skip_contrib = self.r[i] * global_skip_max
-        
-            new_probs[i] = sum(b[i] * (
-                skip_contrib if skip_contrib >= local_max else local_max
-            ))
+
+            new_probs[i] = sum(
+                b[i] * (skip_contrib if skip_contrib >= local_max else local_max)
+            )
+        if np.sum(new_probs) > 0:
+            new_probs /= np.sum(new_probs)
+        else:
+            new_probs = np.ones(self.n_states) / self.n_states
         return new_probs
 
     def run(
-            self, 
-            verbose: bool = True,
-            ) -> NDArrayInt:
+        self,
+        verbose: bool = True,
+    ) -> NDArrayInt:
         same_state_counter = 0
         empty_counter = 0
         if verbose:
@@ -410,10 +415,8 @@ class OuterProductHMM:
 
         while self.is_still_following():
             prev_state = self.current_state
-            try:
-                queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
-            except: # it raises 'Empty' when there is no queue input anymore
-                break
+
+            queue_input = self.queue.get()
             if queue_input is not None:
                 current_state = self(queue_input)
                 empty_counter = 0
