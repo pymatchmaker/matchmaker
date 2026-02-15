@@ -589,7 +589,7 @@ def plot_and_save_score_following_result(
         if xmin <= target <= xmax and ymin <= ref <= ymax
     ]
     for ref, target in cropped_history:
-        plt.plot(target, ref, ".", color="cyan", alpha=0.5, markersize=3)
+        plt.plot(target, ref, ".", color="lime", alpha=0.5, markersize=3)
 
     # plot ground-truth labels
     for ref, target in zip(score_annots, perf_annots):
