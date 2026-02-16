@@ -245,7 +245,6 @@ class AudioStream(Stream):
             audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
             sr = self.target_sr
 
-        duration = float(librosa.get_duration(y=audio_y, sr=sr))
         time_interval = self.hop_length / float(sr)
         # Pad to next hop_length boundary so no trailing samples are lost
         remainder = len(audio_y) % self.hop_length
