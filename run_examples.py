@@ -53,7 +53,6 @@ def main():
             input_type=input_mode,
             method=method,
             feature_type=feature_type,
-            sample_rate=16000,
         )
     except Empty as e:
         print(f"Error initializing Matchmaker: {e}")

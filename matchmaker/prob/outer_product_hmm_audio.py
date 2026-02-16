@@ -59,25 +59,6 @@ def _pitch_to_template_index(pitch: int) -> Optional[int]:
     return None
 
 
-def _obs_to_chroma(obs: np.ndarray) -> np.ndarray:
-    """Convert observation to normalized 12-bin chroma vector."""
-    obs = np.asarray(obs, dtype=float).reshape(-1)
-    obs = np.maximum(obs, 0.0)
-
-    if obs.size == 12:
-        chroma = obs.copy()
-    elif obs.size >= 88:
-        chroma = np.zeros(12, dtype=float)
-        for i in range(88):
-            chroma[(21 + i) % 12] += obs[i]
-    else:
-        chroma = np.zeros(12, dtype=float)
-        chroma[: min(12, obs.size)] = obs[: min(12, obs.size)]
-
-    s = chroma.sum()
-    return chroma / s if s > 0 else chroma
-
-
 def _preprocess_obs(obs: np.ndarray) -> np.ndarray:
     """Flatten observation to 1D array, taking last frame if 2D."""
     obs = np.asarray(obs, dtype=float)
@@ -262,14 +243,10 @@ class AudioOuterProductHMM:
         self.chord_harmonic_mask = np.zeros(
             (self.n_states, 88), dtype=float
         )  # (n_states, 88)
-        self.chord_pc_mask = np.zeros(
-            (self.n_states, 12), dtype=float
-        )  # (n_states, 12)
         for i, chord in enumerate(chords):
             for p in chord:
                 if 21 <= p <= 108:
                     self.chord_pitch_mask[i, int(p - 21)] = 1.0
-                self.chord_pc_mask[i, int(p % 12)] = 1.0
 
             # build harmonic mask for this chord (in 0..87 pitch-index domain)
             # offsets are approximate: octave=+12, 12th≈+19, 2oct=+24, etc.
@@ -309,9 +286,9 @@ class AudioOuterProductHMM:
         self.pause_entry_prob = _PAUSE_ENTRY_PROB
         self.pause_duration_sec = _PAUSE_DURATION_SEC
         self.emission_mode = str(emission_mode)
-        if self.emission_mode not in {"chord_mask", "tone_model_mixture", "chroma"}:
+        if self.emission_mode not in {"chord_mask", "tone_model_mixture"}:
             raise ValueError(
-                "Invalid emission_mode. Use 'chord_mask', 'tone_model_mixture', or 'chroma'."
+                "Invalid emission_mode. Use 'chord_mask' or 'tone_model_mixture'."
             )
         self.pause_emission_max = _PAUSE_EMISSION_MAX
 
@@ -366,16 +343,9 @@ class AudioOuterProductHMM:
         )
 
         # Emission model (II-C Eq.(4) extended to polyphonic chords)
-        if self.emission_mode == "chroma":
-            # Chroma mode: no tone_model needed, uses chord_pc_mask only
-            self.n_templates = 0
-            self.noise_template_idx = -1
-            self.w_sound = None
-            self.w_pause = None
-        elif self.tone_model is None:
+        if self.tone_model is None:
             raise ValueError(
-                "AudioOuterProductHMM requires tone_model (GaussianToneModel) "
-                "unless emission_mode='chroma'. "
+                "AudioOuterProductHMM requires tone_model (GaussianToneModel). "
                 "Pass tone_model from matchmaker.features.audio.GaussianToneModel.from_templates()."
             )
         else:
@@ -605,17 +575,6 @@ class AudioOuterProductHMM:
         """Compute per-top-state sound emission b_0^{(i)}(y_t) for current frame."""
         obs = _preprocess_obs(observation)
 
-        # Chroma-based emission: chord_pc_mask (N x 12) @ chroma (12,)
-        if self.emission_mode == "chroma":
-            chroma = _obs_to_chroma(obs)
-            if chroma.sum() <= 0:
-                return np.full(self.n_states, 1e-12, dtype=float)
-            em = self.chord_pc_mask @ chroma
-            if _EMISSION_SHARPENING != 1.0:
-                em = np.maximum(em, 1e-12)
-                em = em**_EMISSION_SHARPENING
-            return np.maximum(np.nan_to_num(em, nan=1e-12), 1e-12)
-
         # CQT-based emission
         cqt = np.maximum(obs[:88] if obs.size >= 88 else obs, 0.0)
         s = cqt.sum()
@@ -676,11 +635,6 @@ class AudioOuterProductHMM:
 
         if s <= 0:
             emit = 1.0
-        elif self.emission_mode == "chroma":
-            # Flatness-based: flat distribution -> higher pause probability
-            chroma = _obs_to_chroma(obs)
-            var = float(np.var(chroma))
-            emit = 1.0 / (1.0 + 200.0 * var)
         elif getattr(self.tone_model, "is_synthetic", False):
             var = float(np.var(cqt / s))
             emit = 1.0 / (1.0 + 200.0 * var)
