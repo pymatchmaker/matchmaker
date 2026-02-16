@@ -15,7 +15,6 @@ from matchmaker.features.audio import (
     ChromagramProcessor,
     CQTProcessor,
     CQTSpectralFluxProcessor,
-    GaussianToneModel,
     LogSpectralEnergyProcessor,
     MelSpectrogramProcessor,
     MFCCProcessor,
@@ -363,29 +362,9 @@ class Matchmaker(object):
                 queue=self.stream.queue,
             )
         elif method == "audio_outerhmm" and self.input_type == "audio":
-            tone_model = None
-            default_template_path = (
-                Path(__file__).parent
-                / "features"
-                / "data"
-                / "Piano_CQT_Nortemplates.bin"
-            )
-            default_cov_path = (
-                Path(__file__).parent
-                / "features"
-                / "data"
-                / "Piano_CQT_Nordiagcovs.bin"
-            )
-
-            if default_template_path.exists() and default_cov_path.exists():
-                tone_model = GaussianToneModel.from_templates(
-                    str(default_template_path), str(default_cov_path)
-                )
-
             self.score_follower = AudioOuterProductHMM(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
-                tone_model=tone_model,
                 sample_rate=self.sample_rate,
                 hop_length=self.hop_length,
             )
