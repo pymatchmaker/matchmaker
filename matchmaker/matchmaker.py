@@ -48,7 +48,6 @@ from matchmaker.utils.misc import (
     get_tempo_from_score,
     is_audio_file,
     is_midi_file,
-    plot_and_save_gt_vs_pred_points,
     save_debug_results,
 )
 from matchmaker.utils.tempo_models import KalmanTempoModel
@@ -57,17 +56,6 @@ sys.setrecursionlimit(10_000)
 
 PathLike = Union[str, bytes, os.PathLike]
 DEFAULT_TEMPO = 120
-
-
-class _LastFrameProcessor:
-    """Wrapper that returns only the last frame from a processor's output."""
-
-    def __init__(self, base_processor):
-        self.base_processor = base_processor
-
-    def __call__(self, y):
-        feats = np.asarray(self.base_processor(y))
-        return feats[-1] if feats.ndim == 2 else feats
 
 
 DEFAULT_DISTANCE_FUNCS = {
@@ -236,12 +224,9 @@ class Matchmaker(object):
         # setup feature processor
         if self.feature_type is None:
             if input_type == "audio":
-                if method == "audio_outerhmm":
-                    # For audio_outerhmm with tone model, can use either raw_audio or cqt
-                    # Using cqt is more efficient (CQT computed once, not twice)
-                    self.feature_type = "cqt_spectral_flux"
-                else:
-                    self.feature_type = "chroma"
+                self.feature_type = (
+                    "cqt_spectral_flux" if method == "audio_outerhmm" else "chroma"
+                )
             else:
                 self.feature_type = "pitch_ioi"
 
@@ -277,9 +262,6 @@ class Matchmaker(object):
                 sample_rate=self.sample_rate,
                 hop_length=self.hop_length,
             )
-            if self.input_type == "audio" and method == "audio_outerhmm":
-                self.processor = _LastFrameProcessor(self.processor)
-
         else:
             raise ValueError(f"Invalid feature type `{self.feature_type}`")
 
@@ -592,31 +574,7 @@ class Matchmaker(object):
                 f"Length of the annotation changed: {original_perf_annots_counts} -> {len(perf_annots_predicted)}"
             )
 
-        if self.input_type == "audio":
-            if debug:
-                save_debug_results(
-                    self.score_file,
-                    getattr(self, "score_audio", None),
-                    score_annots,
-                    score_annots_predicted,
-                    self.performance_file,
-                    perf_annots,
-                    perf_annots_predicted,
-                    self.score_follower,
-                    self.frame_rate,
-                    save_dir,
-                    run_name,
-                )
-            # plot_and_save_gt_vs_pred_points(
-            #     perf_annots,
-            #     perf_annots_predicted,
-            #     save_dir,
-            #     run_name,
-            #     score_y=score_annots,
-            #     frame_rate=self.frame_rate,
-            #     x_unit="frames",
-            # )
-
+        # Evaluation metrics
         if domain == "performance":
             eval_results = get_evaluation_results(
                 perf_annots,
@@ -629,7 +587,7 @@ class Matchmaker(object):
                 score_annots_predicted
             )
             if tolerances == TOLERANCES_IN_MILLISECONDS:
-                tolerances = TOLERANCES_IN_BEATS  # switch to beats
+                tolerances = TOLERANCES_IN_BEATS
             eval_results = get_evaluation_results(
                 score_annots,
                 score_annots_predicted,
@@ -640,6 +598,24 @@ class Matchmaker(object):
         if self.input_type == "audio":
             latency_results = self.get_latency_stats()
             eval_results.update(latency_results)
+
+        # Debug: save warping path TSV, results JSON, and plots
+        if debug and save_dir is not None:
+            save_debug_results(
+                warping_path=self.score_follower.warping_path,
+                score_annots=score_annots,
+                perf_annots=perf_annots,
+                perf_annots_predicted=perf_annots_predicted,
+                eval_results=eval_results,
+                frame_rate=self.frame_rate,
+                save_dir=save_dir,
+                run_name=run_name or "results",
+                state_space=getattr(self.score_follower, "state_space", None),
+                ref_features=getattr(self.score_follower, "reference_features", None),
+                input_features=getattr(self.score_follower, "input_features", None),
+                distance_func=getattr(self.score_follower, "distance_func", None),
+            )
+
         return eval_results
 
     def run(self, verbose: bool = True, wait: bool = True):
