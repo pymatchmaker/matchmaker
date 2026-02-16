@@ -39,9 +39,6 @@ def main():
     print(f"Running matchmaker with the score file ({SCORE_FILE.name})...")
     print("-" * 50)
 
-    # Use the corresponding score follower for each input mode.
-    # - audio: AudioOuterProductHMM (paper-style HMM / outer-product)
-    # - midi : OuterProductHMM
     method = "outerhmm" if input_mode == "midi" else "arzt"
 
     # Initialize matchmaker (simulation mode)
