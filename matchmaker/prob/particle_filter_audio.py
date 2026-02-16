@@ -19,15 +19,15 @@ class ParticleFilterAudio(OnlineAlignment):
     def __init__(
         self,
         reference_features,          # shape: (num_score_frames, 12)
-        score_beats,            # beat position of each score frame
+        state_space,            # beat position of each score frame
         score_boundaries,       # beat positions of note onsets/offsets
         notated_tempo,          # BPM from score
-        hop_size,               # seconds
+        hop_size,               # hop size in seconds
         queue: Optional[RECVQueue] = None,
         num_particles=1000
     ):
         self.reference_features = reference_features
-        self.score_beats = score_beats
+        self.state_space = state_space
         self.score_boundaries = np.array(score_boundaries)
         self.notated_tempo = notated_tempo
         self.hop_size = hop_size
@@ -38,20 +38,27 @@ class ParticleFilterAudio(OnlineAlignment):
         self.input_features: List[NDArray[np.float32]] = None
         self.rng = RNG
 
+        self.beat_std = 0.0625
+
+        self.p_ioi = None
+        self.f_time_prev = None
+
         # Tempo limits
         self.v_min = 0.5 * notated_tempo
         self.v_max = 2.0 * notated_tempo
 
         # Tempo noise (paper: quarter of notated tempo)
         self.sigma_v = 0.25 * notated_tempo
+        self.tempo_noise = self.rng.normal(0, self.sigma_v, self.num_particles)
 
         # Particle state arrays
-        self.x = self.rng.uniform(score_beats[0], score_beats[-1], num_particles)  # beat positions
-        self.v = self.rng.uniform(self.v_min, self.v_max, num_particles)
+        self.x = self.rng.uniform(state_space[0], state_space[-1], num_particles)  # beat positions - full range!
+        self.v = self.rng.normal(notated_tempo, self.sigma_v, num_particles)  # Normal distribution around notated tempo
+        self.v = np.clip(self.v, self.v_min, self.v_max)  # Clip to valid range
         self.weights = np.ones(num_particles) / num_particles
 
         # Initialize at first beat
-        self.x[:] = score_beats[0]
+        #self.x[:] = state_space[0]
 
     def is_still_following(self) -> bool:
         if self.current_state is not None:
@@ -60,34 +67,12 @@ class ParticleFilterAudio(OnlineAlignment):
         return False
 
     def predict(self):
-        avg_tempo = np.mean(self.v)
-        # Update score position
-        self.x += (self.v / 60.0) * self.hop_size
-
-        # Check boundary crossing
-        crossed = self._crossed_boundary(self.x)
-
-        # Update tempo only if crossed
-        noise = self.rng.normal(0, self.sigma_v, self.num_particles)
-        self.v = np.where(
-            crossed,
-            self.v + noise,
-            self.v
-        )
-
-        # Clip tempo
-        self.v = np.clip(self.v, self.v_min, self.v_max)
-
-    def _crossed_boundary(self, new_positions):
-        """
-        Check if particle crossed any score boundary.
-        """
-        crossed = np.zeros(self.num_particles, dtype=bool)
-
-        for b in self.score_boundaries:
-            crossed |= (new_positions >= b)
-
-        return crossed
+        # Update score position - each particle advances based on its tempo
+        self.x += (self.v / 60.0) * self.hop_size  # Convert BPM to beats per second
+        # Add small noise for exploration
+        self.x += self.rng.normal(0, self.beat_std, self.num_particles)
+        # Keep within bounds
+        self.x = np.clip(self.x, self.state_space[0], self.state_space[-1])
 
     def compute_likelihood(self, feature):
         likelihoods = np.zeros(self.num_particles)
@@ -100,7 +85,7 @@ class ParticleFilterAudio(OnlineAlignment):
         return likelihoods
 
     def _get_score_feature(self, beat_position):
-        idx = np.argmin(np.abs(self.score_beats - beat_position))
+        idx = np.argmin(np.abs(self.state_space - beat_position))
         return self.reference_features[idx]
 
     @staticmethod
@@ -116,32 +101,72 @@ class ParticleFilterAudio(OnlineAlignment):
         cos_angle = np.dot(ca, cm) / (norm_a * norm_m)
         cos_angle = np.clip(cos_angle, 0, 1)
         return np.arccos(cos_angle)
+    
+    def compute_likelihood_timing(self, ioi, idx):
+        # Bounds checking: if at the start, use next beat instead
+        if idx <= 0:
+            return np.ones(self.num_particles)  # No timing info at start
+        
+        beat_diff = abs(self.state_space[idx] - self.state_space[idx - 1])
+        expected_ioi = (60.0 * beat_diff) / self.notated_tempo
+        
+        # Estimate tempo from observed IOI
+        tempo_estimate = (60.0 * beat_diff) / max(ioi, 1e-6)
+        
+        # Aggressive tempo update - use higher learning rate
+        alpha = 0.5  # Increased from 0.1
+        self.v += alpha * (tempo_estimate - self.v)
+        self.v = np.clip(self.v, self.v_min, self.v_max)  # Ensure valid range
+        
+        # Likelihood based on how well IOI matches expected
+        return np.exp(-0.5 * ((ioi - expected_ioi) / max(self.sigma_v, 1e-6)) ** 2)
 
-    def step(self, feature):
+    def step(self, feature, f_time):
+        if self.p_ioi is not None:
+            self.p_ioi = f_time  - self.f_time_prev
+            self.f_time_prev = f_time
         self.predict()
 
         likelihoods = self.compute_likelihood(feature)
+        if self.p_ioi is not None and self.current_state > 0:
+            timing_likelihood = self.compute_likelihood_timing(self.p_ioi, int(round(self.current_state)))
+            likelihoods *= timing_likelihood
+        if self.p_ioi is None:
+            self.f_time_prev = f_time
+            self.p_ioi = 0.0
+
+        # Add small amount of uniform likelihood to avoid zero-likelihood traps
+        likelihoods = likelihoods + 1e-6 * np.max(likelihoods)
+        
         self.weights *= likelihoods
         self.weights += 1e-12  # avoid zero
         self.weights /= np.sum(self.weights)
 
-        indices = self.rng.choice(
-            self.num_particles,
-            size=self.num_particles,
-            p=self.weights
-        )
-
-        self.x = self.x[indices]
-        self.v = self.v[indices]
-
-        # Reset weights
-        self.weights.fill(1.0 / self.num_particles)
+        # Only resample if effective sample size is too low
+        n_eff = 1.0 / np.sum(self.weights ** 2)
+        if n_eff < self.num_particles / 2.0:
+            indices = self.rng.choice(
+                self.num_particles,
+                size=self.num_particles,
+                p=self.weights
+            )
+            self.x = self.x[indices]
+            self.v = self.v[indices]
+            # Reset weights only after resampling
+            self.weights.fill(1.0 / self.num_particles)
 
         return int(round(np.mean(self.x)))
     
+    def check_crossing(self, previous_state):
+        if previous_state is not None and self.current_state is not None:
+            crossed = np.where((self.score_boundaries > previous_state) & (self.score_boundaries <= self.current_state))[0]
+            if len(crossed) > 0:
+                for idx in crossed:
+                    self.v[idx] += self.rng.normal(0, self.sigma_v)  # Add tempo noise on crossing
+
     
-    def __call__(self, feature):
-        return self.step(feature)
+    def __call__(self, feature, f_time):
+        return self.step(feature, f_time)
     
     def run(self, verbose: bool = True) -> Generator[int, None, NDArray[np.float32]]:
         """Run the online alignment process.
@@ -172,7 +197,9 @@ class ParticleFilterAudio(OnlineAlignment):
                 if self.input_features is not None
                 else features
             )
-            self.current_state = self(features)
+            previous_state = self.current_state
+            self.current_state = self(features, f_time)
+            self.check_crossing(previous_state)
 
             if verbose:
                 pbar.update(int(self.current_state))

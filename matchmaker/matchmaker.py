@@ -231,9 +231,16 @@ class Matchmaker(object):
         elif method == "pf" and self.input_type == "audio":
             state_space = self._convert_frame_to_beat(np.arange(len(self.reference_features)))
             score_boundaries = self.get_score_onsets_in_beats(self.score_part)
+            # for every entry in score_boundaries, find the highest beat in state_space that is smaller than or equal to it, and replace the entry with that beat (to ensure boundaries are aligned with score frames)
+            score_boundaries = np.array(
+                [
+                    state_space[np.searchsorted(state_space, boundary, side="right") - 1]
+                    for boundary in score_boundaries
+                ]
+            )
             self.score_follower = ParticleFilterAudio(
                 reference_features=self.reference_features,
-                score_beats=state_space,
+                state_space=state_space,
                 score_boundaries=score_boundaries,
                 notated_tempo=self.tempo,
                 hop_size=1.0 / self.frame_rate,
@@ -313,8 +320,12 @@ class Matchmaker(object):
         with self.stream:
             for current_frame in self.score_follower.run(verbose=verbose):
                 if self.input_type == "audio" and self.method != "hmm":
-                    position_in_beat = self._convert_frame_to_beat(current_frame)
-                    yield position_in_beat
+                    if self.method == "pf":
+                        #print("bn", float(self.score_follower.state_space[current_frame]))
+                        yield float(self.score_follower.state_space[current_frame])
+                    else:
+                        position_in_beat = self._convert_frame_to_beat(current_frame)
+                        yield position_in_beat
                 else:
                     print("nn", float(self.score_follower.state_space[current_frame]))
                     yield float(self.score_follower.state_space[current_frame])
