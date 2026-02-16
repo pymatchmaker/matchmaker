@@ -129,7 +129,7 @@ class AudioOuterProductHMM:
         transitions: Optional[List[tuple[int, float]]] = None,
         pitch_error_probs: Optional[dict[str, float]] = None,
         patience: int = 0,
-        tone_model=None,
+        tempo: float = 120.0,
         sample_rate: int = 16000,
         hop_length: int = 320,
     ) -> None:
@@ -179,7 +179,6 @@ class AudioOuterProductHMM:
             else DEFAULT_PITCH_ERROR_PROBS
         )
         self.other_prob = _OTHER_PROB
-        self.tone_model = tone_model
         self.sample_rate = int(sample_rate)
         self.hop_length = int(hop_length)
         self.pause_entry_prob = _PAUSE_ENTRY_PROB
@@ -219,9 +218,9 @@ class AudioOuterProductHMM:
         }
         # Bottom transitions a_{l',l}^{(i)} and exit probs e_l^{(i)} (Eq.(5))
         frame_rate = float(self.sample_rate) / float(self.hop_length)
-        self.a00 = self._extract_chord_self_transition_probs(
-            reference_features=self.reference_features,
+        self.a00 = self._compute_chord_self_transition_probs(
             unique_onsets=unique_onsets,
+            tempo=tempo,
             frame_rate=frame_rate,
         )
         self.a11 = float(
@@ -260,73 +259,31 @@ class AudioOuterProductHMM:
         return float(1.0 - exit_prob)
 
     @staticmethod
-    def _extract_chord_self_transition_probs(
-        reference_features: np.ndarray,
+    def _compute_chord_self_transition_probs(
         unique_onsets: np.ndarray,
+        tempo: float,
         frame_rate: float,
-        default_duration_sec: float = 0.2,  # 200ms default note duration
     ) -> np.ndarray:
         """
-        Extract self-transition probabilities from note durations.
+        Compute self-transition probabilities from chord durations (Eq.5).
 
-        Based on Nakamura et al. 2013 Eq.(2):
-            d_i = 1 / (1 - a_i)  =>  a_i = 1 - 1/d_i
-
-        where d_i is the expected duration in frames.
-
-        Parameters
-        ----------
-        reference_features : np.ndarray
-            Note array with onset_beat and duration_sec fields
-        unique_onsets : np.ndarray
-            Unique onset times (chord boundaries)
-        frame_rate : float
-            Audio frame rate (frames per second)
-        default_duration_sec : float
-            Default note duration when not available (default: 0.2s = 200ms)
-
-        Returns
-        -------
-        np.ndarray
-            Self-transition probability for each state (a_i values)
+        a_i = 1 - 1/d_i, where d_i = duration_sec / frame_time.
         """
         N = len(unique_onsets)
         frame_time = 1.0 / max(frame_rate, 1e-6)
 
-        # Default: a_i = 1 - 1/d_i where d_i = default_duration_sec / frame_time
-        default_d_i = max(1.0, default_duration_sec / frame_time)
-        default_a_i = 1.0 - 1.0 / default_d_i  # e.g., 0.2s at 50fps → d=10 → a=0.90
-        out = np.full(N, default_a_i, dtype=float)
+        # Convert onset beats to seconds, then compute inter-onset durations
+        onset_sec = unique_onsets * (60.0 / tempo)
+        dur_sec = np.zeros(N, dtype=float)
+        if N >= 2:
+            dur_sec[:-1] = np.diff(onset_sec)
+            dur_sec[-1] = dur_sec[-2]
+        else:
+            dur_sec[:] = 0.2
 
-        if not isinstance(reference_features, np.ndarray):
-            return out
-        names = getattr(reference_features.dtype, "names", None)
-        if not names or "onset_beat" not in names:
-            return out
-
-        if "self_trans_prob" in names:
-            for i, onset in enumerate(unique_onsets):
-                idxs = np.where(reference_features["onset_beat"] == onset)[0]
-                if idxs.size == 0:
-                    continue
-                v = float(reference_features["self_trans_prob"][idxs[0]])
-                if np.isfinite(v):
-                    out[i] = float(np.clip(v, 1e-6, 1.0 - 1e-6))
-            return out
-
-        if "duration_sec" in names:
-            for i, onset in enumerate(unique_onsets):
-                idxs = np.where(reference_features["onset_beat"] == onset)[0]
-                if idxs.size == 0:
-                    continue
-                duration_sec = float(reference_features["duration_sec"][idxs[0]])
-                if np.isfinite(duration_sec) and duration_sec > 0:
-                    # Minimum duration floor to avoid too aggressive transitions
-                    duration_sec = max(duration_sec, 0.05)  # at least 50ms
-                    d_i = max(1.0, duration_sec / frame_time)
-                    out[i] = float(np.clip(1.0 - 1.0 / d_i, 1e-6, 1.0 - 1e-6))
-
-        return out
+        dur_sec = np.maximum(dur_sec, 0.05)  # at least 50ms
+        d_i = np.maximum(1.0, dur_sec / frame_time)
+        return np.clip(1.0 - 1.0 / d_i, 1e-6, 1.0 - 1e-6)
 
     def is_still_following(self) -> bool:
         if self.current_state is not None:

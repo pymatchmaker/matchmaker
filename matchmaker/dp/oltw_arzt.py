@@ -5,7 +5,6 @@ On-line Dynamic Time Warping
 """
 
 import time
-from queue import Empty
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import numpy as np
@@ -209,10 +208,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             pbar = progressbar.ProgressBar(max_value=self.N_ref, redirect_stdout=True)
 
         while self.is_still_following():
-            try:
-                features, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
-            except Empty:
-                break  # Stream ended, exit gracefully
+            features, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
             self.last_queue_update = time.time()
             self.input_features = (
                 np.concatenate((self.input_features, features))

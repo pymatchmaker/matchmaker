@@ -45,7 +45,6 @@ from matchmaker.utils.eval import (
 from matchmaker.utils.misc import (
     adjust_tempo_for_performance_audio,
     generate_score_audio,
-    get_tempo_at_beat,
     get_tempo_from_score,
     is_audio_file,
     is_midi_file,
@@ -226,15 +225,11 @@ class Matchmaker(object):
             raise ValueError(f"Invalid score file: {e}")
 
         # Set tempo: user-provided > adjust_tempo (always 120) > score marking > default (120 BPM)
-        # _user_specified_tempo: if True, use uniform tempo; if False, use score tempo map
         if tempo is not None:
             self.tempo = float(tempo)
-            self._user_specified_tempo = True
         elif auto_adjust_tempo:
             self.tempo = DEFAULT_TEMPO
-            self._user_specified_tempo = False
         else:
-            self._user_specified_tempo = False
             score_tempo = get_tempo_from_score(self.score_part, self.score_file)
             self.tempo = score_tempo if score_tempo is not None else DEFAULT_TEMPO
 
@@ -365,6 +360,7 @@ class Matchmaker(object):
             self.score_follower = AudioOuterProductHMM(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
+                tempo=self.tempo,
                 sample_rate=self.sample_rate,
                 hop_length=self.hop_length,
             )
@@ -385,118 +381,21 @@ class Matchmaker(object):
             raise ValueError("Invalid method")
 
     def preprocess_score(self, use_score_audio: bool = False):
-        """
-        Preprocess score to extract reference features.
-
-        For audio-based methods, generates score audio and extracts features.
-        For MIDI-based methods, returns note array with duration and transition
-        probability information for geometric distribution-based HMM modeling.
-
-        The duration-based transition probabilities follow geometric distribution:
-        - Exit probability (p): Δt / D (frame_time / note_duration)
-        - Self-transition probability (1-p): 1 - Δt / D
-
-        where D is the note duration and Δt is the frame time (hop_length / sample_rate).
-        """
-        # Adjust tempo based on performance audio if requested (applies to all methods)
+        """Preprocess score to extract reference features."""
         if self.auto_adjust_tempo and self.performance_file is not None:
             self.tempo = adjust_tempo_for_performance_audio(
                 self.score_part, self.performance_file, self.tempo
             )
 
         if use_score_audio:
-            # generate score audio
             self.score_audio = generate_score_audio(
                 self.score_part, self.tempo, self.sample_rate
             ).astype(np.float32)
-
             reference_features = self.processor(self.score_audio)
             self.reference_features = reference_features
             self.processor.reset()
         else:
-            # Get note array from score
-            note_array = self.score_part.note_array()
-
-            # Calculate frame time (Δt): hop_length / sample_rate
-            # This represents the time duration of one frame
-            frame_time = self.hop_length / self.sample_rate  # in seconds
-
-            # Calculate note durations and transition probabilities
-            # Duration is calculated as: next note onset - current note onset
-            # For the last note, use: note end time - note onset time
-            num_notes = len(note_array)
-            durations_sec = np.zeros(num_notes, dtype=np.float32)
-            self_trans_probs = np.zeros(num_notes, dtype=np.float32)
-            exit_probs = np.zeros(num_notes, dtype=np.float32)
-
-            # Convert onset_beat to seconds for duration calculation
-            if "onset_beat" in note_array.dtype.names:
-                # Use unique onset intervals (not note indices) for chord-based HMM
-                unique_onsets = np.unique(note_array["onset_beat"])
-
-                # Calculate onset times in seconds, respecting tempo changes
-                onset_sec = np.zeros_like(unique_onsets, dtype=np.float32)
-                for i, beat in enumerate(unique_onsets):
-                    if i == 0:
-                        onset_sec[i] = 0.0
-                    else:
-                        # Duration from previous onset to current onset
-                        prev_beat = unique_onsets[i - 1]
-                        beat_diff = beat - prev_beat
-                        # Use tempo at the starting beat of this interval
-                        # If user specified tempo, use uniform tempo; otherwise use score tempo map
-                        if self._user_specified_tempo:
-                            tempo_at_interval = self.tempo
-                        else:
-                            tempo_at_interval = get_tempo_at_beat(
-                                self.score_part, prev_beat, self.tempo
-                            )
-                        onset_sec[i] = onset_sec[i - 1] + beat_diff * (
-                            60.0 / tempo_at_interval
-                        )
-
-                # chord duration in seconds: next onset - current onset
-                chord_dur_sec = np.zeros_like(onset_sec, dtype=np.float32)
-                if onset_sec.size >= 2:
-                    chord_dur_sec[:-1] = np.diff(onset_sec).astype(np.float32)
-                    chord_dur_sec[-1] = chord_dur_sec[-2]
-                else:
-                    chord_dur_sec[:] = 1.0
-
-                # Minimum duration floor
-                chord_dur_sec = np.maximum(chord_dur_sec, frame_time).astype(np.float32)
-
-                # Broadcast chord-level duration/self/exit back to notes in that onset
-                for uo, dsec in zip(unique_onsets, chord_dur_sec):
-                    idxs = np.where(note_array["onset_beat"] == uo)[0]
-                    if idxs.size == 0:
-                        continue
-                    durations_sec[idxs] = dsec
-                    exit_probs[idxs] = float(frame_time / dsec)
-                    self_trans_probs[idxs] = 1.0 - exit_probs[idxs]
-
-            # Add duration and transition probability information to note array
-            # Create structured array with additional fields
-            dtype_list = list(note_array.dtype.descr)
-            dtype_list.extend(
-                [
-                    ("duration_sec", "f4"),
-                    ("self_trans_prob", "f4"),
-                    ("exit_prob", "f4"),
-                ]
-            )
-
-            enhanced_note_array = np.zeros(num_notes, dtype=dtype_list)
-            for field in note_array.dtype.names:
-                enhanced_note_array[field] = note_array[field]
-
-            enhanced_note_array["duration_sec"] = durations_sec
-            enhanced_note_array["self_trans_prob"] = self_trans_probs
-            enhanced_note_array["exit_prob"] = exit_probs
-
-            reference_features = enhanced_note_array
-
-        return reference_features
+            return self.score_part.note_array()
 
     def _convert_frame_to_beat(self, current_frame: int) -> float:
         """

@@ -24,7 +24,6 @@ from partitura.score import ScoreLike
 
 from matchmaker.features.audio import SAMPLE_RATE
 
-
 # Tempo marking to BPM mapping
 # Reference: https://en.wikipedia.org/wiki/Tempo#Basic_tempo_markings
 TEMPO_MARKING_TO_BPM = {
@@ -514,61 +513,6 @@ def generate_score_audio(score: ScoreLike, bpm: float, samplerate: int):
     last_onset_in_time += buffer_size
     score_audio = score_audio[: int(last_onset_in_time * samplerate)]
     return score_audio
-
-
-def synthesize_single_note_audio_fluidsynth(
-    pitch: int,
-    *,
-    bpm: float,
-    samplerate: int,
-    duration_sec: float = 0.35,
-    velocity: int = 80,
-    program: int = 0,
-    channel: int = 0,
-    ticks_per_beat: int = 480,
-) -> np.ndarray:
-    """
-    Create a single-note MIDI in memory and render it to audio using Partitura+FluidSynth.
-
-    This is useful for regenerating GaussianToneModel templates from a "realistic" piano soundfont,
-    instead of analytic sine/noise synthesis.
-    """
-
-    pitch = int(pitch)
-    velocity = int(np.clip(int(velocity), 1, 127))
-    program = int(np.clip(int(program), 0, 127))
-    channel = int(np.clip(int(channel), 0, 15))
-    ticks_per_beat = int(max(1, ticks_per_beat))
-
-    # Convert duration (sec) -> ticks using requested bpm.
-    dur_beats = float(duration_sec) * float(bpm) / 60.0
-    dur_ticks = int(max(1, round(dur_beats * ticks_per_beat)))
-
-    mid = mido.MidiFile(ticks_per_beat=ticks_per_beat)
-    track = mido.MidiTrack()
-    mid.tracks.append(track)
-
-    # Tempo + instrument
-    track.append(
-        mido.MetaMessage("set_tempo", tempo=mido.bpm2tempo(float(bpm)), time=0)
-    )
-    track.append(
-        mido.Message("program_change", program=program, channel=channel, time=0)
-    )
-
-    # Note
-    track.append(
-        mido.Message("note_on", note=pitch, velocity=velocity, channel=channel, time=0)
-    )
-    track.append(
-        mido.Message(
-            "note_off", note=pitch, velocity=0, channel=channel, time=dur_ticks
-        )
-    )
-
-    perf = partitura.load_performance_midi(mid)
-    y = partitura.save_wav_fluidsynth(perf, samplerate=int(samplerate), bpm=float(bpm))
-    return np.asarray(y, dtype=np.float32)
 
 
 def save_nparray_to_csv(array: NDArray, save_path: str):
