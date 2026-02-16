@@ -245,16 +245,15 @@ class AudioStream(Stream):
             audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
             sr = self.target_sr
 
-        # Use audio length (not int-truncated seconds) for padding
         duration = float(librosa.get_duration(y=audio_y, sr=sr))
-        # Use the effective sample rate for timing
         time_interval = self.hop_length / float(sr)
-        # Avoid adding long zero-padding at the end; it inflates frame count and can
-        # distort evaluation for short example clips.
-        padded_audio = audio_y
-        trimmed_audio = padded_audio[  # trim to multiple of chunk_size
-            : len(padded_audio) - (len(padded_audio) % self.hop_length)
-        ]
+        # Pad to next hop_length boundary so no trailing samples are lost
+        remainder = len(audio_y) % self.hop_length
+        if remainder > 0:
+            audio_y = np.concatenate(
+                (audio_y, np.zeros(self.hop_length - remainder, dtype=np.float32))
+            )
+        trimmed_audio = audio_y
         # Do not stop early on digital silence (all-zeros tails).
         while trimmed_audio.size > 0:
             self.input_index += 1

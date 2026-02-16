@@ -42,8 +42,7 @@ def main():
     # Use the corresponding score follower for each input mode.
     # - audio: AudioOuterProductHMM (paper-style HMM / outer-product)
     # - midi : OuterProductHMM
-    method = "outerhmm" if input_mode == "midi" else "audio_outerhmm"
-    feature_type = "pitchclass" if input_mode == "midi" else "cqt_spectral_flux"
+    method = "outerhmm" if input_mode == "midi" else "arzt"
 
     # Initialize matchmaker (simulation mode)
     try:
@@ -52,7 +51,6 @@ def main():
             performance_file=performance_file,
             input_type=input_mode,
             method=method,
-            feature_type=feature_type,
         )
     except Empty as e:
         print(f"Error initializing Matchmaker: {e}")
