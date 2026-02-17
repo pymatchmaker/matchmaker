@@ -305,4 +305,4 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
 
 
 if __name__ == "__main__":
-    pass
+    pass  # pragma: no cover
