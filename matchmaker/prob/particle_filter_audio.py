@@ -38,7 +38,7 @@ class ParticleFilterAudio(OnlineAlignment):
         self.input_features: List[NDArray[np.float32]] = None
         self.rng = RNG
 
-        self.beat_std = 0.0625
+        self.beat_std = 0.25
 
         self.p_ioi = None
         self.f_time_prev = None
@@ -52,7 +52,7 @@ class ParticleFilterAudio(OnlineAlignment):
         self.tempo_noise = self.rng.normal(0, self.sigma_v, self.num_particles)
 
         # Particle state arrays
-        self.x = self.rng.uniform(state_space[0], state_space[-1], num_particles)  # beat positions - full range!
+        self.x = self.rng.uniform(state_space[0], state_space[3], num_particles)  # beat positions - full range!
         self.v = self.rng.normal(notated_tempo, self.sigma_v, num_particles)  # Normal distribution around notated tempo
         self.v = np.clip(self.v, self.v_min, self.v_max)  # Clip to valid range
         self.weights = np.ones(num_particles) / num_particles
@@ -85,8 +85,24 @@ class ParticleFilterAudio(OnlineAlignment):
         return likelihoods
 
     def _get_score_feature(self, beat_position):
-        idx = np.argmin(np.abs(self.state_space - beat_position))
-        return self.reference_features[idx]
+        # Find interval
+        idx = np.searchsorted(self.state_space, beat_position)
+
+        if idx <= 0:
+            return self.reference_features[0]
+        if idx >= len(self.state_space):
+            return self.reference_features[-1]
+
+        left = idx - 1
+        right = idx
+
+        beat_left = self.state_space[left]
+        beat_right = self.state_space[right]
+
+        frac = (beat_position - beat_left) / (beat_right - beat_left + 1e-12)
+
+        return (1 - frac) * self.reference_features[left] + \
+            frac * self.reference_features[right]
 
     @staticmethod
     def _cosine_angle(ca, cm):
@@ -114,7 +130,7 @@ class ParticleFilterAudio(OnlineAlignment):
         tempo_estimate = (60.0 * beat_diff) / max(ioi, 1e-6)
         
         # Aggressive tempo update - use higher learning rate
-        alpha = 0.5  # Increased from 0.1
+        alpha = 0.7  # Increased from 0.1
         self.v += alpha * (tempo_estimate - self.v)
         self.v = np.clip(self.v, self.v_min, self.v_max)  # Ensure valid range
         
@@ -122,6 +138,8 @@ class ParticleFilterAudio(OnlineAlignment):
         return np.exp(-0.5 * ((ioi - expected_ioi) / max(self.sigma_v, 1e-6)) ** 2)
 
     def step(self, feature, f_time):
+        prev_mean_x = np.mean(self.x)
+
         if self.p_ioi is not None:
             self.p_ioi = f_time  - self.f_time_prev
             self.f_time_prev = f_time
@@ -137,6 +155,12 @@ class ParticleFilterAudio(OnlineAlignment):
 
         # Add small amount of uniform likelihood to avoid zero-likelihood traps
         likelihoods = likelihoods + 1e-6 * np.max(likelihoods)
+
+        # Forward bias
+        gamma = 2.0  # try between 0.5 and 5.0
+        forward_term = np.exp(gamma * (self.x - prev_mean_x))
+        likelihoods *= forward_term
+
         
         self.weights *= likelihoods
         self.weights += 1e-12  # avoid zero
