@@ -172,6 +172,7 @@ matchmaker/utils/distances.c
 tests/dev*.py
 tests/tmp/
 matchmaker/rl/*
+matchmaker/prob/viterbi_step.c
 
 *~
 tests/test_io_error_trace.txt
