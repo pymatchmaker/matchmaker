@@ -5,6 +5,8 @@ from typing import Optional, Union
 import numpy as np
 
 import partitura
+from partitura.io.exportmidi import get_ppq
+
 from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
 from matchmaker.features.audio import (
     FRAME_RATE,
@@ -27,6 +29,7 @@ from matchmaker.prob.hmm import (
     GaussianAudioPitchTempoHMM,
     PitchHMM,
     PitchIOIHMM,
+    PitchHMM,
 )
 from matchmaker.prob.outer_product_hmm import OuterProductHMM
 from matchmaker.utils.eval import (
@@ -143,10 +146,10 @@ class Matchmaker(object):
         device_name_or_index: Union[str, int] = None,
         sample_rate: int = SAMPLE_RATE,
         frame_rate: int = FRAME_RATE,
-        kwargs=KWARGS,
-        unfold_score=True,
         tempo: Optional[float] = None,
         adjust_tempo: bool = False,
+        kwargs = KWARGS,
+        unfold_score = True,
     ):
         self.score_file = str(score_file)
         self.performance_file = (
@@ -176,6 +179,7 @@ class Matchmaker(object):
         self.method = method
         self.config = kwargs[input_type][self.method]
         self.adjust_tempo = adjust_tempo
+        self.config = kwargs[input_type][method]
 
         # setup score file
         if score_file is None:
@@ -232,12 +236,10 @@ class Matchmaker(object):
             )
         elif self.feature_type == "pitch_ioi":
             self.processor = PitchIOIProcessor(piano_range=self.config["piano_range"])
-        elif self.feature_type == "pitchclass":
+        elif self.feature_type == "pitchclass":    
             self.processor = PitchClassPianoRollProcessor()
         elif self.feature_type == "pianoroll":
-            self.processor = PianoRollProcessor(piano_range=True)
-        elif self.feature_type == "pitchclass":
-            self.processor = PitchClassPianoRollProcessor()
+            self.processor = PianoRollProcessor(piano_range=self.config["piano_range"])
         else:
             raise ValueError(f"Invalid feature type `{self.feature_type}`")
 
@@ -252,11 +254,16 @@ class Matchmaker(object):
                 raise ValueError(
                     f"Invalid performance file. Expected MIDI file, but got {self.performance_file}"
                 )
+            
+        # validate method first
+        if method is None:
+            method = DEFAULT_METHODS[self.input_type]
+        elif method not in AVAILABLE_METHODS:
+            raise ValueError(f"Invalid method. Available methods: {AVAILABLE_METHODS}")
 
         # setup distance function
         if distance_func is None:
             distance_func = DEFAULT_DISTANCE_FUNCS[method]
-
         # setup stream device
         if self.input_type == "audio":
             self.stream = AudioStream(

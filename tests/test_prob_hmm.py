@@ -102,9 +102,9 @@ class TestPitchHMM(unittest.TestCase):
         initial_probabilities /= initial_probabilities.sum()
 
         hmm = PitchHMM(
+            reference_features=snote_array,
             observation_model=observation_model,
             transition_matrix=transition_matrix,
-            score_onsets=unique_sonsets,
             initial_probabilities=initial_probabilities,
             has_insertions=False,
         )
@@ -163,7 +163,7 @@ class TestPitchIOIHMM(unittest.TestCase):
             n_states=len(chord_pitches),
         )
 
-        tempo_model = ReactiveTempoModel(init_score_onset=unique_sonsets.min())
+        tempo_model = ReactiveTempoModel
 
         hmm = PitchIOIHMM(
             observation_model=observation_model,
