@@ -21,7 +21,6 @@ DCT_TYPE = 2
 NORM = np.inf
 FEATURES = "chroma"
 QUEUE_TIMEOUT = 10
-WINDOW_SIZE = 5
 
 # Type hint for Input Audio frame.
 InputAudioSeries = np.ndarray
@@ -198,15 +197,74 @@ class MelSpectrogramProcessor(Processor):
 
 
 class LogSpectralEnergyProcessor(Processor):
+    """
+    Log Spectral Energy feature processor based on Dixon (2005).
+
+    Computes a spectral representation using a linear-log frequency scale,
+    then applies half-wave rectified first-order difference to emphasize
+    note onsets.
+
+    The frequency axis is mapped to:
+    - Linear below 370 Hz
+    - Logarithmic spacing from 370 Hz to 12,500 Hz (49 bins)
+    - One bin above 12,500 Hz
+    """
+
+    LINEAR_FREQ_LIMIT = 370  # Hz (F#4)
+    LOG_FREQ_LIMIT = 12500  # Hz (G9)
+    N_LOG_BINS = 49  # paper: 84 - 34 - 1
+
     def __init__(
         self,
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
+        normalize: bool = True,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.n_fft = 2 * self.hop_length
+        self.normalize = normalize
+        self._prev_spectrum = None
+
+        # Pre-compute frequency axis and masks
+        self._freqs = librosa.fft_frequencies(sr=self.sample_rate, n_fft=self.n_fft)
+        self._linear_mask = self._freqs <= self.LINEAR_FREQ_LIMIT
+        self._log_mask = (self._freqs > self.LINEAR_FREQ_LIMIT) & (
+            self._freqs <= self.LOG_FREQ_LIMIT
+        )
+        self._high_mask = self._freqs > self.LOG_FREQ_LIMIT
+
+        # Create N+1 edges for N log-spaced bins
+        self._log_bin_edges = np.logspace(
+            np.log10(self.LINEAR_FREQ_LIMIT),
+            np.log10(self.LOG_FREQ_LIMIT),
+            num=self.N_LOG_BINS + 1,
+        )
+
+        # Pre-compute bin assignments for log frequencies
+        log_freqs = self._freqs[self._log_mask]
+        bin_idx = np.digitize(log_freqs, self._log_bin_edges) - 1
+        self._log_bin_idx = np.clip(bin_idx, 0, self.N_LOG_BINS - 1)
+
+    def reset(self):
+        self._prev_spectrum = None
+
+    def _map_frequencies(self, magnitude):
+        """Map FFT magnitude spectrum to linear-log frequency scale."""
+        linear_bins = magnitude[self._linear_mask]
+
+        log_bins = magnitude[self._log_mask]
+        n_frames = magnitude.shape[1]
+        log_mapped = np.zeros((self.N_LOG_BINS, n_frames), dtype=np.float32)
+        for b in range(self.N_LOG_BINS):
+            mask = self._log_bin_idx == b
+            if np.any(mask):
+                log_mapped[b] = np.sum(log_bins[mask], axis=0)
+
+        high_freq = np.sum(magnitude[self._high_mask], axis=0, keepdims=True)
+
+        return np.vstack((linear_bins, log_mapped, high_freq)).astype(np.float32)
 
     def __call__(
         self,
@@ -222,37 +280,28 @@ class LogSpectralEnergyProcessor(Processor):
         )
         magnitude = np.abs(stft_result)
 
-        freqs = librosa.fft_frequencies(sr=self.sample_rate, n_fft=self.n_fft)
+        # Map to linear-log frequency scale
+        feature_vector = self._map_frequencies(magnitude)
 
-        linear_limit = 370
-        log_limit = 12500
-        linear_bins = magnitude[freqs <= linear_limit, :]
-        log_bins = magnitude[(freqs > linear_limit) & (freqs <= log_limit), :]
-
-        log_bin_edges = np.logspace(
-            np.log10(linear_limit), np.log10(log_limit), num=84 - 34 - 1
-        )
-        log_mapped_bins = np.zeros((len(log_bin_edges), linear_bins.shape[1]))
-
-        for i in range(log_mapped_bins.shape[1]):
-            log_bin_idx = np.digitize(
-                freqs[(freqs > linear_limit) & (freqs <= log_limit)], log_bin_edges
+        # Half-wave rectified first-order difference (stateful for streaming)
+        if self._prev_spectrum is not None:
+            combined = np.hstack((self._prev_spectrum, feature_vector))
+            diff = np.diff(combined, axis=1)
+        else:
+            diff = np.diff(
+                feature_vector, axis=1, prepend=np.zeros_like(feature_vector[:, :1])
             )
-            for j in range(1, len(log_bin_edges)):
-                log_mapped_bins[j - 1, i] = np.sum(log_bins[log_bin_idx == j, i])
 
-        high_freq_bin = np.sum(magnitude[freqs > log_limit, :], axis=0, keepdims=True)
+        self._prev_spectrum = feature_vector[:, -1:]
 
-        feature_vector = np.vstack(
-            (linear_bins, log_mapped_bins, high_freq_bin), dtype=np.float32
-        )
+        result = np.maximum(diff, 0).T
 
-        diff_feature_vector = np.diff(
-            feature_vector, axis=0, prepend=feature_vector[0:1, :]
-        )
-        half_wave_rectified_vector = np.maximum(diff_feature_vector, 0)
+        if self.normalize:
+            norms = np.linalg.norm(result, axis=1, keepdims=True)
+            norms = np.maximum(norms, 1e-10)
+            result = result / norms
 
-        return half_wave_rectified_vector.T
+        return result
 
 
 def compute_features_from_audio(
