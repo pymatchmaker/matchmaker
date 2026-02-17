@@ -31,7 +31,6 @@ from matchmaker.prob.hmm import (
     GaussianAudioPitchTempoHMM,
     PitchHMM,
     PitchIOIHMM,
-    PitchHMM,
 )
 from matchmaker.prob.outer_product_hmm import OuterProductHMM
 from matchmaker.prob.outer_product_hmm_audio import AudioOuterProductHMM
@@ -374,8 +373,8 @@ class Matchmaker(object):
                 self.score_part, self.tempo, self.sample_rate
             ).astype(np.float32)
             reference_features = self.processor(self.score_audio)
-            self.reference_features = reference_features
             self.processor.reset()
+            return reference_features
         else:
             return self.score_part.note_array()
 
