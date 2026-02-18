@@ -13,7 +13,7 @@ from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.dp.dtw_loop import oltw_arzt_loop
-from matchmaker.features.audio import FRAME_RATE, QUEUE_TIMEOUT, WINDOW_SIZE, START_WINDOW_SIZE, STEP_SIZE
+from matchmaker.features.audio import FRAME_RATE, QUEUE_TIMEOUT
 from matchmaker.utils import (
     CYTHONIZED_METRICS_W_ARGUMENTS,
     CYTHONIZED_METRICS_WO_ARGUMENTS,
@@ -26,6 +26,11 @@ from matchmaker.utils.misc import (
     RECVQueue,
     set_latency_stats,
 )
+
+STEP_SIZE: int = 5
+WINDOW_SIZE: int = 5
+START_WINDOW_SIZE: Union[float, int] = 0.25
+
 
 class OnlineTimeWarpingArzt(OnlineAlignment):
     """
@@ -306,4 +311,4 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
 
 
 if __name__ == "__main__":
-    pass
+    pass  # pragma: no cover

@@ -13,8 +13,6 @@ from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
 from matchmaker.features.audio import (
     FRAME_RATE,
     SAMPLE_RATE,
-    WINDOW_SIZE,
-    STEP_SIZE,
     ChromagramProcessor,
     CQTProcessor,
     LogSpectralEnergyProcessor,
@@ -33,6 +31,7 @@ from matchmaker.prob.hmm import (
     GaussianAudioPitchTempoHMM,
     PitchHMM,
     PitchIOIHMM,
+    PitchHMM,
 )
 from matchmaker.prob.outer_product_hmm import OuterProductHMM
 from matchmaker.utils.tempo_models import KalmanTempoModel
@@ -153,8 +152,8 @@ class Matchmaker(object):
         frame_rate: int = FRAME_RATE,
         tempo: Optional[float] = None,
         adjust_tempo: bool = False,
-        kwargs=KWARGS,
-        unfold_score=True,
+        kwargs = KWARGS,
+        unfold_score = True,
     ):
         self.score_file = str(score_file)
         self.performance_file = (
@@ -184,6 +183,7 @@ class Matchmaker(object):
         self.method = method
         self.config = kwargs[input_type][method]
         self.adjust_tempo = adjust_tempo
+        self.config = kwargs[input_type][method]
 
         # setup score file
         if score_file is None:
@@ -240,7 +240,7 @@ class Matchmaker(object):
             )
         elif self.feature_type == "pitch_ioi":
             self.processor = PitchIOIProcessor(piano_range=self.config["piano_range"])
-        elif self.feature_type == "pitchclass":
+        elif self.feature_type == "pitchclass":    
             self.processor = PitchClassPianoRollProcessor()
         elif self.feature_type == "pianoroll":
             self.processor = PianoRollProcessor(piano_range=self.config["piano_range"])
@@ -268,7 +268,6 @@ class Matchmaker(object):
         # setup distance function
         if distance_func is None:
             distance_func = DEFAULT_DISTANCE_FUNCS[method]
-        
         # setup stream device
         if self.input_type == "audio":
             self.stream = AudioStream(
@@ -375,6 +374,7 @@ class Matchmaker(object):
 
             reference_features = self.processor(self.score_audio)
             self.reference_features = reference_features
+            self.processor.reset()
         else:
             if self.method == "arzt":
                 if self.performance_file is not None:
@@ -491,7 +491,7 @@ class Matchmaker(object):
 
     def run_evaluation(
         self,
-        perf_annotations: PathLike,
+        perf_annotations: Union[PathLike, np.ndarray],
         level: str = "beat",
         tolerances: list = TOLERANCES_IN_MILLISECONDS,
         musical_beat: bool = False,  # beat annots are difference in some dataset
@@ -505,8 +505,9 @@ class Matchmaker(object):
 
         Parameters
         ----------
-        perf_annotations : PathLike
-            Path to the performance annotations file (tab-separated)
+        perf_annotations : PathLike or np.ndarray
+            Path to the performance annotations file (tab-separated),
+            or numpy array of annotation times in seconds.
         level : str
             Level of annotations to use: bar, beat or note
         tolerance : list
@@ -525,8 +526,11 @@ class Matchmaker(object):
         if not self._has_run:
             raise ValueError("Must call run() before evaluation")
 
+        if isinstance(perf_annotations, np.ndarray):
+            perf_annots = perf_annotations
+        else:
+            perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
         score_annots = self.build_score_annotations(level, musical_beat)
-        perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
         original_perf_annots_length = len(perf_annots)
 
         min_length = min(len(score_annots), len(perf_annots))
