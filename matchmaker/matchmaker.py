@@ -79,12 +79,18 @@ KWARGS = {
         "dixon": {
             "window_size": 10,
         },
-        "arzt": {},
+        "arzt": {
+            "window_size": 5,
+            "start_window_size": 0.25,
+            "step_size" : 5,},
     },
     "midi": {
         "arzt": {
             "processor": "pianoroll",
             "piano_range": True,
+            "window_size": 200,
+            "start_window_size": 200,
+            "step_size": 5,
         },
         "dixon": {
             "processor": "pianoroll",
