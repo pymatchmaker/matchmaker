@@ -243,19 +243,18 @@ class AudioStream(Stream):
         audio_y, sr = librosa.load(self.file_path, sr=None)
         if sr != self.target_sr:
             audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
+            sr = self.target_sr
 
-        duration = int(librosa.get_duration(path=self.file_path))
-        time_interval = self.hop_length / self.sample_rate
-        padded_audio = np.concatenate(  # zero padding at the end
-            (
-                audio_y,
-                np.zeros(int(duration * 0.1 * self.sample_rate), dtype=np.float32),
+        time_interval = self.hop_length / float(sr)
+        # Pad to next hop_length boundary so no trailing samples are lost
+        remainder = len(audio_y) % self.hop_length
+        if remainder > 0:
+            audio_y = np.concatenate(
+                (audio_y, np.zeros(self.hop_length - remainder, dtype=np.float32))
             )
-        )
-        trimmed_audio = padded_audio[  # trim to multiple of chunk_size
-            : len(padded_audio) - (len(padded_audio) % self.hop_length)
-        ]
-        while trimmed_audio.any():
+        trimmed_audio = audio_y
+        # Do not stop early on digital silence (all-zeros tails).
+        while trimmed_audio.size > 0:
             self.input_index += 1
             self.last_data_received = time.time()
             target_audio = trimmed_audio[: self.hop_length]

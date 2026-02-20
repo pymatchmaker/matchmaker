@@ -20,7 +20,7 @@ N_MFCC = 13
 DCT_TYPE = 2
 NORM = np.inf
 FEATURES = "chroma"
-QUEUE_TIMEOUT = 10
+QUEUE_TIMEOUT = 1
 
 # Type hint for Input Audio frame.
 InputAudioSeries = np.ndarray
@@ -159,8 +159,67 @@ class CQTProcessor(Processor):
             hop_length=self.hop_length,
             norm=self.norm,
             dtype=np.float32,
+            fmin=librosa.note_to_hz("A0"),
+            n_bins=88,
         )
         return np.abs(cqt).T[1:-1]
+
+
+class CQTSpectralFluxProcessor(Processor):
+    """
+    CQT spectrum (88 bins, A0-C8) with optional half-wave rectified spectral flux.
+    Output shape: (n_frames, 88) or (n_frames, 89) if include_spectral_flux=True.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+        norm: Optional[Union[float, str]] = NORM,
+        fmin: Optional[float] = None,
+        n_bins: int = 88,
+        bins_per_octave: int = 12,
+        include_spectral_flux: bool = True,
+    ):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.hop_length = hop_length
+        self.norm = norm
+        self.fmin = fmin if fmin is not None else librosa.note_to_hz("A0")
+        self.n_bins = n_bins
+        self.bins_per_octave = bins_per_octave
+        self.include_spectral_flux = include_spectral_flux
+        self.prev_magnitude = None
+
+    def __call__(
+        self,
+        y: InputAudioSeries,
+    ) -> Tuple[Optional[np.ndarray], Dict]:
+        cqt = librosa.cqt(
+            y=y,
+            sr=self.sample_rate,
+            hop_length=self.hop_length,
+            fmin=self.fmin,
+            n_bins=self.n_bins,
+            bins_per_octave=self.bins_per_octave,
+            norm=self.norm,
+            dtype=np.float32,
+        )
+        cqt_features = np.abs(cqt).T
+
+        if self.include_spectral_flux:
+            if self.prev_magnitude is None:
+                spectral_flux = np.zeros((cqt_features.shape[0], 1), dtype=np.float32)
+            else:
+                diff = np.maximum(cqt_features - self.prev_magnitude, 0)
+                spectral_flux = np.sum(diff, axis=1, keepdims=True)
+
+            self.prev_magnitude = cqt_features.copy()
+            features = np.hstack([cqt_features, spectral_flux])
+        else:
+            features = cqt_features
+
+        return features[1:-1]
 
 
 class MelSpectrogramProcessor(Processor):
@@ -318,6 +377,8 @@ def compute_features_from_audio(
         "mel": MelSpectrogramProcessor,
         "mfcc": MFCCProcessor,
         "log_spectral": LogSpectralEnergyProcessor,
+        "cqt": CQTProcessor,
+        "cqt_spectral_flux": CQTSpectralFluxProcessor,
     }
 
     feature_processor = processor_mapping[processor_name](
