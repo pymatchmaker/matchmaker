@@ -306,7 +306,7 @@ class Matchmaker(object):
         else:
             raise ValueError(f"Invalid input type {self.input_type}")
 
-        self.reference_features = self.preprocess_score(use_score_audio)
+        self.reference_features = self.preprocess_score()
 
         if distance_func is None:
             distance_func = DEFAULT_DISTANCE_FUNCS[method]
