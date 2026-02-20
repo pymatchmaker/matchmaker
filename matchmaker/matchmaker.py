@@ -306,7 +306,6 @@ class Matchmaker(object):
         else:
             raise ValueError(f"Invalid input type {self.input_type}")
 
-        use_score_audio = self.input_type == "audio" and method in {"dixon", "arzt"}
         self.reference_features = self.preprocess_score(use_score_audio)
 
         if distance_func is None:
@@ -369,36 +368,37 @@ class Matchmaker(object):
         else:
             raise ValueError("Invalid method")
 
-    def preprocess_score(self, use_score_audio: bool = False):
+    def preprocess_score(self):
         """Preprocess score to extract reference features."""
         if self.auto_adjust_tempo and self.performance_file is not None:
             self.tempo = adjust_tempo_for_performance_file(
                 self.score_part, self.performance_file, self.tempo
             )
 
-        if use_score_audio:
-            self.score_audio = generate_score_audio(
-                self.score_part, self.tempo, self.sample_rate
-            ).astype(np.float32)
-            reference_features = self.processor(self.score_audio)
-            self.processor.reset()
-            return reference_features
-        elif self.method in {"arzt", "dixon"}: # only midi
+        if self.method in {"arzt", "dixon"}:
             self.ppart = partitura.utils.music.performance_from_part(self.score_part, bpm=self.tempo)
             self.ppart.sustain_pedal_threshold = 127
-            polling_period = 0.01
-            reference_features = (
-                partitura.utils.music.compute_pianoroll(
-                    note_info=self.ppart,
-                    time_unit="sec",
-                    time_div=int(np.round(1 / polling_period)),
-                    binary=True,
-                    piano_range=self.config["piano_range"],
-                )
-                .toarray()
-                .T
-            ).astype(np.float32)
-            return reference_features
+            if self.input_type == "audio":
+                self.score_audio = generate_score_audio(
+                    self.score_part, self.tempo, self.sample_rate
+                ).astype(np.float32)
+                reference_features = self.processor(self.score_audio)
+                self.processor.reset()
+                return reference_features
+            else:
+                polling_period = 0.01
+                reference_features = (
+                    partitura.utils.music.compute_pianoroll(
+                        note_info=self.ppart,
+                        time_unit="sec",
+                        time_div=int(np.round(1 / polling_period)),
+                        binary=True,
+                        piano_range=self.config["piano_range"],
+                    )
+                    .toarray()
+                    .T
+                ).astype(np.float32)
+                return reference_features
         else:
             return self.score_part.note_array()
     
