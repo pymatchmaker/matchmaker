@@ -6,7 +6,6 @@ Miscellaneous utilities
 
 import csv
 import numbers
-import os
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -17,12 +16,9 @@ import librosa
 import numpy as np
 import partitura
 import scipy
-import soundfile as sf
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 from partitura.score import ScoreLike
-
-from matchmaker.features.audio import SAMPLE_RATE
 
 # Tempo marking to BPM mapping
 # Reference: https://en.wikipedia.org/wiki/Tempo#Basic_tempo_markings
@@ -324,6 +320,7 @@ def get_tempo_from_score(
     Tries multiple sources in order:
     1. Partitura Tempo objects (explicit BPM)
     2. MusicXML <sound tempo="..."/> element (if score_file provided)
+    3. Text tempo marking (e.g., "Allegro", "Andante") converted to approximate BPM
 
     Parameters
     ----------
@@ -361,6 +358,12 @@ def get_tempo_from_score(
                     return float(tempo_attr)
         except Exception:
             pass
+
+    # Fallback: extract from text tempo marking (e.g., "Allegro", "Andante")
+    if score_file is not None:
+        text_tempo = extract_tempo_marking_from_musicxml(score_file)
+        if text_tempo is not None:
+            return text_tempo
 
     return None
 
@@ -514,161 +517,181 @@ def save_nparray_to_csv(array: NDArray, save_path: str):
         writer.writerows(array)
 
 
-def save_mixed_audio(
-    audio: Union[np.ndarray, str, os.PathLike],
-    annots: np.ndarray,
-    save_path: Union[str, os.PathLike],
-    sr: int = SAMPLE_RATE,
+def plot_alignment(
+    warping_path: np.ndarray,
+    perf_annots: np.ndarray,
+    perf_annots_predicted: np.ndarray,
+    save_dir: Path,
+    name: str,
+    score_y: Optional[np.ndarray] = None,
+    frame_rate: float = 1.0,
+    state_space: Optional[np.ndarray] = None,
+    ref_features: Optional[np.ndarray] = None,
+    input_features: Optional[np.ndarray] = None,
+    distance_func=None,
 ):
-    if not isinstance(audio, np.ndarray):
-        audio, _ = librosa.load(audio, sr=sr)
+    """Plot warping path, GT annotations, and predicted points in one figure.
 
-    annots_audio = librosa.clicks(
-        times=annots,
-        sr=sr,
-        click_freq=1000,
-        length=len(audio),
+    Layers (back to front): distance matrix → warping path → predicted → GT.
+    """
+    save_dir.mkdir(parents=True, exist_ok=True)
+    gt = np.asarray(perf_annots, dtype=float)
+    pred = np.asarray(perf_annots_predicted, dtype=float)
+    n = min(len(gt), len(pred))
+    gt, pred = gt[:n], pred[:n]
+
+    has_dist_matrix = (
+        ref_features is not None
+        and input_features is not None
+        and distance_func is not None
     )
-    audio_mixed = audio + annots_audio
-    sf.write(str(save_path), audio_mixed, sr, subtype="PCM_24")
 
+    fig, ax = plt.subplots(figsize=(30, 30))
 
-def plot_and_save_score_following_result(
-    wp,
-    ref_features,
-    input_features,
-    distance_func,
-    save_dir,
-    score_annots,
-    perf_annots,
-    frame_rate,
-    name=None,
-):
-    xmin = 0  # performance range
-    xmax = None
-    ymin = 0  # score range
-    ymax = None
+    if has_dist_matrix:
+        # DTW mode: everything in frame space
+        dist = scipy.spatial.distance.cdist(
+            ref_features,
+            input_features,
+            metric=distance_func,
+        )
+        ax.imshow(
+            dist,
+            aspect="auto",
+            origin="lower",
+            interpolation="nearest",
+            extent=(0, input_features.shape[0] - 1, 0, ref_features.shape[0] - 1),
+        )
+        x_gt = gt * float(frame_rate)
+        x_pred = pred * float(frame_rate)
+        if score_y is not None:
+            y = np.asarray(score_y, dtype=float)[:n] * float(frame_rate)
+        else:
+            y = np.arange(n)
+        ylabel = "score (frames)"
+        wp_x = warping_path[1]
+        wp_y = warping_path[0]
+    else:
+        # HMM mode: x in frames, y in beats via state_space
+        x_gt = gt * float(frame_rate)
+        x_pred = pred * float(frame_rate)
+        if score_y is None:
+            y = np.arange(n)
+            ylabel = "annotation index"
+        else:
+            y = np.asarray(score_y, dtype=float)[:n]
+            ylabel = "score position (beats)"
+        wp_x = warping_path[1]
+        if state_space is not None:
+            wp_y = state_space[warping_path[0]]
+        else:
+            wp_y = warping_path[0]
 
-    xmax = xmax if xmax is not None else input_features.shape[0] - 1
-    ymax = ymax if ymax is not None else ref_features.shape[0] - 1
-    x_indices = range(xmin, xmax + 1)
-    y_indices = range(ymin, ymax + 1)
+    # 1. Warping path
+    if has_dist_matrix:
+        ax.plot(
+            wp_x,
+            wp_y,
+            ".",
+            color="white",
+            alpha=0.7,
+            markersize=15,
+            label="warping path",
+            zorder=2,
+        )
+    else:
+        ax.plot(
+            wp_x,
+            wp_y,
+            ".",
+            color="lime",
+            alpha=0.5,
+            markersize=15,
+            label="warping path",
+            zorder=2,
+        )
 
-    run_name = name or "results"
-    save_path = save_dir / f"wp_{run_name}.tsv"
-    save_nparray_to_csv(wp.T, save_path.as_posix())
-
-    dist = scipy.spatial.distance.cdist(
-        ref_features[y_indices, :],
-        input_features[x_indices, :],
-        metric=distance_func,
-    )  # [d, wy]
-    plt.figure(figsize=(10, 10))
-    plt.imshow(
-        dist,
-        aspect="auto",
-        origin="lower",
-        interpolation="nearest",
-        extent=(xmin, xmax, ymin, ymax),
+    # 2. Predicted points
+    ax.scatter(
+        x_pred,
+        y,
+        label="predicted",
+        s=80,
+        alpha=0.9,
+        marker="o",
+        color="blue",
+        linewidths=0,
+        zorder=3,
     )
-    mask_perf = (xmin <= perf_annots * frame_rate) & (perf_annots * frame_rate <= xmax)
-    mask_score = (ymin <= score_annots * frame_rate) & (
-        score_annots * frame_rate <= ymax
-    )
-    plt.title(
-        f"[{save_dir.name}/{run_name}] \n Matchmaker alignment path with ground-truth labels",
-        fontsize=15,
-    )
-    plt.xlabel("Performance Features", fontsize=15)
-    plt.ylabel("Score Features", fontsize=15)
 
-    # plot online DTW path
-    cropped_history = [
-        (ref, target)
-        for (ref, target) in wp.T
-        if xmin <= target <= xmax and ymin <= ref <= ymax
-    ]
-    for ref, target in cropped_history:
-        plt.plot(target, ref, ".", color="cyan", alpha=0.5, markersize=3)
+    # 3. GT annotations (front)
+    ax.scatter(
+        x_gt,
+        y,
+        label="ground truth",
+        s=120,
+        alpha=0.9,
+        marker="x",
+        color="red",
+        linewidths=3,
+        zorder=4,
+    )
 
-    # plot ground-truth labels
-    for ref, target in zip(score_annots, perf_annots):
-        if (xmin <= target * frame_rate <= xmax) and (ymin <= ref * frame_rate <= ymax):
-            plt.plot(
-                target * frame_rate,
-                ref * frame_rate,
-                "x",
-                color="r",
-                alpha=1,
-                markersize=3,
-                markeredgewidth=3,
-            )
-    plt.savefig(save_dir / f"{run_name}.png")
+    ax.set_xlabel("performance frame")
+    ax.set_ylabel(ylabel)
+    ax.set_title(f"[{save_dir.name}] alignment ({name})")
+    ax.grid(True, alpha=0.2)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(save_dir / f"{name}.png", dpi=150)
+    plt.close(fig)
 
 
 def save_debug_results(
-    score_file,
-    score_audio,
-    score_annots,
-    score_annots_predicted,
-    perf_file,
-    perf_annots,
-    perf_annots_predicted,
-    model,
-    frame_rate,
-    save_dir=None,
-    run_name=None,
+    warping_path: np.ndarray,
+    score_annots: np.ndarray,
+    perf_annots: np.ndarray,
+    perf_annots_predicted: np.ndarray,
+    eval_results: dict,
+    frame_rate: float,
+    save_dir: Path,
+    run_name: str = "results",
+    state_space: Optional[np.ndarray] = None,
+    ref_features: Optional[np.ndarray] = None,
+    input_features: Optional[np.ndarray] = None,
+    distance_func=None,
 ):
-    # save score audio with beat annotations
-    score_audio_dir = Path("./score_audio")
-    score_audio_dir.mkdir(parents=True, exist_ok=True)
-    run_name_suffix = (
-        f"{Path(perf_file).stem}_{run_name}" if run_name else f"{Path(perf_file).stem}"
-    )
-    save_mixed_audio(
-        score_audio,
-        score_annots,
-        save_path=score_audio_dir
-        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).stem}_{run_name_suffix}.wav",
-    )
-    # save performance audio with beat annotations
-    perf_audio_dir = Path("./performance_audio")
-    perf_audio_dir.mkdir(parents=True, exist_ok=True)
-    save_mixed_audio(
-        perf_file,
-        perf_annots,
-        save_path=perf_audio_dir
-        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{run_name_suffix}.wav",
-    )
-    # save score audio with predicted beat annotations
-    score_predicted_audio_dir = Path("./score_audio_predicted")
-    score_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
-    save_mixed_audio(
-        score_audio,
-        score_annots_predicted,
-        save_path=score_predicted_audio_dir
-        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).parent.name}_{run_name_suffix}.wav",
-    )
-    # save performance audio with predicted beat annotations
-    perf_predicted_audio_dir = Path("./performance_audio_predicted")
-    perf_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
-    save_mixed_audio(
-        perf_file,
-        perf_annots_predicted,
-        save_path=perf_predicted_audio_dir
-        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{run_name_suffix}.wav",
-    )
-    # save score following plot result
-    save_dir = save_dir or Path("./tests/results")
+    """Save debug outputs: warping path TSV, results JSON, and alignment plot."""
+    save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
-    plot_and_save_score_following_result(
-        model.warping_path,
-        model.reference_features,
-        model.input_features,
-        model.distance_func,
-        save_dir,
-        score_annots,
+
+    # 1. Warping path TSV + results JSON
+    save_nparray_to_csv(warping_path.T, (save_dir / f"wp_{run_name}.tsv").as_posix())
+    import json
+
+    with open(save_dir / f"{run_name}.json", "w") as f:
+        json.dump(eval_results, f, indent=4)
+
+    # 2. Alignment plot
+    if state_space is not None:
+        score_y = state_space
+    else:
+        sx = np.asarray(score_annots, dtype=float)
+        score_y = (
+            sx
+            if sx.ndim == 1 and len(sx) == len(perf_annots) and np.all(np.diff(sx) >= 0)
+            else None
+        )
+    plot_alignment(
+        warping_path,
         perf_annots,
-        frame_rate,
-        name=run_name,
+        perf_annots_predicted,
+        save_dir,
+        run_name,
+        score_y=score_y,
+        frame_rate=frame_rate,
+        state_space=state_space,
+        ref_features=ref_features,
+        input_features=input_features,
+        distance_func=distance_func,
     )
