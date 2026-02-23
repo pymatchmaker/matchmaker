@@ -13,6 +13,7 @@ from queue import Empty, Queue
 from typing import Any, Dict, Iterable, List, Optional, Union
 
 import librosa
+import mido
 import numpy as np
 import partitura
 import scipy
@@ -425,25 +426,28 @@ def get_tempo_at_beat(
     return current_tempo
 
 
-def adjust_tempo_for_performance_audio(
-    score: ScoreLike, performance_audio: Path, default_tempo: int = 120
+def adjust_tempo_for_performance_file(
+    score: ScoreLike, performance_file: Path, default_tempo: int = 120
 ):
     """
-    Adjust the tempo of the score part to match the performance audio.
+    Adjust the tempo of the score part to match the performance file.
     We round up the tempo to the nearest 20 bpm to avoid too much optimization.
 
     Parameters
     ----------
     score : partitura.score.ScoreLike
         The score to adjust the tempo of.
-    performance_audio : Path
-        The performance audio file to adjust the tempo to.
+    performance_file : Path
+        The performance file to adjust the tempo to.
     default_tempo : int
         The default tempo of the score.
     """
     score_midi = partitura.save_score_midi(score, out=None)
     source_length = score_midi.length
-    target_length = librosa.get_duration(path=str(performance_audio))
+    if is_midi_file(performance_file):
+        target_length = mido.MidiFile(performance_file).length
+    else:
+        target_length = librosa.get_duration(path=str(performance_file))
     ratio = target_length / source_length
     rounded_tempo = int(
         (default_tempo / ratio + 19) // 20 * 20
