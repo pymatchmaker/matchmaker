@@ -4,10 +4,8 @@ from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
-import partitura
-from partitura.io.exportmidi import get_ppq
-from partitura.score import Part
 
+import partitura
 from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
 from matchmaker.features.audio import (
     FRAME_RATE,
@@ -21,8 +19,8 @@ from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import GaussianAudioPitchHMM, PitchIOIHMM
-from matchmaker.prob.particle_filter_midi import ParticleFilterMIDI
 from matchmaker.prob.particle_filter_audio import ParticleFilterAudio
+from matchmaker.prob.particle_filter_midi import ParticleFilterMIDI
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
@@ -37,6 +35,8 @@ from matchmaker.utils.misc import (
     is_midi_file,
     save_debug_results,
 )
+from partitura.io.exportmidi import get_ppq
+from partitura.score import Part
 
 PathLike = Union[str, bytes, os.PathLike]
 DEFAULT_TEMPO = 120
@@ -211,8 +211,9 @@ class Matchmaker(object):
                 queue=self.stream.queue,
             )
         elif method == "hmm" and self.input_type == "audio":
-
-            state_space = self._convert_frame_to_beat(np.arange(len(self.reference_features)))
+            state_space = self._convert_frame_to_beat(
+                np.arange(len(self.reference_features))
+            )
             self.score_follower = GaussianAudioPitchHMM(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
@@ -229,12 +230,16 @@ class Matchmaker(object):
             )
 
         elif method == "pf" and self.input_type == "audio":
-            state_space = self._convert_frame_to_beat(np.arange(len(self.reference_features)))
+            state_space = self._convert_frame_to_beat(
+                np.arange(len(self.reference_features))
+            )
             score_boundaries = self.get_score_onsets_in_beats(self.score_part)
             # for every entry in score_boundaries, find the highest beat in state_space that is smaller than or equal to it, and replace the entry with that beat (to ensure boundaries are aligned with score frames)
             score_boundaries = np.array(
                 [
-                    state_space[np.searchsorted(state_space, boundary, side="right") - 1]
+                    state_space[
+                        np.searchsorted(state_space, boundary, side="right") - 1
+                    ]
                     for boundary in score_boundaries
                 ]
             )
@@ -245,7 +250,7 @@ class Matchmaker(object):
                 notated_tempo=self.tempo,
                 hop_size=1.0 / self.frame_rate,
                 queue=self.stream.queue,
-                num_particles=1000
+                num_particles=100,
             )
 
     def preprocess_score(self):
@@ -284,7 +289,7 @@ class Matchmaker(object):
             decimals=2,
         )
         return beat_position
-    
+
     def get_score_onsets_in_beats(self, score_part: Part) -> np.ndarray:
         """
         Get the beat positions of note onsets in the score.
@@ -321,8 +326,9 @@ class Matchmaker(object):
             for current_frame in self.score_follower.run(verbose=verbose):
                 if self.input_type == "audio" and self.method != "hmm":
                     if self.method == "pf":
-                        #print("bn", float(self.score_follower.state_space[current_frame]))
-                        yield float(self.score_follower.state_space[current_frame])
+                        # print("bn", float(self.score_follower.state_space[current_frame]))
+                        position_in_beat = float(current_frame)
+                        yield position_in_beat
                     else:
                         position_in_beat = self._convert_frame_to_beat(current_frame)
                         yield position_in_beat
