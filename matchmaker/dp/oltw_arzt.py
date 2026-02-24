@@ -98,6 +98,9 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         current_position: int = 0,
         frame_rate: int = FRAME_RATE,
         queue: Optional[RECVQueue] = None,
+        state_to_ref_time_map = None,
+        ref_to_state_time_map = None,
+        state_space = None,
         **kwargs,
     ) -> None:
         super().__init__(reference_features=reference_features)
@@ -173,6 +176,9 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             "max_latency": 0,
             "min_latency": float("inf"),
         }
+        self.state_to_ref_time_map = state_to_ref_time_map
+        self.ref_to_state_time_map = ref_to_state_time_map
+        self.state_space = state_space #if state_space != None else np.unique(self.reference_features.note_array()["onset_beat"])
 
     @property
     def warping_path(self) -> NDArray[np.int32]:
@@ -289,7 +295,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         if self.input_index == 0:
             # enforce the first time step to stay at the
             # initial position
-            self.current_position = min(
+            self.current_position = min( # TODO: Is this necessary?
                 max(self.current_position, min_index),
                 self.current_position,
             )
@@ -305,4 +311,4 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
 
 
 if __name__ == "__main__":
-    pass
+    pass  # pragma: no cover

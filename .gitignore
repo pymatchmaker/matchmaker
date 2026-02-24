@@ -172,6 +172,7 @@ matchmaker/utils/distances.c
 tests/dev*.py
 tests/tmp/
 matchmaker/rl/*
+matchmaker/prob/viterbi_step.c
 
 *~
 tests/test_io_error_trace.txt
@@ -195,7 +196,7 @@ score_audio_mozart_k265_var1.wav
 performance_audio*/
 score_audio*/
 notebook/
-
 .claude/
 src/
 scripts/
+

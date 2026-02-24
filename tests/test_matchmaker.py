@@ -13,6 +13,7 @@ from matchmaker.features.midi import PitchIOIProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
+from matchmaker.prob.outer_product_hmm import OuterProductHMM
 
 warnings.filterwarnings("ignore", module="partitura")
 warnings.filterwarnings("ignore", module="librosa")
@@ -25,7 +26,7 @@ class TestMatchmaker(unittest.TestCase):
         self.performance_file_audio = "./tests/resources/Bach-fugue_bwv_858.mp3"
         self.performance_file_midi = "./tests/resources/Bach-fugue_bwv_858.mid"
         self.performance_file_annotations = (
-            "./tests/resources/Bach-fugue_bwv_858_annotations.txt"
+            "./tests/resources/Bach-fugue_bwv_858_note_annotations.txt"
         )
 
         self.test_datasets = [
@@ -34,15 +35,15 @@ class TestMatchmaker(unittest.TestCase):
                 "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
                 "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
                 "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
-                "annotations": "./tests/resources/Bach-fugue_bwv_858_annotations.txt",
+                "annotations": "./tests/resources/Bach-fugue_bwv_858_note_annotations.txt",
             },
-            # {
-            #     "name": "mozart_k265_var1",
-            #     "score": "./matchmaker/assets/mozart_k265_var1.musicxml",
-            #     "audio": "./matchmaker/assets/mozart_k265_var1.mp3",
-            #     "midi": "./matchmaker/assets/mozart_k265_var1.mid",
-            #     "annotations": "./matchmaker/assets/mozart_k265_var1_annotations.txt",
-            # },
+            {
+                "name": "simple_mozart_k265_var1",
+                "score": "./matchmaker/assets/simple_mozart_k265_var1.musicxml",
+                "audio": "./matchmaker/assets/simple_mozart_k265_var1.mp3",
+                "midi": "./matchmaker/assets/simple_mozart_k265_var1.mid",
+                "annotations": "./matchmaker/assets/simple_mozart_k265_var1_note_annotations.txt",
+            },
         ]
 
     def test_matchmaker_audio_init(self):
@@ -171,11 +172,12 @@ class TestMatchmaker(unittest.TestCase):
             mm._has_run = True
 
         results = mm.run_evaluation(
-            self.performance_file_annotations,
+            "./tests/resources/Bach-fugue_bwv_858_beat_annotations.txt",
+            level="beat",
             debug=True,
             save_dir=Path("./tests/results"),
             run_name="test_matchmaker_audio_run_with_evaluation_in_beats",
-            in_seconds=False,
+            domain="score",
         )
         print(f"RESULTS: {json.dumps(results, indent=4)}")
 
@@ -279,7 +281,7 @@ class TestMatchmaker(unittest.TestCase):
 
         # Then: the Matchmaker instance should be correctly initialized
         self.assertIsInstance(mm.stream, MidiStream)
-        self.assertIsInstance(mm.score_follower, PitchIOIHMM)
+        self.assertIsInstance(mm.score_follower, OuterProductHMM)
         self.assertIsInstance(mm.processor, PitchIOIProcessor)
 
     def test_matchmaker_midi_run(self):
