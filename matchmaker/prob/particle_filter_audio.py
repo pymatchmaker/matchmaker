@@ -52,7 +52,7 @@ class ParticleFilterAudio(OnlineAlignment):
         self.tempo_noise = self.rng.normal(0, self.sigma_v, self.num_particles)
 
         # Particle state arrays
-        self.x = self.rng.uniform(state_space[0], state_space[3], num_particles)  # beat positions - full range!
+        self.x = self.rng.uniform(state_space[0], state_space[3], num_particles)
         self.v = self.rng.normal(notated_tempo, self.sigma_v, num_particles)  # Normal distribution around notated tempo
         self.v = np.clip(self.v, self.v_min, self.v_max)  # Clip to valid range
         self.weights = np.ones(num_particles) / num_particles
@@ -101,8 +101,7 @@ class ParticleFilterAudio(OnlineAlignment):
 
         frac = (beat_position - beat_left) / (beat_right - beat_left + 1e-12)
 
-        return (1 - frac) * self.reference_features[left] + \
-            frac * self.reference_features[right]
+        return (1 - frac) * self.reference_features[left] + frac * self.reference_features[right]
 
     @staticmethod
     def _cosine_angle(ca, cm):
@@ -123,14 +122,14 @@ class ParticleFilterAudio(OnlineAlignment):
         if idx <= 0:
             return np.ones(self.num_particles)  # No timing info at start
         
-        beat_diff = abs(self.state_space[idx] - self.state_space[idx - 1])
+        beat_diff = self.state_space[idx] - self.state_space[idx - 1]
         expected_ioi = (60.0 * beat_diff) / self.notated_tempo
         
         # Estimate tempo from observed IOI
         tempo_estimate = (60.0 * beat_diff) / max(ioi, 1e-6)
         
-        # Aggressive tempo update - use higher learning rate
-        alpha = 0.7  # Increased from 0.1
+        # tempo update
+        alpha = 0.1
         self.v += alpha * (tempo_estimate - self.v)
         self.v = np.clip(self.v, self.v_min, self.v_max)  # Ensure valid range
         
@@ -138,11 +137,14 @@ class ParticleFilterAudio(OnlineAlignment):
         return np.exp(-0.5 * ((ioi - expected_ioi) / max(self.sigma_v, 1e-6)) ** 2)
 
     def step(self, feature, f_time):
+        tempo_mean = np.mean(self.v)
+        print(f"Current tempo estimate: {tempo_mean:.2f} BPM")
         prev_mean_x = np.mean(self.x)
 
         if self.p_ioi is not None:
             self.p_ioi = f_time  - self.f_time_prev
             self.f_time_prev = f_time
+        
         self.predict()
 
         likelihoods = self.compute_likelihood(feature)
@@ -153,31 +155,29 @@ class ParticleFilterAudio(OnlineAlignment):
             self.f_time_prev = f_time
             self.p_ioi = 0.0
 
-        # Add small amount of uniform likelihood to avoid zero-likelihood traps
-        likelihoods = likelihoods + 1e-6 * np.max(likelihoods)
 
-        # Forward bias
-        gamma = 2.0  # try between 0.5 and 5.0
-        forward_term = np.exp(gamma * (self.x - prev_mean_x))
-        likelihoods *= forward_term
+        # # Forward bias
+        # gamma = 1  # try between 0.5 and 5.0
+        # forward_term = np.exp(gamma * (self.x - prev_mean_x))
+        # likelihoods *= forward_term
 
         
         self.weights *= likelihoods
         self.weights += 1e-12  # avoid zero
         self.weights /= np.sum(self.weights)
-
+  
         # Only resample if effective sample size is too low
-        n_eff = 1.0 / np.sum(self.weights ** 2)
-        if n_eff < self.num_particles / 2.0:
-            indices = self.rng.choice(
-                self.num_particles,
-                size=self.num_particles,
-                p=self.weights
-            )
-            self.x = self.x[indices]
-            self.v = self.v[indices]
-            # Reset weights only after resampling
-            self.weights.fill(1.0 / self.num_particles)
+        #n_eff = 1.0 / np.sum(self.weights ** 2)
+        #if n_eff < self.num_particles / 2.0:
+        indices = self.rng.choice(
+            self.num_particles,
+            size=self.num_particles,
+            p=self.weights
+        )
+        self.x = self.x[indices]
+        self.v = self.v[indices]
+        # Reset weights only after resampling
+        self.weights.fill(1.0 / self.num_particles)
 
         return int(round(np.mean(self.x)))
     
