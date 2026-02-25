@@ -161,7 +161,7 @@ class ParticleFilterAudio(OnlineAlignment):
             self.num_particles, size=self.num_particles, p=self.weights
         )
         self.x = self.x[indices]
-        # self.v = self.v[indices]
+        self.v = self.v[indices]
         # Reset weights only after resampling
         self.weights.fill(1.0 / self.num_particles)
 

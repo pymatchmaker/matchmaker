@@ -1,26 +1,42 @@
-import csv
 import os
+import sys
 from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
-
 import partitura
+from partitura.io.exportmidi import get_ppq
+from partitura.score import Part, merge_parts
+from partitura.musicanalysis.performance_codec import get_time_maps_from_alignment
+
 from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
 from matchmaker.features.audio import (
     FRAME_RATE,
     SAMPLE_RATE,
     ChromagramProcessor,
     CQTProcessor,
+    # CQTSpectralFluxProcessor,
+    # LogSpectralEnergyProcessor,
     MelSpectrogramProcessor,
     MFCCProcessor,
 )
-from matchmaker.features.midi import PianoRollProcessor, PitchIOIProcessor
+from matchmaker.features.midi import (
+    PianoRollProcessor,
+    PitchClassPianoRollProcessor,
+    PitchIOIProcessor,
+)
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
-from matchmaker.prob.hmm import GaussianAudioPitchHMM, PitchIOIHMM
-from matchmaker.prob.particle_filter_audio import ParticleFilterAudio
+from matchmaker.prob.hmm import (
+    GaussianAudioPitchHMM,
+    GaussianAudioPitchTempoHMM,
+    PitchHMM,
+    PitchIOIHMM,
+)
 from matchmaker.prob.particle_filter_midi import ParticleFilterMIDI
+from matchmaker.prob.particle_filter_audio import ParticleFilterAudio
+#from matchmaker.prob.outer_product_hmm import OuterProductHMM
+#from matchmaker.prob.outer_product_hmm_audio import AudioOuterProductHMM
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
@@ -29,31 +45,88 @@ from matchmaker.utils.eval import (
     transfer_from_score_to_predicted_perf,
 )
 from matchmaker.utils.misc import (
+    #adjust_tempo_for_performance_file,
     adjust_tempo_for_performance_audio,
     generate_score_audio,
+    #get_tempo_from_score,
     is_audio_file,
     is_midi_file,
     save_debug_results,
 )
-from partitura.io.exportmidi import get_ppq
-from partitura.score import Part
+from matchmaker.utils.tempo_models import KalmanTempoModel
+
+sys.setrecursionlimit(10_000)
 
 PathLike = Union[str, bytes, os.PathLike]
 DEFAULT_TEMPO = 120
+
+
 DEFAULT_DISTANCE_FUNCS = {
     "arzt": OnlineTimeWarpingArzt.DEFAULT_DISTANCE_FUNC,
     "dixon": OnlineTimeWarpingDixon.DEFAULT_DISTANCE_FUNC,
     "hmm": None,
+    "outerhmm": None,
+    "audio_outerhmm": None,
+    "pthmm": None,
     "pf": None,
 }
 
 DEFAULT_METHODS = {
     "audio": "arzt",
-    "midi": "pf",
+    "midi": "outerhmm",
 }
 
-AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pf"]
-
+AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm", "outerhmm", "audio_outerhmm", "pf"]
+KWARGS = {
+    "audio": {
+        "dixon": {
+            "window_size": 10,
+        },
+        "arzt": {
+            "window_size": 5,
+            "start_window_size": 0.25,
+            "step_size" : 5,},
+        "audio_outerhmm": {
+            "sample_rate": 16000,
+            "frame_rate": 50,
+        },
+        "pf": {
+            "num_particles": 1000,
+        },
+    },
+    "midi": {
+        "arzt": {
+            "processor": "pianoroll",
+            "piano_range": True,
+            "window_size": 200,
+            "start_window_size": 200,
+            "step_size": 5,
+        },
+        "dixon": {
+            "processor": "pianoroll",
+            "piano_range": True,
+            "window_size": 30,
+        },
+        "hmm": {
+            "processor": "pitch_ioi",
+            "tempo_model": KalmanTempoModel,
+            "piano_range": True,
+        },
+        "pthmm": {
+            "processor": "pitch_ioi",
+            "piano_range": True,
+        },
+        "outerhmm": {
+            "processor": "pitch_ioi",
+            "piano_range": True,
+        },
+        "pf": {
+            "processor": "pitch_ioi",
+            "piano_range": False,
+            "num_particles": 1000,
+        },
+    },
+}
 
 class Matchmaker(object):
     """
@@ -91,6 +164,9 @@ class Matchmaker(object):
         device_name_or_index: Union[str, int] = None,
         sample_rate: int = SAMPLE_RATE,
         frame_rate: int = FRAME_RATE,
+        kwargs=KWARGS,
+        unfold_score=True,
+        auto_adjust_tempo: bool = False,
     ):
         self.score_file = str(score_file)
         self.performance_file = (
@@ -109,6 +185,9 @@ class Matchmaker(object):
         self.tempo = DEFAULT_TEMPO  # bpm for quarter note
         self._has_run = False
         self.method = method
+        self.config = kwargs[self.input_type][self.method]
+        self.auto_adjust_tempo = auto_adjust_tempo
+        
 
         # setup score file
         if score_file is None:
