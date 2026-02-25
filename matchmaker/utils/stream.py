@@ -6,10 +6,14 @@ This module contains all Stream related functionality.
 
 from __future__ import annotations
 
+import threading
 import time
 from threading import Thread
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Callable, Optional, Type, Union
+
+STREAM_START = threading.Event  # call STREAM_START() to create per-instance event
+STREAM_END = object()  # put into queue to signal end-of-stream
 
 if TYPE_CHECKING:  # pragma: no cover
     from matchmaker.utils.processor import Processor
@@ -43,6 +47,7 @@ class Stream(Thread):
         self.mock = mock
         self.listen = False
         self.init_time = None
+        self.stream_start = STREAM_START()
 
     def start_listening(self):
         """

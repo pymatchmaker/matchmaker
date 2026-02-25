@@ -139,6 +139,8 @@ class MidiStream(Stream):
             self.queue.put(((data, c_time), output))
         else:
             self.queue.put(output)
+        if not self.stream_start.is_set():
+            self.stream_start.set()
 
     def _process_frame_window(
         self,

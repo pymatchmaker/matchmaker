@@ -14,8 +14,10 @@ import scipy
 from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
-from matchmaker.features.audio import FRAME_RATE, QUEUE_TIMEOUT
+from matchmaker.features.audio import FRAME_RATE
+from matchmaker.io.audio import QUEUE_TIMEOUT
 from matchmaker.utils.misc import set_latency_stats
+from matchmaker.utils.stream import STREAM_END
 
 
 class Direction(IntEnum):
@@ -74,9 +76,9 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         max_run_count=MAX_RUN_COUNT,
         frame_per_seg=FRAME_PER_SEG,
         frame_rate=FRAME_RATE,
-        state_to_ref_time_map = None,
-        ref_to_state_time_map = None,
-        state_space = None,
+        state_to_ref_time_map=None,
+        ref_to_state_time_map=None,
+        state_space=None,
         **kwargs,
     ):
         super().__init__(reference_features=reference_features)
@@ -90,6 +92,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.state_to_ref_time_map = state_to_ref_time_map
         self.ref_to_state_time_map = ref_to_state_time_map
         self.state_space = state_space
+        self._ref_frame_to_beat = kwargs.get("ref_frame_to_beat", None)
         self.reset()
 
     def reset(self):
@@ -113,6 +116,14 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             "min_latency": float("inf"),
         }
         self._initialized = False
+
+    @property
+    def current_beat(self) -> float:
+        """Current score position in beats."""
+        if self._ref_frame_to_beat is not None:
+            idx = min(self.best_ref, len(self._ref_frame_to_beat) - 1)
+            return float(self._ref_frame_to_beat[idx])
+        return float(self.best_ref)
 
     @property
     def warping_path(self) -> NDArray[np.float32]:  # [shape=(2, T)]
@@ -276,8 +287,8 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             return Direction.REF
 
     def save_history(self):
-        """Append current best alignment point to warping path."""
-        new_point = np.array([[self.best_ref], [self.best_input]])
+        """Append current best alignment point to warping path (beats, input_frame)."""
+        new_point = np.array([[self.current_beat], [self.best_input]])
         self.wp = np.concatenate((self.wp, new_point), axis=1)
 
     def __call__(self, input_features: NDArray[np.float32]) -> int:
@@ -363,21 +374,29 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.reset()
 
         if verbose:
-            pbar = progressbar.ProgressBar(max_value=self.N_ref, redirect_stdout=True)
+            pbar = progressbar.ProgressBar(
+                max_value=len(self.state_space),
+                redirect_stdout=True,
+                redirect_stderr=True,
+            )
+            pbar.start()
 
         while self.is_still_following():
-            input_feature, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
+            item = self.queue.get(timeout=QUEUE_TIMEOUT)
+            if item is STREAM_END:
+                break
+            input_feature, f_time = item
             self.last_queue_update = time.time()
             self.step(input_feature)
 
             if verbose:
-                pbar.update(int(self.current_position))
+                pbar.update(int(np.searchsorted(self.state_space, self.current_beat)))
 
             latency = time.time() - self.last_queue_update
             self.latency_stats = set_latency_stats(
                 latency, self.latency_stats, self.input_index
             )
-            yield self.current_position
+            yield self.current_beat
 
         if verbose:
             pbar.finish()

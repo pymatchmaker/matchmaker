@@ -197,7 +197,7 @@ class TestBernoulliGaussianPitchIOIHMM(unittest.TestCase):
             "./tests/resources/Bach-fugue_bwv_858_annotations.txt"
         )
 
-        self.performance = process_audio_offline(
-            perf_info=self.performance_file_audio,
+        self.performance = process_midi_offline(
+            perf_info=self.performance_file_midi,
             processor=PitchProcessor(piano_range=True),
         )

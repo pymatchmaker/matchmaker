@@ -31,6 +31,12 @@ def main():
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--audio", action="store_true", help="Use audio input mode")
     group.add_argument("--midi", action="store_true", help="Use MIDI input mode")
+    parser.add_argument(
+        "--method",
+        type=str,
+        default=None,
+        help="Score following method (e.g., arzt, dixon, outerhmm, audio_outerhmm)",
+    )
     args = parser.parse_args()
 
     input_mode = "midi" if args.midi else "audio"
@@ -39,7 +45,10 @@ def main():
     print(f"Running matchmaker with the score file ({SCORE_FILE.name})...")
     print("-" * 50)
 
-    method = "outerhmm" if input_mode == "midi" else "arzt"
+    if args.method is not None:
+        method = args.method
+    else:
+        method = "outerhmm" if input_mode == "midi" else "arzt"
 
     # Initialize matchmaker (simulation mode)
     try:
@@ -54,7 +63,7 @@ def main():
         return
 
     # Run real-time score following
-    for current_position in mm.run(wait=True):
+    for current_position in mm.run():
         timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[{timestamp}] Current beat position: {current_position}")
 

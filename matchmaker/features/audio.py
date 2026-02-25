@@ -20,7 +20,6 @@ N_MFCC = 13
 DCT_TYPE = 2
 NORM = np.inf
 FEATURES = "chroma"
-QUEUE_TIMEOUT = 1
 
 # Type hint for Input Audio frame.
 InputAudioSeries = np.ndarray

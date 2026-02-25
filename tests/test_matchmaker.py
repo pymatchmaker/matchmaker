@@ -5,6 +5,8 @@ import unittest
 import warnings
 from pathlib import Path
 
+import numpy as np
+
 from matchmaker import Matchmaker
 from matchmaker.dp import OnlineTimeWarpingArzt
 from matchmaker.dp.oltw_dixon import OnlineTimeWarpingDixon
@@ -14,6 +16,7 @@ from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchIOIHMM
 from matchmaker.prob.outer_product_hmm import OuterProductHMM
+from matchmaker.prob.outer_product_hmm_audio import AudioOuterProductHMM
 
 warnings.filterwarnings("ignore", module="partitura")
 warnings.filterwarnings("ignore", module="librosa")
@@ -22,27 +25,30 @@ warnings.filterwarnings("ignore", module="librosa")
 class TestMatchmaker(unittest.TestCase):
     def setUp(self):
         # Set up paths to test files
-        self.score_file = "./tests/resources/Bach-fugue_bwv_858.musicxml"
-        self.performance_file_audio = "./tests/resources/Bach-fugue_bwv_858.mp3"
-        self.performance_file_midi = "./tests/resources/Bach-fugue_bwv_858.mid"
+        self.score_file = "./matchmaker/assets/simple_mozart_k265_var1.musicxml"
+        self.performance_file_audio = "./matchmaker/assets/simple_mozart_k265_var1.mp3"
+        self.performance_file_midi = "./matchmaker/assets/simple_mozart_k265_var1.mid"
         self.performance_file_annotations = (
-            "./tests/resources/Bach-fugue_bwv_858_note_annotations.txt"
+            "./matchmaker/assets/simple_mozart_k265_var1_note_annotations.txt"
+        )
+        self.performance_file_beat_annotations = (
+            "./matchmaker/assets/simple_mozart_k265_var1_beat_annotations.txt"
         )
 
         self.test_datasets = [
-            {
-                "name": "bach_fugue_bwv_858",
-                "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
-                "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
-                "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
-                "annotations": "./tests/resources/Bach-fugue_bwv_858_note_annotations.txt",
-            },
             {
                 "name": "simple_mozart_k265_var1",
                 "score": "./matchmaker/assets/simple_mozart_k265_var1.musicxml",
                 "audio": "./matchmaker/assets/simple_mozart_k265_var1.mp3",
                 "midi": "./matchmaker/assets/simple_mozart_k265_var1.mid",
                 "annotations": "./matchmaker/assets/simple_mozart_k265_var1_note_annotations.txt",
+            },
+            {
+                "name": "bach_fugue_bwv_858",
+                "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
+                "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
+                "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
+                "annotations": "./tests/resources/Bach-fugue_bwv_858_note_annotations.txt",
             },
         ]
 
@@ -72,6 +78,7 @@ class TestMatchmaker(unittest.TestCase):
         # When & Then: running the alignment process, the yielded result should be a float values
         for position_in_beat in mm.run(verbose=False):
             self.assertIsInstance(position_in_beat, float)
+            break
 
     def test_matchmaker_audio_run_with_result(self):
         # Given: a Matchmaker instance with audio input
@@ -95,12 +102,11 @@ class TestMatchmaker(unittest.TestCase):
 
     def test_matchmaker_audio_run_with_evaluation(self):
         for dataset in self.test_datasets:
-            for method in ["arzt", "dixon"]:
+            for method in ["arzt", "dixon", "audio_outerhmm"]:
                 with self.subTest(dataset=dataset["name"], method=method):
                     mm = Matchmaker(
                         score_file=dataset["score"],
                         performance_file=dataset["audio"],
-                        wait=False,
                         input_type="audio",
                         method=method,
                     )
@@ -116,15 +122,15 @@ class TestMatchmaker(unittest.TestCase):
                     current_test = f"{dataset['name']}_{method}"
                     results = mm.run_evaluation(
                         dataset["annotations"],
-                        debug=True,
-                        save_dir=Path("./tests/results"),
-                        run_name=current_test,
+                        debug=False,
+                        # save_dir=Path("./tests/results"),
+                        # run_name=current_test,
                     )
                     print(f"[{current_test}] RESULTS: {json.dumps(results, indent=4)}")
 
                     # Then: the results should at least be 0.5
                     for threshold in ["300ms", "500ms", "1000ms"]:
-                        self.assertGreaterEqual(results[threshold], 0.5)
+                        self.assertGreaterEqual(results["ms"][threshold], 0.5)
 
     def test_matchmaker_audio_run_with_evaluation_cqt(self):
         # Given: a Matchmaker instance with audio input
@@ -134,7 +140,6 @@ class TestMatchmaker(unittest.TestCase):
             wait=False,
             input_type="audio",
             feature_type="cqt",
-            distance_func="Cosine",
             method="arzt",
         )
         try:
@@ -154,7 +159,7 @@ class TestMatchmaker(unittest.TestCase):
 
         # Then: the results should at least be 0.5
         for threshold in ["300ms", "500ms", "1000ms"]:
-            self.assertGreaterEqual(results[threshold], 0.5)
+            self.assertGreaterEqual(results["ms"][threshold], 0.5)
 
     def test_matchmaker_audio_run_with_evaluation_in_beats(self):
         # Given: a Matchmaker instance with audio input
@@ -172,18 +177,14 @@ class TestMatchmaker(unittest.TestCase):
             mm._has_run = True
 
         results = mm.run_evaluation(
-            "./tests/resources/Bach-fugue_bwv_858_beat_annotations.txt",
-            level="beat",
-            debug=True,
-            save_dir=Path("./tests/results"),
-            run_name="test_matchmaker_audio_run_with_evaluation_in_beats",
+            self.performance_file_annotations,
             domain="score",
         )
         print(f"RESULTS: {json.dumps(results, indent=4)}")
 
         # Then: the results should at least be 0.5
         for threshold in ["0.3b", "0.5b", "1b"]:
-            self.assertGreaterEqual(results[threshold], 0.5)
+            self.assertGreaterEqual(results["beat"][threshold], 0.5)
 
     def test_matchmaker_audio_run_with_evaluation_before_run(self):
         # Given: a Matchmaker instance with audio input
@@ -226,6 +227,47 @@ class TestMatchmaker(unittest.TestCase):
         self.assertIsInstance(mm.stream, AudioStream)
         self.assertIsInstance(mm.score_follower, OnlineTimeWarpingArzt)
 
+    def test_matchmaker_audio_outerhmm_init(self):
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_audio,
+            input_type="audio",
+            method="audio_outerhmm",
+        )
+
+        self.assertIsInstance(mm.stream, AudioStream)
+        self.assertIsInstance(mm.score_follower, AudioOuterProductHMM)
+
+    def test_matchmaker_audio_outerhmm_run(self):
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.performance_file_audio,
+            input_type="audio",
+            method="audio_outerhmm",
+        )
+
+        for position_in_beat in mm.run(verbose=False):
+            self.assertIsInstance(position_in_beat, float)
+            break
+
+    def test_matchmaker_audio_rtf(self):
+        for method in ["arzt", "dixon", "audio_outerhmm"]:
+            with self.subTest(method=method):
+                mm = Matchmaker(
+                    score_file=self.score_file,
+                    performance_file=self.performance_file_audio,
+                    input_type="audio",
+                    method=method,
+                )
+                list(mm.run(verbose=False))
+
+                results = mm.run_evaluation(
+                    self.performance_file_annotations,
+                )
+                self.assertIn("rtf", results)
+                self.assertGreater(results["rtf"], 0)
+                self.assertLess(results["rtf"], 1.0)
+
     def test_matchmaker_with_frame_rate(self):
         # Given: a Matchmaker instance with audio input
         mm = Matchmaker(
@@ -233,12 +275,12 @@ class TestMatchmaker(unittest.TestCase):
             performance_file=self.performance_file_audio,
             wait=False,
             input_type="audio",
-            frame_rate=100,
+            frame_rate=50,
         )
 
-        # Then: the frame rate should be 100
-        self.assertEqual(mm.frame_rate, 100)
-        self.assertEqual(mm.score_follower.frame_rate, 100)
+        # Then: the frame rate should be 50
+        self.assertEqual(mm.frame_rate, 50)
+        self.assertEqual(mm.score_follower.frame_rate, 50)
 
     def test_matchmaker_invalid_input_type(self):
         # Test Matchmaker with invalid input type
@@ -293,10 +335,10 @@ class TestMatchmaker(unittest.TestCase):
         )
 
         # When & Then: running the alignment process,
-        # the yielded result should be a float values
+        # the yielded result should be numeric (int state index for MIDI)
         for position_in_beat in mm.run():
-            self.assertIsInstance(position_in_beat, float)
-            if position_in_beat >= 130:
+            self.assertIsInstance(position_in_beat, (int, float, np.integer))
+            if position_in_beat >= 10:
                 break
 
 

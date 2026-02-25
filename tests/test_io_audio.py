@@ -227,7 +227,11 @@ class TestAudioStream(unittest.TestCase):
             print("current time", self.stream.current_time)
             self.stream.join()
 
-            outputs = list(self.stream.queue.queue)
+            from matchmaker.utils.stream import STREAM_END
+
+            outputs = [
+                item for item in self.stream.queue.queue if item is not STREAM_END
+            ]
 
             for _, ftime in outputs:
                 self.assertTrue(isinstance(ftime, float))

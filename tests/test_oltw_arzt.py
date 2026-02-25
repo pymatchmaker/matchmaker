@@ -22,7 +22,7 @@ from tests.utils import generate_example_sequences
 
 RNG = np.random.RandomState(1984)
 
-SCIPY_DISTANCES = [
+_ALL_SCIPY_DISTANCES = [
     "braycurtis",
     "canberra",
     "chebyshev",
@@ -36,13 +36,14 @@ SCIPY_DISTANCES = [
     "dice",
     "hamming",
     "jaccard",
-    "kulczynski1",
     "rogerstanimoto",
     "russellrao",
     "sokalmichener",
     "sokalsneath",
     "yule",
 ]
+# Filter to distances available in the installed scipy version
+SCIPY_DISTANCES = [d for d in _ALL_SCIPY_DISTANCES if hasattr(sp_distance, d)]
 
 
 class TestOnlineTimeWarpingArzt(unittest.TestCase):

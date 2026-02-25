@@ -13,7 +13,8 @@ from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.dp.dtw_loop import oltw_arzt_loop
-from matchmaker.features.audio import FRAME_RATE, QUEUE_TIMEOUT
+from matchmaker.features.audio import FRAME_RATE
+from matchmaker.io.audio import QUEUE_TIMEOUT
 from matchmaker.utils import (
     CYTHONIZED_METRICS_W_ARGUMENTS,
     CYTHONIZED_METRICS_WO_ARGUMENTS,
@@ -26,10 +27,11 @@ from matchmaker.utils.misc import (
     RECVQueue,
     set_latency_stats,
 )
+from matchmaker.utils.stream import STREAM_END
 
-STEP_SIZE: int = 5
-WINDOW_SIZE: int = 5
-START_WINDOW_SIZE: Union[float, int] = 0.25
+STEP_SIZE: int = 3
+WINDOW_SIZE: int = 10
+START_WINDOW_SIZE: Union[float, int] = 0.1
 
 
 class OnlineTimeWarpingArzt(OnlineAlignment):
@@ -98,9 +100,9 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         current_position: int = 0,
         frame_rate: int = FRAME_RATE,
         queue: Optional[RECVQueue] = None,
-        state_to_ref_time_map = None,
-        ref_to_state_time_map = None,
-        state_space = None,
+        state_to_ref_time_map=None,
+        ref_to_state_time_map=None,
+        state_space=None,
         **kwargs,
     ) -> None:
         super().__init__(reference_features=reference_features)
@@ -154,7 +156,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
 
         self.N_ref: int = self.reference_features.shape[0]
         self.frame_rate = frame_rate
-        self.window_size: int = window_size * self.frame_rate
+        self.window_size: int = int(np.round(window_size * self.frame_rate))
         self.step_size: int = step_size
         self.start_window_size: int = int(np.round(start_window_size * frame_rate))
         self.init_position: int = current_position
@@ -178,12 +180,22 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         }
         self.state_to_ref_time_map = state_to_ref_time_map
         self.ref_to_state_time_map = ref_to_state_time_map
-        self.state_space = state_space #if state_space != None else np.unique(self.reference_features.note_array()["onset_beat"])
+        self.state_space = state_space
+        self._ref_frame_to_beat: Optional[NDArray[np.float32]] = kwargs.get(
+            "ref_frame_to_beat", None
+        )
 
     @property
-    def warping_path(self) -> NDArray[np.int32]:
-        wp = (np.array(self._warping_path).T).astype(np.int32)
-        return wp
+    def current_beat(self) -> float:
+        """Current score position in beats."""
+        if self._ref_frame_to_beat is not None:
+            idx = min(self.current_position, len(self._ref_frame_to_beat) - 1)
+            return float(self._ref_frame_to_beat[idx])
+        return float(self.current_position)
+
+    @property
+    def warping_path(self) -> NDArray[np.float32]:
+        return np.array(self._warping_path).T
 
     def __call__(self, input: NDArray[np.float32]) -> int:
         self.step(input)
@@ -211,10 +223,18 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         self.reset()
 
         if verbose:
-            pbar = progressbar.ProgressBar(max_value=self.N_ref, redirect_stdout=True)
+            pbar = progressbar.ProgressBar(
+                max_value=len(self.state_space),
+                redirect_stdout=True,
+                redirect_stderr=True,
+            )
+            pbar.start()
 
         while self.is_still_following():
-            features, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
+            item = self.queue.get(timeout=QUEUE_TIMEOUT)
+            if item is STREAM_END:
+                break
+            features, f_time = item
             self.last_queue_update = time.time()
             self.input_features = (
                 np.concatenate((self.input_features, features))
@@ -224,13 +244,13 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             self.step(features)
 
             if verbose:
-                pbar.update(int(self.current_position))
+                pbar.update(int(np.searchsorted(self.state_space, self.current_beat)))
 
             latency = time.time() - self.last_queue_update
             self.latency_stats = set_latency_stats(
                 latency, self.latency_stats, self.input_index
             )
-            yield self.current_position
+            yield self.current_beat
 
         if verbose:
             pbar.finish()
@@ -289,23 +309,17 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             min_index=min_index,
         )
 
-        # adapt current_position: do not go backwards,
-        # but also go a maximum of N steps forward
-
-        if self.input_index == 0:
-            # enforce the first time step to stay at the
-            # initial position
-            self.current_position = min( # TODO: Is this necessary?
-                max(self.current_position, min_index),
-                self.current_position,
-            )
-        else:
-            self.current_position = min(
-                max(self.current_position, min_index),
-                self.current_position + self.step_size,
+        # Clamp new position: no backwards, max step_size forward per frame
+        if self.input_index > 0:
+            self.current_position = int(
+                np.clip(
+                    min_index,
+                    self.current_position,
+                    self.current_position + self.step_size,
+                )
             )
 
-        self._warping_path.append((self.current_position, self.input_index))
+        self._warping_path.append((self.current_beat, self.input_index))
         # update input index
         self.input_index += 1
 
