@@ -83,7 +83,7 @@ class ParticleFilterAudio(OnlineAlignment):
     def predict(self):
         # Update score position - each particle advances based on its tempo
         self.x += (self.v / 60.0) * self.hop_size  # Convert BPM to beats per second
-        
+
         # Add small noise for exploration
         # self.x += self.rng.normal(0, self.beat_std, self.num_particles)
         # Keep within bounds
@@ -190,7 +190,9 @@ class ParticleFilterAudio(OnlineAlignment):
         self.weights.fill(1.0 / self.num_particles)
 
         current_state = np.clip(
-            round(np.mean(self.x), 2), a_min=self.state_space.min(), a_max=self.state_space.max()
+            round(np.mean(self.x), 2),
+            a_min=self.state_space.min(),
+            a_max=self.state_space.max(),
         )
         self.current_state = current_state
         self.check_crossing(self.current_state)
@@ -244,8 +246,12 @@ class ParticleFilterAudio(OnlineAlignment):
             )
             # previous_state = self.current_state
             self.current_state = self(features, f_time)
-            self.current_state_in_frame_index = int(self.beat_to_frame_map(self.current_state))
-            self.warping_path.append((self.current_state_in_frame_index, self.input_index))
+            self.current_state_in_frame_index = int(
+                self.beat_to_frame_map(self.current_state)
+            )
+            self.warping_path.append(
+                (self.current_state_in_frame_index, self.input_index)
+            )
             if verbose:
                 pbar.update(self.current_state_in_frame_index)
 
@@ -256,4 +262,5 @@ class ParticleFilterAudio(OnlineAlignment):
         if verbose:
             pbar.finish()
 
+        self.warping_path = np.array(self.warping_path).T
         return self.warping_path

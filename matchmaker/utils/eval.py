@@ -25,6 +25,10 @@ def transfer_positions(wp, ref_anns, frame_rate, reverse=False):
     predicted_targets : np.array with shape (T,)
         predicted target positions in seconds.
     """
+
+    import pdb
+
+    pdb.set_trace()
     # Causal nearest neighbor interpolation
     if reverse:
         x, y = wp[1], wp[0]
