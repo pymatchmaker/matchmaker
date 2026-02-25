@@ -36,7 +36,6 @@ class ParticleFilterAudio(OnlineAlignment):
         self.current_state_in_frame_index = 0
         self.current_state = 0
         self.queue = queue
-        # self.N_ref: int = self.reference_features.shape[0]
         self.N_ref = len(state_space)
         self.beat_to_frame_map = interp1d(
             x=self.state_space,
@@ -71,9 +70,6 @@ class ParticleFilterAudio(OnlineAlignment):
 
         self.warping_path = [(self.current_state_in_frame_index, self.input_index)]
 
-        # Initialize at first beat
-        # self.x[:] = state_space[0]
-
     def is_still_following(self) -> bool:
         if self.current_state is not None:
             return self.current_state < self.state_space[-1]
@@ -84,8 +80,6 @@ class ParticleFilterAudio(OnlineAlignment):
         # Update score position - each particle advances based on its tempo
         self.x += (self.v / 60.0) * self.hop_size  # Convert BPM to beats per second
 
-        # Add small noise for exploration
-        # self.x += self.rng.normal(0, self.beat_std, self.num_particles)
         # Keep within bounds
         self.x = np.clip(self.x, self.state_space[0], self.state_space[-1])
 
@@ -155,32 +149,14 @@ class ParticleFilterAudio(OnlineAlignment):
         return np.exp(-0.5 * ((ioi - expected_ioi) / max(self.sigma_v, 1e-6)) ** 2)
 
     def step(self, feature, f_time):
-        # if self.p_ioi is not None:
-        #     self.p_ioi = f_time - self.f_time_prev
-        #     self.f_time_prev = f_time
-
         self.predict()
 
         likelihoods = self.compute_likelihood(feature)
-        # if self.p_ioi is not None and self.current_state > 0:
-        #     timing_likelihood = self.compute_likelihood_timing(self.p_ioi, int(round(self.current_state)))
-        #     likelihoods *= timing_likelihood
-        # if self.p_ioi is None:
-        #     self.f_time_prev = f_time
-        #     self.p_ioi = 0.0
-
-        # # Forward bias
-        # gamma = 1  # try between 0.5 and 5.0
-        # forward_term = np.exp(gamma * (self.x - prev_mean_x))
-        # likelihoods *= forward_term
 
         self.weights *= likelihoods
         self.weights += 1e-12  # avoid zero
         self.weights /= np.sum(self.weights)
 
-        # Only resample if effective sample size is too low
-        # n_eff = 1.0 / np.sum(self.weights ** 2)
-        # if n_eff < self.num_particles / 2.0:
         indices = self.rng.choice(
             self.num_particles, size=self.num_particles, p=self.weights
         )
@@ -196,7 +172,6 @@ class ParticleFilterAudio(OnlineAlignment):
         )
         self.current_state = current_state
         self.check_crossing(self.current_state)
-        # self.previous_state = current_state
 
         return self.current_state
 
@@ -244,7 +219,7 @@ class ParticleFilterAudio(OnlineAlignment):
                 if self.input_features is not None
                 else features
             )
-            # previous_state = self.current_state
+
             self.current_state = self(features, f_time)
             self.current_state_in_frame_index = int(
                 self.beat_to_frame_map(self.current_state)
