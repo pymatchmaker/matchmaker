@@ -6,7 +6,7 @@ Input audio stream
 
 import time
 from types import TracebackType
-from typing import Callable, Optional, Tuple, Type, Union
+from typing import Callable, Dict, Optional, Tuple, Type, Union
 
 import librosa
 import numpy as np
@@ -18,7 +18,7 @@ from matchmaker.utils.audio import (
     get_default_input_device_index,
     get_device_index_from_name,
 )
-from matchmaker.utils.misc import RECVQueue
+from matchmaker.utils.misc import RECVQueue, set_latency_stats
 from matchmaker.utils.stream import Stream
 
 CHANNELS = 1
@@ -115,6 +115,14 @@ class AudioStream(Stream):
         self.prev_time = None
         self.wait = wait  # only for offline mode making it same time as online
         self.target_sr = target_sr
+        self.last_data_received = time.time()
+        self.latency_stats: Dict[str, float] = {
+            "total_latency": 0,
+            "total_frames": 0,
+            "max_latency": 0,
+            "min_latency": float("inf"),
+        }
+        self.input_index = 0
 
         if self.mock:
             self.run = self.run_offline
@@ -145,6 +153,8 @@ class AudioStream(Stream):
         time_info: dict,
         status_flag: int,
     ) -> Tuple[np.ndarray, int]:
+        self.input_index += 1
+        self.last_data_received = time.time()
         self.prev_time = time_info["input_buffer_adc_time"]
         # initial y
         target_audio = np.frombuffer(data, dtype=np.float32)
@@ -166,8 +176,17 @@ class AudioStream(Stream):
             target_audio = np.concatenate((self.last_chunk, target_audio))
 
         features = self.processor(target_audio)
+
         if self.last_chunk is not None:
             self.queue.put((features, f_time))
+
+        # update latency stats
+        latency = time.time() - self.last_data_received
+        self.latency_stats = set_latency_stats(
+            latency, self.latency_stats, self.input_index
+        )
+
+        # cache last chunk (for the next frame window)
         self.last_chunk = target_audio[-self.hop_length :]
 
     @property
@@ -224,26 +243,24 @@ class AudioStream(Stream):
         audio_y, sr = librosa.load(self.file_path, sr=None)
         if sr != self.target_sr:
             audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
+            sr = self.target_sr
 
-        duration = int(librosa.get_duration(path=self.file_path))
-        time_interval = self.hop_length / self.sample_rate
-        padded_audio = np.concatenate(  # zero padding at the end
-            (
-                audio_y,
-                np.zeros(int(duration * 0.1 * self.sample_rate), dtype=np.float32),
+        time_interval = self.hop_length / float(sr)
+        # Pad to next hop_length boundary so no trailing samples are lost
+        remainder = len(audio_y) % self.hop_length
+        if remainder > 0:
+            audio_y = np.concatenate(
+                (audio_y, np.zeros(self.hop_length - remainder, dtype=np.float32))
             )
-        )
-        trimmed_audio = padded_audio[  # trim to multiple of chunk_size
-            : len(padded_audio) - (len(padded_audio) % self.hop_length)
-        ]
-        while trimmed_audio.any():
-            start_time = time.time()
+        trimmed_audio = audio_y
+        # Do not stop early on digital silence (all-zeros tails).
+        while trimmed_audio.size > 0:
+            self.input_index += 1
+            self.last_data_received = time.time()
             target_audio = trimmed_audio[: self.hop_length]
-            f_time = time.time()
-            self.last_time = f_time
-            self._process_feature(target_audio, f_time)
+            self._process_feature(target_audio, self.last_data_received)
             trimmed_audio = trimmed_audio[self.hop_length :]
-            elapsed_time = time.time() - start_time
+            elapsed_time = time.time() - self.last_data_received
 
             if self.wait:
                 time.sleep(max(time_interval - elapsed_time, 0))

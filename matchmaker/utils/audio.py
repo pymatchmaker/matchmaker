@@ -4,6 +4,7 @@
 Audio device utilities.
 """
 
+import os
 from typing import List
 
 import pyaudio
@@ -51,6 +52,10 @@ def get_audio_devices() -> List[AudioDeviceInfo]:
         List of available audio devices.
         Returns empty list if no devices are available or in CI environment.
     """
+    # Check if running in CI environment
+    if os.getenv("CI") or os.getenv("GITHUB_ACTIONS"):
+        return []
+
     try:
         p = pyaudio.PyAudio()
         device_count = p.get_device_count()

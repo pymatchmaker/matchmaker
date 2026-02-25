@@ -6,23 +6,144 @@ Miscellaneous utilities
 
 import csv
 import numbers
-import os
+import re
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Any, Iterable, List, Union
+from typing import Any, Dict, Iterable, List, Optional, Union
 
 import librosa
 import mido
 import numpy as np
 import partitura
 import scipy
-import soundfile as sf
 from matplotlib import pyplot as plt
 from numpy.typing import NDArray
 from partitura.score import ScoreLike
-from partitura.utils.music import performance_notearray_from_score_notearray
 
-from matchmaker.features.audio import SAMPLE_RATE
+# Tempo marking to BPM mapping
+# Reference: https://en.wikipedia.org/wiki/Tempo#Basic_tempo_markings
+TEMPO_MARKING_TO_BPM = {
+    # Very slow (24-40 BPM)
+    "larghissimo": 24,
+    "grave": 30,
+    # Slow (40-66 BPM)
+    "largo": 40,
+    "larghetto": 50,
+    "lento": 60,
+    # Slow-moderate (44-80 BPM)
+    "adagio": 60,
+    "adagietto": 70,
+    # Walking pace (56-108 BPM)
+    "andante": 80,
+    "andantino": 90,
+    # Moderate (86-126 BPM)
+    "moderato": 110,
+    "allegretto": 120,
+    # Fast (100-156 BPM)
+    "allegro": 130,
+    # Very fast (136-200+ BPM)
+    "vivace": 150,
+    "vivacissimo": 170,
+    "presto": 180,
+    "prestissimo": 200,
+}
+
+
+def extract_tempo_marking_from_musicxml(
+    score_file: Union[str, Path],
+) -> Optional[float]:
+    """
+    Extract tempo from text tempo marking (e.g., "Allegro", "Andante") in MusicXML.
+
+    Parses <direction-type><words>...</words></direction-type> elements and
+    matches against known tempo markings. The tempo is adjusted based on the
+    time signature to return quarter-note BPM.
+
+    Handles both simple and compound meters:
+    - Simple meters (2/2, 4/4, etc.): beat is the note indicated by denominator
+    - Compound meters (6/8, 9/8, 12/8): beat is a dotted note (3 subdivisions)
+
+    For example:
+    - 2/2 "Allegro" (130 half notes/min) → 260 quarter-note BPM
+    - 6/8 "Presto" (180 dotted-quarters/min) → 270 quarter-note BPM
+
+    Parameters
+    ----------
+    score_file : str or Path
+        Path to the MusicXML file
+
+    Returns
+    -------
+    float or None
+        Quarter-note BPM based on tempo marking, or None if not found
+    """
+    try:
+        tree = ET.parse(str(score_file))
+        root = tree.getroot()
+
+        # Track current time signature
+        # Default to 4/4 (simple meter, quarter note beat)
+        current_beats = 4
+        current_beat_type = 4
+
+        # Process measures in order to track time signature changes
+        for part in root.iter("part"):
+            for measure in part.iter("measure"):
+                # Check for time signature change in this measure
+                for attributes in measure.iter("attributes"):
+                    for time_elem in attributes.iter("time"):
+                        beats_elem = time_elem.find("beats")
+                        beat_type_elem = time_elem.find("beat-type")
+                        if beats_elem is not None and beats_elem.text:
+                            current_beats = int(beats_elem.text)
+                        if beat_type_elem is not None and beat_type_elem.text:
+                            current_beat_type = int(beat_type_elem.text)
+
+                # Look for tempo marking in this measure
+                for direction in measure.iter("direction"):
+                    for direction_type in direction.iter("direction-type"):
+                        for words in direction_type.iter("words"):
+                            if words.text:
+                                text = words.text.lower().strip()
+                                # Check each tempo marking
+                                for marking, bpm in TEMPO_MARKING_TO_BPM.items():
+                                    # Match if marking appears at the start of the text
+                                    if re.match(rf"^{marking}\b", text):
+                                        # Check if compound meter (6/8, 9/8, 12/8, etc.)
+                                        # Compound meter: numerator divisible by 3 and >= 6
+                                        is_compound = (
+                                            current_beats >= 6
+                                            and current_beats % 3 == 0
+                                        )
+
+                                        if is_compound:
+                                            # Compound meter: beat is dotted note
+                                            # e.g., 6/8: dotted quarter = 3 eighth notes
+                                            # To maintain the same "feel" as simple meter:
+                                            # - In 4/4 "Andante=80": quarter = 0.75s
+                                            # - In 6/8 we want dotted quarter as beat
+                                            # - dotted quarter = 1.5 × quarter
+                                            # - So dotted quarter BPM = quarter BPM / 1.5
+                                            quarter_note_bpm = bpm / 1.5
+                                        else:
+                                            # Simple meter: beat-type indicates beat note
+                                            # Convert to quarter-note BPM
+                                            # beat-type 2 (half note): multiply by 2
+                                            # beat-type 4 (quarter note): no change
+                                            # beat-type 8 (eighth note): divide by 2
+                                            quarter_note_bpm = bpm * (
+                                                4.0 / current_beat_type
+                                            )
+
+                                        return float(quarter_note_bpm)
+
+                # Only process first part to avoid duplicates
+                break
+    except Exception:
+        pass
+
+    return None
 
 
 class MatchmakerInvalidParameterTypeError(Exception):
@@ -155,6 +276,17 @@ def is_midi_file(file_path) -> bool:
     return ext.lower() in midi_extensions
 
 
+def set_latency_stats(
+    latency: float, latency_stats: Dict[str, float], count: int
+) -> Dict[str, float]:
+    latency_stats["total_latency"] += latency
+    latency_stats["total_frames"] = count
+    latency_stats["max_latency"] = max(latency_stats["max_latency"], latency)
+    latency_stats["min_latency"] = min(latency_stats["min_latency"], latency)
+
+    return latency_stats
+
+
 def interleave_with_constant(
     array: np.array,
     constant_row: float = 0,
@@ -179,37 +311,147 @@ def interleave_with_constant(
     return interleaved_array
 
 
-def adjust_tempo_for_performance_audio(score: ScoreLike, performance_audio: Path):
+def get_tempo_from_score(
+    score_part: ScoreLike,
+    score_file: Optional[Union[str, Path]] = None,
+) -> Optional[float]:
     """
-    Adjust the tempo of the score part to match the performance audio.
+    Extract first tempo marking from score if available.
+
+    Tries multiple sources in order:
+    1. Partitura Tempo objects (explicit BPM)
+    2. MusicXML <sound tempo="..."/> element (if score_file provided)
+    3. Text tempo marking (e.g., "Allegro", "Andante") converted to approximate BPM
+
+    Parameters
+    ----------
+    score_part : ScoreLike
+        Partitura score part
+    score_file : str or Path, optional
+        Path to the score file. Used as fallback to parse MusicXML directly
+        when partitura doesn't extract tempo.
+
+    Returns
+    -------
+    float or None
+        Tempo in BPM if found in score, None otherwise.
+    """
+    # Try partitura Tempo objects first
+    if score_part is not None:
+        try:
+            for tempo_obj in score_part.iter_all(partitura.score.Tempo):
+                if hasattr(tempo_obj, "bpm") and tempo_obj.bpm is not None:
+                    return float(tempo_obj.bpm)
+        except Exception:
+            pass
+
+    # Fallback: parse MusicXML directly for <sound tempo="..."/>
+    if score_file is not None:
+        try:
+            import xml.etree.ElementTree as ET
+
+            tree = ET.parse(str(score_file))
+            root = tree.getroot()
+
+            for sound_elem in root.iter("sound"):
+                tempo_attr = sound_elem.get("tempo")
+                if tempo_attr is not None:
+                    return float(tempo_attr)
+        except Exception:
+            pass
+
+    # Fallback: extract from text tempo marking (e.g., "Allegro", "Andante")
+    if score_file is not None:
+        text_tempo = extract_tempo_marking_from_musicxml(score_file)
+        if text_tempo is not None:
+            return text_tempo
+
+    return None
+
+
+def get_tempo_at_beat(
+    score_part: ScoreLike,
+    beat: float,
+    default_tempo: float = 120.0,
+) -> float:
+    """
+    Get tempo (BPM) at a specific beat position in the score.
+
+    Uses score tempo markings if available. Falls back to default_tempo otherwise.
+
+    Parameters
+    ----------
+    score_part : ScoreLike
+        Partitura score part
+    beat : float
+        Beat position in the score
+    default_tempo : float
+        Default tempo to use if no tempo markings found
+
+    Returns
+    -------
+    float
+        Tempo in BPM at the given beat position
+    """
+    if score_part is None:
+        return default_tempo
+
+    # Collect all tempo markings with their positions
+    tempo_changes = []
+    try:
+        for tempo_obj in score_part.iter_all(partitura.score.Tempo):
+            if hasattr(tempo_obj, "bpm") and tempo_obj.bpm is not None:
+                # Get beat position of tempo marking
+                start_time = getattr(tempo_obj, "start", None)
+                if start_time is not None:
+                    tempo_beat = score_part.beat_map(start_time.t)
+                    tempo_changes.append((tempo_beat, float(tempo_obj.bpm)))
+    except Exception:
+        pass
+
+    if not tempo_changes:
+        return default_tempo
+
+    # Sort by beat position
+    tempo_changes.sort(key=lambda x: x[0])
+
+    # Find the tempo at the given beat (last tempo marking before or at beat)
+    current_tempo = default_tempo
+    for tempo_beat, bpm in tempo_changes:
+        if tempo_beat <= beat:
+            current_tempo = bpm
+        else:
+            break
+
+    return current_tempo
+
+
+def adjust_tempo_for_performance_file(
+    score: ScoreLike, performance_file: Path, default_tempo: int = 120
+):
+    """
+    Adjust the tempo of the score part to match the performance file.
     We round up the tempo to the nearest 20 bpm to avoid too much optimization.
 
     Parameters
     ----------
     score : partitura.score.ScoreLike
         The score to adjust the tempo of.
-    performance_audio : Path
-        The performance audio file to adjust the tempo to.
+    performance_file : Path
+        The performance file to adjust the tempo to.
+    default_tempo : int
+        The default tempo of the score.
     """
-    default_tempo = 120
-    # score_midi = partitura.save_score_midi(score, out=None)
-    # tmp_score_path = "score.mid"
-    # partitura.save_score_midi(score, out=tmp_score_path)
-    # source_length = mido.MidiFile(tmp_score_path).length
-
-    sna = score.note_array()
-    pna = performance_notearray_from_score_notearray(
-        snote_array=sna,
-        bpm=default_tempo,
-    )
-
-    source_length = np.max(pna["onset_sec"] + pna["duration_sec"])
-    target_length = librosa.get_duration(path=str(performance_audio))
+    score_midi = partitura.save_score_midi(score, out=None)
+    source_length = score_midi.length
+    if is_midi_file(performance_file):
+        target_length = mido.MidiFile(performance_file).length
+    else:
+        target_length = librosa.get_duration(path=str(performance_file))
     ratio = target_length / source_length
     rounded_tempo = int(
         (default_tempo / ratio + 19) // 20 * 20
     )  # round up to nearest 20
-    # rounded_tempo = round(default_tempo / ratio / 20) * 20
     print(
         f"default tempo: {default_tempo} (score length: {source_length}) -> adjusted_tempo: {rounded_tempo} (perf length: {target_length})"
     )
@@ -279,134 +521,181 @@ def save_nparray_to_csv(array: NDArray, save_path: str):
         writer.writerows(array)
 
 
-def save_mixed_audio(
-    audio: Union[np.ndarray, str, os.PathLike],
-    annots: np.ndarray,
-    save_path: Union[str, os.PathLike],
-    sr: int = SAMPLE_RATE,
+def plot_alignment(
+    warping_path: np.ndarray,
+    perf_annots: np.ndarray,
+    perf_annots_predicted: np.ndarray,
+    save_dir: Path,
+    name: str,
+    score_y: Optional[np.ndarray] = None,
+    frame_rate: float = 1.0,
+    state_space: Optional[np.ndarray] = None,
+    ref_features: Optional[np.ndarray] = None,
+    input_features: Optional[np.ndarray] = None,
+    distance_func=None,
 ):
-    if not isinstance(audio, np.ndarray):
-        audio, _ = librosa.load(audio, sr=sr)
+    """Plot warping path, GT annotations, and predicted points in one figure.
 
-    annots_audio = librosa.clicks(
-        times=annots,
-        sr=sr,
-        click_freq=1000,
-        length=len(audio),
+    Layers (back to front): distance matrix → warping path → predicted → GT.
+    """
+    save_dir.mkdir(parents=True, exist_ok=True)
+    gt = np.asarray(perf_annots, dtype=float)
+    pred = np.asarray(perf_annots_predicted, dtype=float)
+    n = min(len(gt), len(pred))
+    gt, pred = gt[:n], pred[:n]
+
+    has_dist_matrix = (
+        ref_features is not None
+        and input_features is not None
+        and distance_func is not None
     )
-    audio_mixed = audio + annots_audio
-    sf.write(str(save_path), audio_mixed, sr, subtype="PCM_24")
 
+    fig, ax = plt.subplots(figsize=(30, 30))
 
-def plot_and_save_score_following_result(
-    wp,
-    ref_features,
-    input_features,
-    distance_func,
-    save_dir,
-    score_annots,
-    perf_annots,
-    frame_rate,
-    name=None,
-):
-    run_name = name or "results"
-    save_path = save_dir / f"wp_{run_name}.tsv"
-    save_nparray_to_csv(wp.T, save_path.as_posix())
+    if has_dist_matrix:
+        # DTW mode: everything in frame space
+        dist = scipy.spatial.distance.cdist(
+            ref_features,
+            input_features,
+            metric=distance_func,
+        )
+        ax.imshow(
+            dist,
+            aspect="auto",
+            origin="lower",
+            interpolation="nearest",
+            extent=(0, input_features.shape[0] - 1, 0, ref_features.shape[0] - 1),
+        )
+        x_gt = gt * float(frame_rate)
+        x_pred = pred * float(frame_rate)
+        if score_y is not None:
+            y = np.asarray(score_y, dtype=float)[:n] * float(frame_rate)
+        else:
+            y = np.arange(n)
+        ylabel = "score (frames)"
+        wp_x = warping_path[1]
+        wp_y = warping_path[0]
+    else:
+        # HMM mode: x in frames, y in beats via state_space
+        x_gt = gt * float(frame_rate)
+        x_pred = pred * float(frame_rate)
+        if score_y is None:
+            y = np.arange(n)
+            ylabel = "annotation index"
+        else:
+            y = np.asarray(score_y, dtype=float)[:n]
+            ylabel = "score position (beats)"
+        wp_x = warping_path[1]
+        if state_space is not None:
+            wp_y = state_space[warping_path[0]]
+        else:
+            wp_y = warping_path[0]
 
-    dist = scipy.spatial.distance.cdist(
-        ref_features,
-        input_features[: wp[1][-1]],
-        metric=distance_func,
-    )  # [d, wy]
-    plt.figure(figsize=(10, 10))
-    plt.imshow(dist, aspect="auto", origin="lower", interpolation="nearest")
-    plt.title(
-        f"[{save_dir.name}/{run_name}] \n Matchmaker alignment path with ground-truth labels",
-        fontsize=15,
-    )
-    plt.xlabel("Performance Features", fontsize=15)
-    plt.ylabel("Score Features", fontsize=15)
-
-    # plot online DTW path
-    ref_paths, target_paths = wp[0], wp[1]
-    for n in range(len(ref_paths)):
-        plt.plot(
-            target_paths[n], ref_paths[n], ".", color="lime", alpha=0.5, markersize=3
+    # 1. Warping path
+    if has_dist_matrix:
+        ax.plot(
+            wp_x,
+            wp_y,
+            ".",
+            color="white",
+            alpha=0.7,
+            markersize=15,
+            label="warping path",
+            zorder=2,
+        )
+    else:
+        ax.plot(
+            wp_x,
+            wp_y,
+            ".",
+            color="lime",
+            alpha=0.5,
+            markersize=15,
+            label="warping path",
+            zorder=2,
         )
 
-    # plot ground-truth labels
-    for i, (ref, target) in enumerate(zip(score_annots, perf_annots)):
-        plt.plot(
-            target * frame_rate,
-            ref * frame_rate,
-            "x",
-            color="r",
-            alpha=1,
-            markersize=3,
-        )
-    plt.savefig(save_dir / f"{run_name}.png")
+    # 2. Predicted points
+    ax.scatter(
+        x_pred,
+        y,
+        label="predicted",
+        s=80,
+        alpha=0.9,
+        marker="o",
+        color="blue",
+        linewidths=0,
+        zorder=3,
+    )
+
+    # 3. GT annotations (front)
+    ax.scatter(
+        x_gt,
+        y,
+        label="ground truth",
+        s=120,
+        alpha=0.9,
+        marker="x",
+        color="red",
+        linewidths=3,
+        zorder=4,
+    )
+
+    ax.set_xlabel("performance frame")
+    ax.set_ylabel(ylabel)
+    ax.set_title(f"[{save_dir.name}] alignment ({name})")
+    ax.grid(True, alpha=0.2)
+    ax.legend(loc="best")
+    fig.tight_layout()
+    fig.savefig(save_dir / f"{name}.png", dpi=150)
+    plt.close(fig)
 
 
 def save_debug_results(
-    score_file,
-    score_audio,
-    score_annots,
-    score_annots_predicted,
-    perf_file,
-    perf_annots,
-    perf_annots_predicted,
-    model,
-    frame_rate,
-    save_dir=None,
-    run_name="",
+    warping_path: np.ndarray,
+    score_annots: np.ndarray,
+    perf_annots: np.ndarray,
+    perf_annots_predicted: np.ndarray,
+    eval_results: dict,
+    frame_rate: float,
+    save_dir: Path,
+    run_name: str = "results",
+    state_space: Optional[np.ndarray] = None,
+    ref_features: Optional[np.ndarray] = None,
+    input_features: Optional[np.ndarray] = None,
+    distance_func=None,
 ):
-    # save score audio with beat annotations
-    score_audio_dir = Path("./score_audio")
-    score_audio_dir.mkdir(parents=True, exist_ok=True)
-    save_mixed_audio(
-        score_audio,
-        score_annots,
-        save_path=score_audio_dir
-        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).parent.name}_{Path(score_file).stem}.wav",
-    )
-    # save performance audio with beat annotations
-    perf_audio_dir = Path("./performance_audio")
-    perf_audio_dir.mkdir(parents=True, exist_ok=True)
-    save_mixed_audio(
-        perf_file,
-        perf_annots,
-        save_path=perf_audio_dir
-        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{Path(perf_file).stem}.wav",
-    )
-    # save score audio with predicted beat annotations
-    score_predicted_audio_dir = Path("./score_audio_predicted")
-    score_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
-    save_mixed_audio(
-        score_audio,
-        score_annots_predicted,
-        save_path=score_predicted_audio_dir
-        / f"score_audio_{Path(score_file).parent.parent.name}_{Path(score_file).parent.name}_{Path(score_file).stem}.wav",
-    )
-    # save performance audio with predicted beat annotations
-    perf_predicted_audio_dir = Path("./performance_audio_predicted")
-    perf_predicted_audio_dir.mkdir(parents=True, exist_ok=True)
-    save_mixed_audio(
-        perf_file,
-        perf_annots_predicted,
-        save_path=perf_predicted_audio_dir
-        / f"perf_audio_{Path(perf_file).parent.parent.name}_{Path(perf_file).parent.name}_{Path(perf_file).stem}.wav",
-    )
-    # save score following plot result
-    save_dir = save_dir or Path("./tests/results")
+    """Save debug outputs: warping path TSV, results JSON, and alignment plot."""
+    save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
-    plot_and_save_score_following_result(
-        model.warping_path,
-        model.reference_features,
-        model.input_features,
-        model.distance_func,
-        save_dir,
-        score_annots,
+
+    # 1. Warping path TSV + results JSON
+    save_nparray_to_csv(warping_path.T, (save_dir / f"wp_{run_name}.tsv").as_posix())
+    import json
+
+    with open(save_dir / f"{run_name}.json", "w") as f:
+        json.dump(eval_results, f, indent=4)
+
+    # 2. Alignment plot
+    if state_space is not None:
+        score_y = state_space
+    else:
+        sx = np.asarray(score_annots, dtype=float)
+        score_y = (
+            sx
+            if sx.ndim == 1 and len(sx) == len(perf_annots) and np.all(np.diff(sx) >= 0)
+            else None
+        )
+    plot_alignment(
+        warping_path,
         perf_annots,
-        frame_rate,
-        name=run_name,
+        perf_annots_predicted,
+        save_dir,
+        run_name,
+        score_y=score_y,
+        frame_rate=frame_rate,
+        state_space=state_space,
+        ref_features=ref_features,
+        input_features=input_features,
+        distance_func=distance_func,
     )

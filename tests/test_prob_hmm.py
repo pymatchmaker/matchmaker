@@ -16,9 +16,9 @@ from matchmaker.prob.hmm import (
     BaseHMM,
     BernoulliGaussianPitchIOIObservationModel,
     BernoulliPitchObservationModel,
+    GaussianAudioPitchHMM,
     PitchHMM,
     PitchIOIHMM,
-    GaussianAudioPitchHMM,
     compute_discrete_pitch_profiles,
     compute_discrete_pitch_profiles_old,
     compute_ioi_matrix,
@@ -27,7 +27,7 @@ from matchmaker.prob.hmm import (
     simple_transition_matrix,
 )
 from matchmaker.utils.tempo_models import ReactiveTempoModel
-from tests.utils import process_midi_offline, process_audio_offline
+from tests.utils import process_audio_offline, process_midi_offline
 
 
 class TestBaseHMM(unittest.TestCase):
@@ -94,7 +94,7 @@ class TestPitchHMM(unittest.TestCase):
 
         transition_matrix = simple_transition_matrix(
             n_states=len(chord_pitches),
-            inserted_states=False,
+            # inserted_states=False,
         )
 
         initial_probabilities = np.zeros(len(chord_pitches)) + 1e-6
@@ -102,9 +102,9 @@ class TestPitchHMM(unittest.TestCase):
         initial_probabilities /= initial_probabilities.sum()
 
         hmm = PitchHMM(
+            reference_features=snote_array,
             observation_model=observation_model,
             transition_matrix=transition_matrix,
-            score_onsets=unique_sonsets,
             initial_probabilities=initial_probabilities,
             has_insertions=False,
         )
@@ -163,7 +163,7 @@ class TestPitchIOIHMM(unittest.TestCase):
             n_states=len(chord_pitches),
         )
 
-        tempo_model = ReactiveTempoModel(init_score_onset=unique_sonsets.min())
+        tempo_model = ReactiveTempoModel
 
         hmm = PitchIOIHMM(
             observation_model=observation_model,
@@ -189,9 +189,7 @@ class TestPitchIOIHMM(unittest.TestCase):
 
 
 class TestBernoulliGaussianPitchIOIHMM(unittest.TestCase):
-
     def test_init(self):
-
         self.score_file = "./tests/resources/Bach-fugue_bwv_858.musicxml"
         self.performance_file_audio = "./tests/resources/Bach-fugue_bwv_858.mp3"
         self.performance_file_midi = "./tests/resources/Bach-fugue_bwv_858.mid"
@@ -201,9 +199,5 @@ class TestBernoulliGaussianPitchIOIHMM(unittest.TestCase):
 
         self.performance = process_audio_offline(
             perf_info=self.performance_file_audio,
+            processor=PitchProcessor(piano_range=True),
         )
-
-
-
-
-    
