@@ -33,6 +33,7 @@ class ParticleFilterAudio(OnlineAlignment):
         self.notated_tempo = notated_tempo
         self.hop_size = hop_size
         self.num_particles = num_particles
+        self.current_state_in_frame_index = 0
         self.current_state = 0
         self.queue = queue
         # self.N_ref: int = self.reference_features.shape[0]
@@ -42,6 +43,7 @@ class ParticleFilterAudio(OnlineAlignment):
             y=np.arange(len(state_space)),
             dtype=int,
         )
+        self.input_index = 0
 
         self.input_features: List[NDArray[np.float32]] = None
         self.rng = RNG
@@ -60,27 +62,30 @@ class ParticleFilterAudio(OnlineAlignment):
         self.tempo_noise = self.rng.normal(0, self.sigma_v, self.num_particles)
 
         # Particle state arrays
-        self.x = self.rng.uniform(state_space[0], state_space[3], num_particles)
+        self.x = np.zeros(self.num_particles)  # Beat position of each particle
         self.v = self.rng.normal(
             notated_tempo, self.sigma_v, num_particles
         )  # Normal distribution around notated tempo
         self.v = np.clip(self.v, self.v_min, self.v_max)  # Clip to valid range
         self.weights = np.ones(num_particles) / num_particles
 
+        self.warping_path = [(self.current_state_in_frame_index, self.input_index)]
+
         # Initialize at first beat
         # self.x[:] = state_space[0]
 
     def is_still_following(self) -> bool:
         if self.current_state is not None:
-            return self.current_state <= self.N_ref - 1
+            return self.current_state < self.state_space[-1]
 
         return False
 
     def predict(self):
         # Update score position - each particle advances based on its tempo
         self.x += (self.v / 60.0) * self.hop_size  # Convert BPM to beats per second
+        
         # Add small noise for exploration
-        self.x += self.rng.normal(0, self.beat_std, self.num_particles)
+        # self.x += self.rng.normal(0, self.beat_std, self.num_particles)
         # Keep within bounds
         self.x = np.clip(self.x, self.state_space[0], self.state_space[-1])
 
@@ -150,13 +155,9 @@ class ParticleFilterAudio(OnlineAlignment):
         return np.exp(-0.5 * ((ioi - expected_ioi) / max(self.sigma_v, 1e-6)) ** 2)
 
     def step(self, feature, f_time):
-        tempo_mean = np.mean(self.v)
-        print(f"Current tempo estimate: {tempo_mean:.2f} BPM")
-        prev_mean_x = np.mean(self.x)
-
-        if self.p_ioi is not None:
-            self.p_ioi = f_time - self.f_time_prev
-            self.f_time_prev = f_time
+        # if self.p_ioi is not None:
+        #     self.p_ioi = f_time - self.f_time_prev
+        #     self.f_time_prev = f_time
 
         self.predict()
 
@@ -164,9 +165,9 @@ class ParticleFilterAudio(OnlineAlignment):
         # if self.p_ioi is not None and self.current_state > 0:
         #     timing_likelihood = self.compute_likelihood_timing(self.p_ioi, int(round(self.current_state)))
         #     likelihoods *= timing_likelihood
-        if self.p_ioi is None:
-            self.f_time_prev = f_time
-            self.p_ioi = 0.0
+        # if self.p_ioi is None:
+        #     self.f_time_prev = f_time
+        #     self.p_ioi = 0.0
 
         # # Forward bias
         # gamma = 1  # try between 0.5 and 5.0
@@ -189,7 +190,7 @@ class ParticleFilterAudio(OnlineAlignment):
         self.weights.fill(1.0 / self.num_particles)
 
         current_state = np.clip(
-            np.mean(self.x), a_min=self.state_space.min(), a_max=self.state_space.max()
+            round(np.mean(self.x), 2), a_min=self.state_space.min(), a_max=self.state_space.max()
         )
         self.current_state = current_state
         self.check_crossing(self.current_state)
@@ -243,12 +244,14 @@ class ParticleFilterAudio(OnlineAlignment):
             )
             # previous_state = self.current_state
             self.current_state = self(features, f_time)
-            # self.check_crossing(previous_state)
-
+            self.current_state_in_frame_index = int(self.beat_to_frame_map(self.current_state))
+            self.warping_path.append((self.current_state_in_frame_index, self.input_index))
             if verbose:
-                pbar.update(int(self.beat_to_frame_map(self.current_state)))
+                pbar.update(self.current_state_in_frame_index)
 
             yield self.current_state
+
+            self.input_index += 1
 
         if verbose:
             pbar.finish()
