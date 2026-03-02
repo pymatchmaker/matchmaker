@@ -35,6 +35,7 @@ class ParticleFilterAudio(OnlineAlignment):
         self.num_particles = num_particles
         self.current_state_in_frame_index = 0
         self.current_state = 0
+        self.previous_state = None
         self.queue = queue
         self.N_ref = len(state_space)
         self.beat_to_frame_map = interp1d(
@@ -56,16 +57,18 @@ class ParticleFilterAudio(OnlineAlignment):
         self.v_min = 0.5 * notated_tempo
         self.v_max = 2.0 * notated_tempo
 
+        init_tempo_std = 0.05 * notated_tempo
+
         # Tempo noise (paper: quarter of notated tempo)
         self.sigma_v = 0.25 * notated_tempo
-        self.tempo_noise = self.rng.normal(0, self.sigma_v, self.num_particles)
 
         # Particle state arrays
-        self.x = np.zeros(self.num_particles)  # Beat position of each particle
-        self.v = self.rng.normal(
-            notated_tempo, self.sigma_v, num_particles
-        )  # Normal distribution around notated tempo
-        self.v = np.clip(self.v, self.v_min, self.v_max)  # Clip to valid range
+        self.x = np.zeros(self.num_particles) # Beat position of each particle
+        self.prev_x = self.x.copy()
+        self.v = self.rng.uniform(self.v_min, self.v_max, self.num_particles)  # Tempo of each particle
+
+        self.tempo_mean = np.mean(self.v)
+
         self.weights = np.ones(num_particles) / num_particles
 
         self.warping_path = [(self.current_state_in_frame_index, self.input_index)]
@@ -77,6 +80,7 @@ class ParticleFilterAudio(OnlineAlignment):
         return False
 
     def predict(self):
+        self.prev_x = self.x.copy()
         # Update score position - each particle advances based on its tempo
         self.x += (self.v / 60.0) * self.hop_size  # Convert BPM to beats per second
 
@@ -89,9 +93,8 @@ class ParticleFilterAudio(OnlineAlignment):
         for i in range(self.num_particles):
             score_feature = self._get_score_feature(self.x[i])
             alpha = self._cosine_angle(feature, score_feature)
-            likelihoods[i] = np.exp(-(alpha**2))
-
-        # print(f"likelihoods: {likelihoods.argmax()}")
+            likelihoods[i] = np.exp(-(alpha**2)/0.2**2)
+            
         return likelihoods
 
     def _get_score_feature(self, beat_position):
@@ -111,9 +114,7 @@ class ParticleFilterAudio(OnlineAlignment):
 
         frac = (beat_position - beat_left) / (beat_right - beat_left + 1e-12)
 
-        return (1 - frac) * self.reference_features[
-            left
-        ] + frac * self.reference_features[right]
+        return (1 - frac) * self.reference_features[left] + frac * self.reference_features[right]
 
     @staticmethod
     def _cosine_angle(ca, cm):
@@ -128,28 +129,50 @@ class ParticleFilterAudio(OnlineAlignment):
         cos_angle = np.dot(ca, cm) / (norm_a * norm_m)
         cos_angle = np.clip(cos_angle, 0, 1)
         return np.arccos(cos_angle)
+    
+    def check_crossing(self):
+        if self.previous_state is not None and self.current_state is not None:
+            # check if there is a score boundary between previous and current state
+            if self.previous_state < self.current_state:
+                crossed_boundaries = self.score_boundaries[
+                    (self.score_boundaries > self.previous_state)
+                    & (self.score_boundaries <= self.current_state)
+                ]
+                if len(crossed_boundaries) > 0:
+                    # for each crossed boundary, check if it falls in between self.prev_x and self.x for each particle, and store the indexes of the particles that crossed the boundary
+                    indices_crossed = []
+                    for boundary in crossed_boundaries:
+                        particles_crossed_indices = np.where(
+                            (self.prev_x < boundary) & (self.x >= boundary)
+                        )[0]
+                        indices_crossed.append(particles_crossed_indices)
 
-    def compute_likelihood_timing(self, ioi, idx):
-        # Bounds checking: if at the start, use next beat instead
-        if idx <= 0:
-            return np.ones(self.num_particles)  # No timing info at start
+                    unique_indices_crossed = np.unique(np.concatenate(indices_crossed))
+                    if len(unique_indices_crossed) > 0:
+                        self.v[unique_indices_crossed] = self.rng.normal(self.tempo_mean, self.sigma_v, len(unique_indices_crossed))
+                        self.v = np.clip(self.v, self.v_min, self.v_max)
 
-        beat_diff = self.state_space[idx] - self.state_space[idx - 1]
-        expected_ioi = (60.0 * beat_diff) / self.notated_tempo
+    def resample(self):
+        indices = self.rng.choice(
+            self.num_particles, size=self.num_particles, p=self.weights
+        )
+        self.x = self.x[indices]
+        self.x += self.rng.normal(0, 0.01, self.num_particles)  # Add noise after resampling
 
-        # Estimate tempo from observed IOI
-        tempo_estimate = (60.0 * beat_diff) / max(ioi, 1e-6)
-
-        # tempo update
-        alpha = 0.1
-        self.v += alpha * (tempo_estimate - self.v)
-        self.v = np.clip(self.v, self.v_min, self.v_max)  # Ensure valid range
-
-        # Likelihood based on how well IOI matches expected
-        return np.exp(-0.5 * ((ioi - expected_ioi) / max(self.sigma_v, 1e-6)) ** 2)
+        self.v = self.v[indices]
+        self.v += self.rng.normal(0, 1, self.num_particles)  # Add tempo noise after resampling
+        self.v = np.clip(self.v, self.v_min, self.v_max)
+        # Reset weights only after resampling
+        self.weights.fill(1.0 / self.num_particles)
 
     def step(self, feature, f_time):
         self.predict()
+
+        current_state = round(np.mean(self.x), 2)
+        
+        self.previous_state = self.current_state
+        self.current_state = current_state
+        self.check_crossing()
 
         likelihoods = self.compute_likelihood(feature)
 
@@ -157,35 +180,13 @@ class ParticleFilterAudio(OnlineAlignment):
         self.weights += 1e-12  # avoid zero
         self.weights /= np.sum(self.weights)
 
-        indices = self.rng.choice(
-            self.num_particles, size=self.num_particles, p=self.weights
-        )
-        self.x = self.x[indices]
-        self.v = self.v[indices]
-        # Reset weights only after resampling
-        self.weights.fill(1.0 / self.num_particles)
+        self.resample()
 
-        current_state = np.clip(
-            round(np.mean(self.x), 2),
-            a_min=self.state_space.min(),
-            a_max=self.state_space.max(),
-        )
-        self.current_state = current_state
-        self.check_crossing(self.current_state)
+        self.tempo_mean = np.mean(self.v)
 
         return self.current_state
 
-    def check_crossing(self, previous_state):
-        if previous_state is not None and self.current_state is not None:
-            crossed = np.where(
-                (self.score_boundaries > previous_state)
-                & (self.score_boundaries <= self.current_state)
-            )[0]
-            if len(crossed) > 0:
-                for idx in crossed:
-                    self.v[idx] += self.rng.normal(
-                        0, self.sigma_v
-                    )  # Add tempo noise on crossing
+    
 
     def __call__(self, feature, f_time):
         return self.step(feature, f_time)

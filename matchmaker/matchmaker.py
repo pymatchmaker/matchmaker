@@ -388,7 +388,7 @@ class Matchmaker(object):
             state_space = self._convert_frame_to_beat(
                 np.arange(len(self.reference_features))
             )
-            score_boundaries = self.get_score_onsets_in_beats(self.score_part)
+            score_boundaries = self.get_score_onsets_and_offsets_in_beats(self.score_part)
             # for every entry in score_boundaries, find the highest beat in state_space that is smaller than or equal to it, and replace the entry with that beat (to ensure boundaries are aligned with score frames)
             score_boundaries = np.array(
                 [
@@ -405,7 +405,7 @@ class Matchmaker(object):
                 notated_tempo=self.tempo,
                 hop_size=1.0 / self.frame_rate,
                 queue=self.stream.queue,
-                num_particles=100,
+                num_particles=1000,
             )
 
         else:
@@ -418,7 +418,7 @@ class Matchmaker(object):
                 self.score_part, self.performance_file, self.tempo
             )
 
-        if self.method in {"arzt", "dixon"}:
+        if self.method in {"arzt", "dixon", "pf"}:
             self.ppart = partitura.utils.music.performance_from_part(self.score_part, bpm=self.tempo)
             self.ppart.sustain_pedal_threshold = 127
             if self.input_type == "audio":
@@ -429,6 +429,8 @@ class Matchmaker(object):
                 self.processor.reset()
                 return reference_features
             else:
+                if self.method == "pf":
+                    return self.score_part.note_array()
                 polling_period = 0.01
                 reference_features = (
                     partitura.utils.music.compute_pianoroll(
@@ -468,9 +470,9 @@ class Matchmaker(object):
         )
         return beat_position
 
-    def get_score_onsets_in_beats(self, score_part: Part) -> np.ndarray:
+    def get_score_onsets_and_offsets_in_beats(self, score_part: Part) -> np.ndarray:
         """
-        Get the beat positions of note onsets in the score.
+        Get the beat positions of note onsets and offsets in the score.
 
         Parameters
         ----------
@@ -480,11 +482,20 @@ class Matchmaker(object):
         Returns
         -------
         np.ndarray
-            Array of beat positions corresponding to note onsets
+            Array of beat positions corresponding to note onsets and offsets
         """
         note_array = score_part.note_array()
-        onset_beats = note_array["onset_beat"]
-        return np.unique(onset_beats)
+        # add a column for offsets, which is onset_beat + duration_beat
+        note_array = np.lib.recfunctions.append_fields(
+            note_array,
+            "offset_beat",
+            note_array["onset_beat"] + note_array["duration_beat"],
+            usemask=False,
+        )
+        onset_and_offset_beats = np.unique(
+            np.concatenate((note_array["onset_beat"], note_array["offset_beat"]))
+        )
+        return onset_and_offset_beats
 
     def build_score_annotations(
         self,
