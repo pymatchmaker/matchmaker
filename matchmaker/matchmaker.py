@@ -377,11 +377,15 @@ class Matchmaker(object):
             )
 
         elif method == "pf" and self.input_type == "midi":
+            score_boundaries = self.get_score_onsets_and_offsets_in_beats(self.score_part)
+            score_boundaries_in_seconds = score_boundaries / self.tempo * 60  # convert beat boundaries to seconds
             self.score_follower = ParticleFilterMIDI(
                 num_particles=1000,
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
                 patience=10,
+                score_boundaries_in_seconds=score_boundaries_in_seconds,
+                tempo=self.tempo,
             )
 
         elif method == "pf" and self.input_type == "audio":
