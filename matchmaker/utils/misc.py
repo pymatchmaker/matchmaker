@@ -480,7 +480,9 @@ def get_current_note_bpm(score: ScoreLike, onset_beat: float, tempo: float) -> f
     return latest_change["beat_type"] / 4 * tempo if latest_change else tempo
 
 
-def generate_score_audio(score: ScoreLike, bpm: float, samplerate: int):
+def generate_score_audio(
+    score: ScoreLike, bpm: float, samplerate: int, hop_length: int
+):
     bpm_array = [
         [onset_beat, get_current_note_bpm(score, onset_beat, bpm)]
         for onset_beat in score.note_array()["onset_beat"]
@@ -509,9 +511,8 @@ def generate_score_audio(score: ScoreLike, bpm: float, samplerate: int):
         * (60 / bpm)
     )
 
-    buffer_size = 0.1  # for assuring the last onset is included (in seconds)
-    last_onset_in_time += buffer_size
-    score_audio = score_audio[: int(last_onset_in_time * samplerate)]
+    # Include extra hops so the last onset gets a full feature frame
+    score_audio = score_audio[: int(last_onset_in_time * samplerate) + 2 * hop_length]
     return score_audio
 
 
