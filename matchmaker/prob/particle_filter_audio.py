@@ -236,7 +236,7 @@ class ParticleFilterAudio(OnlineAlignment):
                 self.beat_to_frame_map(self.current_state)
             )
             self.warping_path.append(
-                (self.current_state_in_frame_index, self.input_index)
+                (self.current_state, self.input_index)
             )
             if verbose:
                 pbar.update(self.current_state_in_frame_index)
