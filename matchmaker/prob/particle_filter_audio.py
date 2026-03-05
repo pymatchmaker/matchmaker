@@ -1,11 +1,12 @@
-from typing import Generator, List, Optional
+from typing import Generator, List, Optional, Dict
 
+import time
 import numpy as np
 import progressbar
 from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
-from matchmaker.utils.misc import RECVQueue
+from matchmaker.utils.misc import RECVQueue, set_latency_stats
 from partitura.utils.generic import interp1d
 
 NDArrayFloat = NDArray[np.float32]
@@ -72,6 +73,14 @@ class ParticleFilterAudio(OnlineAlignment):
         self.weights = np.ones(num_particles) / num_particles
 
         self.warping_path = [(self.current_state_in_frame_index, self.input_index)]
+
+        self.last_queue_update = time.time()
+        self.latency_stats: Dict[str, float] = {
+            "total_latency": 0,
+            "total_frames": 0,
+            "max_latency": 0,
+            "min_latency": float("inf"),
+        }
 
     def is_still_following(self) -> bool:
         if self.current_state is not None:
@@ -215,6 +224,7 @@ class ParticleFilterAudio(OnlineAlignment):
 
         while self.is_still_following():
             features, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
+            self.last_queue_update = time.time()
             self.input_features = (
                 np.concatenate((self.input_features, features))
                 if self.input_features is not None
@@ -230,6 +240,11 @@ class ParticleFilterAudio(OnlineAlignment):
             )
             if verbose:
                 pbar.update(self.current_state_in_frame_index)
+
+            latency = time.time() - self.last_queue_update
+            self.latency_stats = set_latency_stats(
+                latency, self.latency_stats, self.input_index
+            )
 
             yield self.current_state
 
