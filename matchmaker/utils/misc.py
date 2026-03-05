@@ -586,10 +586,10 @@ def plot_alignment(
             y = np.asarray(score_y, dtype=float)[:n]
             ylabel = "score position (beats)"
         wp_x = warping_path[1]
-        if state_space is not None:
-            wp_y = state_space[warping_path[0]]
-        else:
+        if np.issubdtype(warping_path[0].dtype, np.floating) or state_space is None:
             wp_y = warping_path[0]
+        else:
+            wp_y = state_space[warping_path[0]]
 
     # 1. Warping path
     if has_dist_matrix:
@@ -677,15 +677,14 @@ def save_debug_results(
         json.dump(eval_results, f, indent=4)
 
     # 2. Alignment plot
-    if state_space is not None:
+    # Use score_annots as y-axis values when they are beat positions
+    sx = np.asarray(score_annots, dtype=float)
+    if sx.ndim == 1 and len(sx) == len(perf_annots) and np.all(np.diff(sx) >= 0):
+        score_y = sx
+    elif state_space is not None:
         score_y = state_space
     else:
-        sx = np.asarray(score_annots, dtype=float)
-        score_y = (
-            sx
-            if sx.ndim == 1 and len(sx) == len(perf_annots) and np.all(np.diff(sx) >= 0)
-            else None
-        )
+        score_y = None
     plot_alignment(
         warping_path,
         perf_annots,

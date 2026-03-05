@@ -1,5 +1,4 @@
 import time
-from queue import Empty
 from typing import List, Optional
 
 import numpy as np
@@ -202,7 +201,7 @@ class AudioOuterProductHMM:
                 row_sums = self.alpha.sum(axis=1, keepdims=True)
             self.alpha = self.alpha / row_sums
 
-        self.current_state = 0
+        self.current_state_index = 0
         self._warping_path = []
         self._current_chord = np.zeros(88, dtype=int)
         self.patience = int(patience)
@@ -244,8 +243,13 @@ class AudioOuterProductHMM:
         self.e1 = float(np.clip(1.0 - self.a11, 1e-10, 1.0))
 
     @property
-    def warping_path(self) -> NDArrayInt:
-        return (np.array(self._warping_path).T).astype(np.int32)
+    def warping_path(self) -> np.ndarray:
+        return np.array(self._warping_path).T
+
+    @property
+    def current_position(self) -> float:
+        """Current score position in beats."""
+        return self.state_space[self.current_state_index]
 
     @staticmethod
     def _pause_self_transition_prob(
@@ -286,8 +290,8 @@ class AudioOuterProductHMM:
         return np.clip(1.0 - 1.0 / d_i, 1e-6, 1.0 - 1e-6)
 
     def is_still_following(self) -> bool:
-        if self.current_state is not None:
-            return self.current_state <= self.n_states - 1
+        if self.current_state_index is not None:
+            return self.current_state_index <= self.n_states - 1
         return False
 
     def __call__(self, input, *args, **kwargs) -> Optional[int]:
@@ -321,10 +325,12 @@ class AudioOuterProductHMM:
         top_scores = probs[0::2] + probs[1::2]
         new_top = int(np.argmax(top_scores))
 
-        self.current_state = new_top
-        self._warping_path.append((self.current_state, self.input_index))
+        self.current_state_index = new_top
+        self._warping_path.append(
+            (self.state_space[self.current_state_index], self.input_index)
+        )
         self.input_index += 1
-        return self.current_state
+        return self.current_state_index
 
     def compute_obs_likelihood(
         self,
@@ -448,21 +454,18 @@ class AudioOuterProductHMM:
         same_state_counter = 0
         empty_counter = 0
         if verbose:
-            pbar = progressbar.ProgressBar(maxval=self.n_states)
+            pbar = progressbar.ProgressBar(maxval=float(self.state_space[-1]))
             pbar.start()
 
         while self.is_still_following():
-            prev_state = self.current_state
+            prev_state = self.current_state_index
 
-            try:
-                queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
-            except Empty:
-                break
+            queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
             self.last_queue_update = time.time()
             if queue_input is not None:
-                current_state = self(queue_input)
+                self(queue_input)
                 empty_counter = 0
-                if current_state == prev_state:
+                if self.current_state_index == prev_state:
                     if self.patience > 0:
                         if same_state_counter < self.patience:
                             same_state_counter += 1
@@ -472,13 +475,12 @@ class AudioOuterProductHMM:
                     same_state_counter = 0
 
                 if verbose:
-                    if current_state is not None:
-                        pbar.update(int(current_state) + 1)  # states starts with 0
+                    pbar.update(self.current_position)
                 latency = time.time() - self.last_queue_update
                 self.latency_stats = set_latency_stats(
                     latency, self.latency_stats, self.input_index
                 )
-                yield current_state
+                yield self.current_position
 
         if verbose:
             pbar.finish()

@@ -6,8 +6,8 @@ from typing import Optional, Union
 import numpy as np
 import partitura
 from partitura.io.exportmidi import get_ppq
-from partitura.score import Part, merge_parts
 from partitura.musicanalysis.performance_codec import get_time_maps_from_alignment
+from partitura.score import Part, merge_parts
 
 from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
 from matchmaker.features.audio import (
@@ -33,16 +33,15 @@ from matchmaker.prob.hmm import (
     PitchHMM,
     PitchIOIHMM,
 )
-from matchmaker.prob.particle_filter_midi import ParticleFilterMIDI
-from matchmaker.prob.particle_filter_audio import ParticleFilterAudio
 from matchmaker.prob.outer_product_hmm import OuterProductHMM
 from matchmaker.prob.outer_product_hmm_audio import AudioOuterProductHMM
+from matchmaker.prob.particle_filter_audio import ParticleFilterAudio
+from matchmaker.prob.particle_filter_midi import ParticleFilterMIDI
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
     get_evaluation_results,
-    transfer_from_perf_to_predicted_score,
-    transfer_from_score_to_predicted_perf,
+    transfer_positions,
 )
 from matchmaker.utils.misc import (
     adjust_tempo_for_performance_file,
@@ -75,7 +74,15 @@ DEFAULT_METHODS = {
     "midi": "outerhmm",
 }
 
-AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm", "outerhmm", "audio_outerhmm", "pf"]
+AVAILABLE_METHODS = [
+    "arzt",
+    "dixon",
+    "hmm",
+    "pthmm",
+    "outerhmm",
+    "audio_outerhmm",
+    "pf",
+]
 KWARGS = {
     "audio": {
         "dixon": {
@@ -84,7 +91,8 @@ KWARGS = {
         "arzt": {
             "window_size": 5,
             "start_window_size": 0.25,
-            "step_size" : 5,},
+            "step_size": 5,
+        },
         "audio_outerhmm": {
             "sample_rate": 16000,
             "frame_rate": 50,
@@ -126,6 +134,7 @@ KWARGS = {
         },
     },
 }
+
 
 class Matchmaker(object):
     """
@@ -333,7 +342,7 @@ class Matchmaker(object):
                 state_to_ref_time_map=state_to_ref_time_map,
                 ref_to_state_time_map=ref_to_state_time_map,
                 step_size=self.config["step_size"],
-                state_space=np.unique(self.score_part.note_array()["onset_beat"])
+                state_space=np.unique(self.score_part.note_array()["onset_beat"]),
             )
         elif method == "dixon":
             self.score_follower = OnlineTimeWarpingDixon(
@@ -377,8 +386,12 @@ class Matchmaker(object):
             )
 
         elif method == "pf" and self.input_type == "midi":
-            score_boundaries = self.get_score_onsets_and_offsets_in_beats(self.score_part)
-            score_boundaries_in_seconds = score_boundaries / self.tempo * 60  # convert beat boundaries to seconds
+            score_boundaries = self.get_score_onsets_and_offsets_in_beats(
+                self.score_part
+            )
+            score_boundaries_in_seconds = (
+                score_boundaries / self.tempo * 60
+            )  # convert beat boundaries to seconds
             self.score_follower = ParticleFilterMIDI(
                 num_particles=1000,
                 reference_features=self.reference_features,
@@ -392,7 +405,9 @@ class Matchmaker(object):
             state_space = self._convert_frame_to_beat(
                 np.arange(len(self.reference_features))
             )
-            score_boundaries = self.get_score_onsets_and_offsets_in_beats(self.score_part)
+            score_boundaries = self.get_score_onsets_and_offsets_in_beats(
+                self.score_part
+            )
             # for every entry in score_boundaries, find the highest beat in state_space that is smaller than or equal to it, and replace the entry with that beat (to ensure boundaries are aligned with score frames)
             score_boundaries = np.array(
                 [
@@ -423,7 +438,9 @@ class Matchmaker(object):
             )
 
         if self.method in {"arzt", "dixon", "pf"}:
-            self.ppart = partitura.utils.music.performance_from_part(self.score_part, bpm=self.tempo)
+            self.ppart = partitura.utils.music.performance_from_part(
+                self.score_part, bpm=self.tempo
+            )
             self.ppart.sustain_pedal_threshold = 127
             if self.input_type == "audio":
                 self.score_audio = generate_score_audio(
@@ -450,10 +467,15 @@ class Matchmaker(object):
                 return reference_features
         else:
             return self.score_part.note_array()
-    
+
     def get_time_maps(self):
-        alignment = [{"label" : "match", "score_id" : nid, "performance_id": nid} for nid in self.score_part.note_array()["id"]]
-        return get_time_maps_from_alignment(self.ppart.note_array(), self.score_part.note_array(), alignment)
+        alignment = [
+            {"label": "match", "score_id": nid, "performance_id": nid}
+            for nid in self.score_part.note_array()["id"]
+        ]
+        return get_time_maps_from_alignment(
+            self.ppart.note_array(), self.score_part.note_array(), alignment
+        )
 
     def _convert_frame_to_beat(self, current_frame: int) -> float:
         """
@@ -648,36 +670,34 @@ class Matchmaker(object):
 
         original_perf_annots_counts = len(perf_annots)
 
-        min_length = min(len(score_annots), len(perf_annots))
-        score_annots = score_annots[:min_length]
-        perf_annots = perf_annots[:min_length]
+        wp = self.score_follower.warping_path
+        if np.issubdtype(wp[0].dtype, np.floating):
+            mode = "beat"
+        else:
+            mode = "state"
 
-        mode = (
-            "state"
-            if (self.input_type == "midi" or self.method == "audio_outerhmm")
-            else "frame"
-        )
-        perf_annots_predicted = transfer_from_score_to_predicted_perf(
-            self.score_follower.warping_path,
-            score_annots,
-            frame_rate=self.frame_rate,
-            mode=mode,
-        )
+        # Beat mode needs beat-valued annotations for forward transfer
+        if mode == "beat":
+            score_annots_beats = self.build_score_annotations(
+                level, musical_beat, return_type="beats"
+            )
+            forward_ref = score_annots_beats
+        else:
+            forward_ref = score_annots
 
-        score_annots_predicted = transfer_from_perf_to_predicted_score(
-            self.score_follower.warping_path,
-            perf_annots,
-            frame_rate=self.frame_rate,
-            mode=mode,
+        perf_annots_predicted = transfer_positions(
+            wp, forward_ref, self.frame_rate, mode=mode
+        )
+        score_annots_predicted = transfer_positions(
+            wp, perf_annots, self.frame_rate, reverse=True, mode=mode
         )
         score_annots = score_annots[: len(score_annots_predicted)]
 
         if original_perf_annots_counts != len(perf_annots_predicted):
             print(
-                f"Length of the annotation changed: {original_perf_annots_counts} -> {len(perf_annots_predicted)}"
+                f"Annotation count changed: {original_perf_annots_counts} -> {len(perf_annots_predicted)}"
             )
 
-        # Evaluation metrics
         if domain == "performance":
             eval_results = get_evaluation_results(
                 perf_annots,
@@ -686,9 +706,25 @@ class Matchmaker(object):
                 tolerances=tolerances,
             )
         else:
-            score_annots_predicted = self.convert_timestamps_to_beats(
-                score_annots_predicted
-            )
+            if mode == "state":
+                # State reverse returns state indices; map to beats
+                state_space = self.score_follower.state_space
+                raw_states = transfer_positions(
+                    wp,
+                    perf_annots,
+                    self.frame_rate,
+                    reverse=True,
+                    mode=mode,
+                    output="frames",
+                )
+                score_annots_predicted = np.array(
+                    [
+                        float(state_space[int(s)])
+                        if not np.isnan(s) and 0 <= int(s) < len(state_space)
+                        else np.nan
+                        for s in raw_states
+                    ]
+                )
             if tolerances == TOLERANCES_IN_MILLISECONDS:
                 tolerances = TOLERANCES_IN_BEATS
             eval_results = get_evaluation_results(
@@ -704,9 +740,10 @@ class Matchmaker(object):
 
         # Debug: save warping path TSV, results JSON, and plots
         if debug and save_dir is not None:
+            plot_score_annots = forward_ref if mode == "beat" else score_annots
             save_debug_results(
                 warping_path=self.score_follower.warping_path,
-                score_annots=score_annots,
+                score_annots=plot_score_annots,
                 perf_annots=perf_annots,
                 perf_annots_predicted=perf_annots_predicted,
                 eval_results=eval_results,
@@ -735,19 +772,21 @@ class Matchmaker(object):
         list
             Alignment results with warping path
         """
+        from queue import Empty
+
         with self.stream:
-            for current_position in self.score_follower.run(verbose=verbose):
-                if self.input_type == "audio" and self.method != "audio_outerhmm":
-                    if self.method == "pf":
-                        # print("bn", float(self.score_follower.state_space[current_position]))
-                        position_in_beat = float(current_position)
-                        yield position_in_beat
-                    else:
+            try:
+                for current_position in self.score_follower.run(verbose=verbose):
+                    if self.method in ("audio_outerhmm", "pf"):
+                        # These methods already yield beat positions
+                        yield current_position
+                    elif self.input_type == "audio":
                         position_in_beat = self._convert_frame_to_beat(current_position)
                         yield position_in_beat
-                else:
-                    print("nn", float(self.score_follower.state_space[current_position]))
-                    yield float(self.score_follower.state_space[current_position])
+                    else:
+                        yield float(self.score_follower.state_space[current_position])
+            except Empty:
+                pass
 
         self._has_run = True
         return self.score_follower.warping_path

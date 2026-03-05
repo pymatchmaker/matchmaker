@@ -123,9 +123,14 @@ class AudioStream(Stream):
             "min_latency": float("inf"),
         }
         self.input_index = 0
+        self._preloaded_audio = None
 
         if self.mock:
             self.run = self.run_offline
+            # Pre-load and resample audio so the stream thread can start
+            # producing frames immediately (avoids queue-timeout race condition
+            # when librosa.load takes longer than QUEUE_TIMEOUT).
+            self._preload_audio()
         else:
             self.run = self.run_online
 
@@ -225,6 +230,13 @@ class AudioStream(Stream):
             self.audio_interface.terminate()
         self.listen = False
 
+    def _preload_audio(self) -> None:
+        """Pre-load and resample audio file so run_offline can start immediately."""
+        audio_y, sr = librosa.load(self.file_path, sr=None)
+        if sr != self.target_sr:
+            audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
+        self._preloaded_audio = audio_y
+
     def run_offline(self) -> None:
         """Process audio file in offline mode.
 
@@ -240,10 +252,16 @@ class AudioStream(Stream):
         self.start_listening()
         self.init_time = time.time()
 
-        audio_y, sr = librosa.load(self.file_path, sr=None)
-        if sr != self.target_sr:
-            audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
-            sr = self.target_sr
+        if self._preloaded_audio is not None:
+            audio_y = self._preloaded_audio
+            self._preloaded_audio = None  # free memory
+        else:
+            audio_y, sr = librosa.load(self.file_path, sr=None)
+            if sr != self.target_sr:
+                audio_y = librosa.resample(
+                    y=audio_y, orig_sr=sr, target_sr=self.target_sr
+                )
+        sr = self.target_sr
 
         time_interval = self.hop_length / float(sr)
         # Pad to next hop_length boundary so no trailing samples are lost

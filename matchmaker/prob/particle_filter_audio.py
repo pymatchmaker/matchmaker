@@ -1,13 +1,13 @@
-from typing import Generator, List, Optional, Dict
-
 import time
+from typing import Dict, Generator, List, Optional
+
 import numpy as np
 import progressbar
 from numpy.typing import NDArray
+from partitura.utils.generic import interp1d
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.utils.misc import RECVQueue, set_latency_stats
-from partitura.utils.generic import interp1d
 
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]
@@ -64,15 +64,17 @@ class ParticleFilterAudio(OnlineAlignment):
         self.sigma_v = 0.25 * notated_tempo
 
         # Particle state arrays
-        self.x = np.zeros(self.num_particles) # Beat position of each particle
+        self.x = np.zeros(self.num_particles)  # Beat position of each particle
         self.prev_x = self.x.copy()
-        self.v = self.rng.uniform(self.v_min, self.v_max, self.num_particles)  # Tempo of each particle
+        self.v = self.rng.uniform(
+            self.v_min, self.v_max, self.num_particles
+        )  # Tempo of each particle
 
         self.tempo_mean = np.mean(self.v)
 
         self.weights = np.ones(num_particles) / num_particles
 
-        self.warping_path = [(self.current_state_in_frame_index, self.input_index)]
+        self._warping_path = [(self.current_state, self.input_index)]
 
         self.last_queue_update = time.time()
         self.latency_stats: Dict[str, float] = {
@@ -81,6 +83,10 @@ class ParticleFilterAudio(OnlineAlignment):
             "max_latency": 0,
             "min_latency": float("inf"),
         }
+
+    @property
+    def warping_path(self) -> np.ndarray:
+        return np.array(self._warping_path).T
 
     def is_still_following(self) -> bool:
         if self.current_state is not None:
@@ -102,8 +108,8 @@ class ParticleFilterAudio(OnlineAlignment):
         for i in range(self.num_particles):
             score_feature = self._get_score_feature(self.x[i])
             alpha = self._cosine_angle(feature, score_feature)
-            likelihoods[i] = np.exp(-(alpha**2)/0.2**2)
-            
+            likelihoods[i] = np.exp(-(alpha**2) / 0.2**2)
+
         return likelihoods
 
     def _get_score_feature(self, beat_position):
@@ -123,7 +129,9 @@ class ParticleFilterAudio(OnlineAlignment):
 
         frac = (beat_position - beat_left) / (beat_right - beat_left + 1e-12)
 
-        return (1 - frac) * self.reference_features[left] + frac * self.reference_features[right]
+        return (1 - frac) * self.reference_features[
+            left
+        ] + frac * self.reference_features[right]
 
     @staticmethod
     def _cosine_angle(ca, cm):
@@ -138,7 +146,7 @@ class ParticleFilterAudio(OnlineAlignment):
         cos_angle = np.dot(ca, cm) / (norm_a * norm_m)
         cos_angle = np.clip(cos_angle, 0, 1)
         return np.arccos(cos_angle)
-    
+
     def check_crossing(self):
         if self.previous_state is not None and self.current_state is not None:
             # check if there is a score boundary between previous and current state
@@ -158,7 +166,9 @@ class ParticleFilterAudio(OnlineAlignment):
 
                     unique_indices_crossed = np.unique(np.concatenate(indices_crossed))
                     if len(unique_indices_crossed) > 0:
-                        self.v[unique_indices_crossed] = self.rng.normal(self.tempo_mean, self.sigma_v, len(unique_indices_crossed))
+                        self.v[unique_indices_crossed] = self.rng.normal(
+                            self.tempo_mean, self.sigma_v, len(unique_indices_crossed)
+                        )
                         self.v = np.clip(self.v, self.v_min, self.v_max)
 
     def resample(self):
@@ -166,10 +176,14 @@ class ParticleFilterAudio(OnlineAlignment):
             self.num_particles, size=self.num_particles, p=self.weights
         )
         self.x = self.x[indices]
-        self.x += self.rng.normal(0, 0.01, self.num_particles)  # Add noise after resampling
+        self.x += self.rng.normal(
+            0, 0.01, self.num_particles
+        )  # Add noise after resampling
 
         self.v = self.v[indices]
-        self.v += self.rng.normal(0, 1, self.num_particles)  # Add tempo noise after resampling
+        self.v += self.rng.normal(
+            0, 1, self.num_particles
+        )  # Add tempo noise after resampling
         self.v = np.clip(self.v, self.v_min, self.v_max)
         # Reset weights only after resampling
         self.weights.fill(1.0 / self.num_particles)
@@ -178,7 +192,7 @@ class ParticleFilterAudio(OnlineAlignment):
         self.predict()
 
         current_state = round(np.mean(self.x), 2)
-        
+
         self.previous_state = self.current_state
         self.current_state = current_state
         self.check_crossing()
@@ -194,8 +208,6 @@ class ParticleFilterAudio(OnlineAlignment):
         self.tempo_mean = np.mean(self.v)
 
         return self.current_state
-
-    
 
     def __call__(self, feature, f_time):
         return self.step(feature, f_time)
@@ -220,7 +232,9 @@ class ParticleFilterAudio(OnlineAlignment):
             (reference_position, input_position)
         """
         if verbose:
-            pbar = progressbar.ProgressBar(max_value=self.N_ref, redirect_stdout=True)
+            pbar = progressbar.ProgressBar(
+                max_value=float(self.state_space[-1]), redirect_stdout=True
+            )
 
         while self.is_still_following():
             features, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
@@ -235,11 +249,9 @@ class ParticleFilterAudio(OnlineAlignment):
             self.current_state_in_frame_index = int(
                 self.beat_to_frame_map(self.current_state)
             )
-            self.warping_path.append(
-                (self.current_state, self.input_index)
-            )
+            self._warping_path.append((self.current_state, self.input_index))
             if verbose:
-                pbar.update(self.current_state_in_frame_index)
+                pbar.update(self.current_state)
 
             latency = time.time() - self.last_queue_update
             self.latency_stats = set_latency_stats(
@@ -253,5 +265,4 @@ class ParticleFilterAudio(OnlineAlignment):
         if verbose:
             pbar.finish()
 
-        self.warping_path = np.array(self.warping_path).T
         return self.warping_path
