@@ -326,11 +326,16 @@ class Matchmaker(object):
                 state_space=np.unique(self.score_part.note_array()["onset_beat"])
             )
         elif method == "dixon":
+            state_to_ref_time_map, ref_to_state_time_map = self.get_time_maps()
             self.score_follower = OnlineTimeWarpingDixon(
                 reference_features=self.reference_features,
                 queue=self.stream.queue,
                 distance_func=distance_func,
                 frame_rate=self.frame_rate,
+                window_size=self.config["window_size"],
+                state_to_ref_time_map=state_to_ref_time_map,
+                ref_to_state_time_map=ref_to_state_time_map,
+                state_space=np.unique(self.score_part.note_array()["onset_beat"])
             )
         elif method == "hmm" and self.input_type == "midi":
             self.score_follower = PitchIOIHMM(

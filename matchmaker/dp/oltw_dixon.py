@@ -74,6 +74,9 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         max_run_count=MAX_RUN_COUNT,
         frame_per_seg=FRAME_PER_SEG,
         frame_rate=FRAME_RATE,
+        state_to_ref_time_map = None,
+        ref_to_state_time_map = None,
+        state_space = None,
         **kwargs,
     ):
         super().__init__(reference_features=reference_features)
@@ -84,6 +87,9 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.distance_func = distance_func.lower()
         self.max_run_count = max_run_count
         self.frame_per_seg = frame_per_seg
+        self.state_to_ref_time_map = state_to_ref_time_map
+        self.ref_to_state_time_map = ref_to_state_time_map
+        self.state_space = state_space
         self.reset()
 
     def reset(self):
