@@ -408,9 +408,6 @@ class Matchmaker(object):
             score_boundaries = self.get_score_onsets_and_offsets_in_beats(
                 self.score_part
             )
-            # Trim state_space to the last score boundary (the audio buffer
-            # added by generate_score_audio extends beyond the last note)
-            state_space = state_space[state_space <= score_boundaries[-1]]
             # for every entry in score_boundaries, find the highest beat in state_space that is smaller than or equal to it, and replace the entry with that beat (to ensure boundaries are aligned with score frames)
             score_boundaries = np.array(
                 [
@@ -420,6 +417,9 @@ class Matchmaker(object):
                     for boundary in score_boundaries
                 ]
             )
+            # Trim state_space to the snapped last score boundary (the audio buffer
+            # added by generate_score_audio extends beyond the last note)
+            state_space = state_space[state_space <= score_boundaries[-1]]
             self.reference_features = self.reference_features[: len(state_space)]
             self.score_follower = ParticleFilterAudio(
                 reference_features=self.reference_features,
