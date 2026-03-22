@@ -9,8 +9,8 @@ from threading import Thread
 
 import numpy as np
 
-from matchmaker.utils.processor import DummyProcessor
-from matchmaker.utils.stream import Stream
+from matchmaker.features.processor import DummyProcessor
+from matchmaker.io.stream import Stream
 
 RNG = np.random.RandomState(1984)
 

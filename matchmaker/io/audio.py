@@ -10,20 +10,20 @@ from typing import Callable, Dict, Optional, Tuple, Type, Union
 
 import librosa
 import numpy as np
-import pyaudio
 
 from matchmaker.features.audio import (
     HOP_LENGTH,
     SAMPLE_RATE,
     ChromagramProcessor,
 )
+from matchmaker.io.queue import RECVQueue
+from matchmaker.io.stream import STREAM_END, Stream
 from matchmaker.utils.audio import (
     get_audio_devices,
     get_default_input_device_index,
     get_device_index_from_name,
 )
-from matchmaker.utils.misc import RECVQueue, set_latency_stats
-from matchmaker.utils.stream import STREAM_END, Stream
+from matchmaker.utils.misc import set_latency_stats
 
 CHANNELS = 1
 QUEUE_TIMEOUT = 10
@@ -112,9 +112,9 @@ class AudioStream(Stream):
         self.sample_rate = sample_rate
         self.hop_length = hop_length
         self.queue = queue or RECVQueue()
-        self.format = pyaudio.paFloat32
+        self.format = None  # set to pyaudio.paFloat32 in run_online
         self.audio_interface = None
-        self.audio_stream: Optional[pyaudio.Stream] = None
+        self.audio_stream = None
         self.last_chunk = None
         self.f_time = 0
         self.prev_time = None
@@ -172,6 +172,8 @@ class AudioStream(Stream):
         if not self.stream_start.is_set():
             self.stream_start.set()
 
+        import pyaudio
+
         return (data, pyaudio.paContinue)
 
     def _process_feature(
@@ -179,9 +181,17 @@ class AudioStream(Stream):
         target_audio: np.ndarray,
         f_time: float,
     ):
+        # Determine how many samples to cache for the next frame.
+        # For processors with n_fft > 2*hop_length (e.g. 512-point FFT with
+        # 128-sample hop), we need to keep n_fft - hop_length samples so that
+        # the next call has enough context for a full analysis window.
+        cache_size = (
+            getattr(self.processor, "n_fft", 2 * self.hop_length) - self.hop_length
+        )
+
         if self.last_chunk is None:  # add zero padding at the first block
             target_audio = np.concatenate(
-                (np.zeros(self.hop_length, dtype=np.float32), target_audio)
+                (np.zeros(cache_size, dtype=np.float32), target_audio)
             )
         else:
             # add last chunk at the beginning of the block
@@ -199,7 +209,7 @@ class AudioStream(Stream):
         )
 
         # cache last chunk (for the next frame window)
-        self.last_chunk = target_audio[-self.hop_length :]
+        self.last_chunk = target_audio[-cache_size:]
 
     @property
     def current_time(self) -> Optional[float]:
@@ -308,6 +318,9 @@ class AudioStream(Stream):
         The audio is processed in chunks of size `hop_length`,
         and features are extracted in real-time.
         """
+        import pyaudio
+
+        self.format = pyaudio.paFloat32
         self.audio_interface = pyaudio.PyAudio()
         self.audio_stream = self.audio_interface.open(
             format=self.format,

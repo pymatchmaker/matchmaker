@@ -140,3 +140,72 @@ def get_evaluation_results(
             )
 
     return results
+
+
+def evaluate_alignment(
+    wp_score,
+    wp_perf_sec,
+    gt_score_beats,
+    gt_perf_sec,
+    beat_tolerances=TOLERANCES_IN_BEATS,
+    ms_tolerances=TOLERANCES_IN_MILLISECONDS,
+):
+    """Evaluate alignment quality in both beat and ms domains.
+
+    Parameters
+    ----------
+    wp_score : np.ndarray
+        Warping path score axis (beats).
+    wp_perf_sec : np.ndarray
+        Warping path performance axis (seconds).
+    gt_score_beats : np.ndarray
+        Ground truth score positions (beats).
+    gt_perf_sec : np.ndarray
+        Ground truth performance times (seconds).
+    beat_tolerances : list
+        Tolerance thresholds for beat error.
+    ms_tolerances : list
+        Tolerance thresholds for ms error.
+
+    Returns
+    -------
+    dict
+        {"beat": {...}, "ms": {...}}
+    """
+    # GT interpolator: score beat → perf time
+    valid = np.isfinite(gt_perf_sec) & np.isfinite(gt_score_beats)
+    gt_interp = scipy.interpolate.interp1d(
+        gt_score_beats[valid],
+        gt_perf_sec[valid],
+        kind="linear",
+        bounds_error=False,
+        fill_value=np.nan,
+    )
+
+    # Beat metrics: perf→score prediction
+    wp_sec = np.array([wp_score, wp_perf_sec])
+    score_predicted = transfer_positions(
+        wp_sec,
+        gt_perf_sec,
+        frame_rate=1,
+        domain="score",
+    )
+    n_valid = min(len(gt_score_beats), len(score_predicted))
+    beat_results = get_evaluation_results(
+        gt_score_beats[:n_valid],
+        score_predicted[:n_valid],
+        total_counts=len(gt_score_beats),
+        tolerances=beat_tolerances,
+        in_seconds=False,
+    )
+
+    # Ms metrics: score→perf prediction
+    gt_perf_for_wp = gt_interp(wp_score)
+    ms_results = get_evaluation_results(
+        gt_perf_for_wp,
+        wp_perf_sec,
+        total_counts=len(wp_score),
+        tolerances=ms_tolerances,
+    )
+
+    return {"beat": beat_results, "ms": ms_results}

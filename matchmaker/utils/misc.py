@@ -9,8 +9,7 @@ import numbers
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from queue import Empty, Queue
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Dict, Optional, Union
 
 import librosa
 import mido
@@ -146,53 +145,6 @@ def extract_tempo_marking_from_musicxml(
     return None
 
 
-class MatchmakerInvalidParameterTypeError(Exception):
-    """
-    Error for flagging an invalid parameter type.
-    """
-
-    def __init__(
-        self,
-        parameter_name: str,
-        required_parameter_type: Union[type, Iterable[type]],
-        actual_parameter_type: type,
-        *args,
-    ) -> None:
-        if isinstance(required_parameter_type, Iterable):
-            rqpt = ", ".join([f"{pt}" for pt in required_parameter_type])
-        else:
-            rqpt = required_parameter_type
-        message = f"`{parameter_name}` was expected to be {rqpt}, but is {actual_parameter_type}"
-
-        super().__init__(message, *args)
-
-
-class MatchmakerInvalidOptionError(Exception):
-    """
-    Error for invalid option.
-    """
-
-    def __init__(self, parameter_name, valid_options, value, *args) -> None:
-        rqop = ", ".join([f"{op}" for op in valid_options])
-        message = f"`{parameter_name}` was expected to be in {rqop}, but is {value}"
-
-        super().__init__(message, *args)
-
-
-class MatchmakerMissingParameterError(Exception):
-    """
-    Error for flagging a missing parameter
-    """
-
-    def __init__(self, parameter_name: Union[str, List[str]], *args) -> None:
-        if isinstance(parameter_name, Iterable) and not isinstance(parameter_name, str):
-            message = ", ".join([f"`{pn}`" for pn in parameter_name])
-            message = f"{message} were not given"
-        else:
-            message = f"`{parameter_name}` was not given."
-        super().__init__(message, *args)
-
-
 def ensure_rng(
     seed: Union[numbers.Integral, np.random.RandomState],
 ) -> np.random.RandomState:
@@ -222,33 +174,6 @@ def ensure_rng(
             "`seed` should be an integer or an instance of "
             f"`np.random.RandomState` but is {type(seed)}"
         )
-
-
-class RECVQueue(Queue):
-    """
-    Queue with a recv method (like Pipe)
-
-    This class uses python's Queue.get with a timeout makes it interruptable via KeyboardInterrupt
-    and even for the future where that is possibly out-dated, the interrupt can happen after each timeout
-    so periodically query the queue with a timeout of 1s each attempt, finding a middleground
-    between busy-waiting and uninterruptable blocked waiting
-    """
-
-    def __init__(self) -> None:
-        Queue.__init__(self)
-
-    def recv(self) -> Any:
-        """
-        Return and remove an item from the queue.
-        """
-        while True:
-            try:
-                return self.get(timeout=1)
-            except Empty:  # pragma: no cover
-                pass
-
-    def poll(self) -> bool:
-        return self.empty()
 
 
 def get_window_indices(indices: np.ndarray, context: int) -> np.ndarray:
@@ -571,12 +496,14 @@ def plot_alignment(
                     ],
                     dtype=np.float32,
                 )
+            n_input = input_features.shape[0]
+            n_ref = ref_features.shape[0]
             ax.imshow(
                 dist,
                 aspect="auto",
                 origin="lower",
                 interpolation="nearest",
-                extent=(0, input_features.shape[0] - 1, 0, ref_features.shape[0] - 1),
+                extent=(0, n_input - 1, 0, n_ref - 1),
             )
             show_dist = True
         except Exception:
@@ -584,7 +511,7 @@ def plot_alignment(
 
     # x-axis: performance time in frames
     x_gt = gt * float(frame_rate)
-    wp_x = warping_path[1]
+    wp_x = warping_path[1] * float(frame_rate)
 
     # y-axis: score position (beats)
     wp_in_beats = np.issubdtype(warping_path[0].dtype, np.floating)

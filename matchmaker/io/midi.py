@@ -12,10 +12,10 @@ import mido
 from mido.ports import BaseInput as MidiInputPort
 
 from matchmaker.features.midi import PitchIOIProcessor
+from matchmaker.features.processor import Processor
 from matchmaker.io.mediator import CeusMediator
-from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.processor import Processor
-from matchmaker.utils.stream import Stream
+from matchmaker.io.queue import RECVQueue
+from matchmaker.io.stream import STREAM_END, Stream
 from matchmaker.utils.symbolic import (
     Buffer,
     framed_midi_messages_from_performance,
@@ -72,7 +72,7 @@ class MidiStream(Stream):
         self,
         processor: Optional[Union[Callable, Processor]] = None,
         file_path: Optional[str] = None,
-        polling_period: Optional[float] = POLLING_PERIOD,
+        polling_period: Optional[float] = None,
         port: Optional[Union[MidiInputPort, str]] = None,
         queue: RECVQueue = None,
         init_time: Optional[float] = None,
@@ -107,21 +107,19 @@ class MidiStream(Stream):
         self.midi_messages = []
 
         self.polling_period = polling_period
+
         if (polling_period is None) and (self.mock is False):
             self.is_windowed = False
             self.run = self.run_online_single
             self._process_frame = self._process_frame_message
-
         elif (polling_period is None) and (self.mock is True):
             self.is_windowed = False
             self.run = self.run_offline_single
             self._process_frame = self._process_frame_message
-
         elif (polling_period is not None) and (self.mock is False):
             self.is_windowed = True
             self.run = self.run_online_windowed
             self._process_frame = self._process_frame_window
-
         elif (polling_period is not None) and (self.mock is True):
             self.is_windowed = True
             self.run = self.run_offline_windowed
@@ -135,6 +133,10 @@ class MidiStream(Stream):
         **kwargs,
     ) -> None:
         output = self.processor(([(data, c_time)], c_time))
+
+        if output is None:
+            return
+
         if self.return_midi_messages:
             self.queue.put(((data, c_time), output))
         else:
@@ -151,11 +153,15 @@ class MidiStream(Stream):
         # the data is the Buffer instance
         output = self.processor((data.frame[:], data.time))
 
-        # if output is not None:
+        if output is None:
+            return
+
         if self.return_midi_messages:
             self.queue.put((data.frame, output))
         else:
             self.queue.put(output)
+        if not self.stream_start.is_set():
+            self.stream_start.set()
 
     def run_online_single(self):
         self.start_listening()
@@ -221,8 +227,8 @@ class MidiStream(Stream):
         midi_messages, message_times = midi_messages_from_performance(
             perf=self.file_path,
         )
-        self.init_time = message_times.min()
         self.start_listening()
+        self.init_time = message_times.min()
         for msg, c_time in zip(midi_messages, message_times):
             self.add_midi_message(
                 msg=msg,
@@ -232,6 +238,12 @@ class MidiStream(Stream):
                 data=msg,
                 c_time=c_time,
             )
+        # Flush remaining chord from OnsetPianoRollProcessor
+        if hasattr(self.processor, "flush_remaining"):
+            last = self.processor.flush_remaining()
+            if last is not None:
+                self.queue.put(last)
+        self.queue.put(STREAM_END)
         self.stop_listening()
 
     def run_offline_windowed(self):
@@ -249,6 +261,11 @@ class MidiStream(Stream):
             self._process_frame_window(
                 data=frame,
             )
+        if hasattr(self.processor, "flush_remaining"):
+            last = self.processor.flush_remaining()
+            if last is not None:
+                self.queue.put(last)
+        self.queue.put(STREAM_END)
 
     @property
     def current_time(self) -> Optional[float]:

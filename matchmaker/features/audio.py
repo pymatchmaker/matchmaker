@@ -9,7 +9,7 @@ from typing import Dict, Optional, Tuple, Union
 import librosa
 import numpy as np
 
-from matchmaker.utils.processor import Processor
+from matchmaker.features.processor import Processor
 
 SAMPLE_RATE = 44100
 FRAME_RATE = 30
@@ -360,6 +360,35 @@ class LogSpectralEnergyProcessor(Processor):
             result = result / norms
 
         return result
+
+
+class RawSpectrumProcessor(Processor):
+    """Magnitude FFT spectrum, as used in Jiang & Raphael (ISMIR 2020).
+
+    Returns (n_frames, n_fft//2 + 1) magnitude spectrum.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = 8000,
+        hop_length: int = 128,
+        n_fft: int = 512,
+    ):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.hop_length = hop_length
+        self.n_fft = n_fft
+
+    def __call__(self, y: InputAudioSeries):
+        stft = librosa.stft(
+            y=y,
+            n_fft=self.n_fft,
+            win_length=self.n_fft,
+            hop_length=self.hop_length,
+            center=False,
+            dtype=np.float32,
+        )
+        return np.abs(stft).T  # (n_frames, n_bins)
 
 
 def compute_features_from_audio(

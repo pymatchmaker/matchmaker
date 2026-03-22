@@ -7,8 +7,6 @@ Audio device utilities.
 import os
 from typing import List
 
-import pyaudio
-
 
 class AudioDeviceInfo(object):
     """Info about an audio device
@@ -57,6 +55,8 @@ def get_audio_devices() -> List[AudioDeviceInfo]:
         return []
 
     try:
+        import pyaudio
+
         p = pyaudio.PyAudio()
         device_count = p.get_device_count()
 
@@ -87,6 +87,8 @@ def get_default_input_device_index() -> int:
     """
     if not check_input_audio_devices():  # pragma: no cover
         raise ValueError("No audio devices found.")
+
+    import pyaudio
 
     p = pyaudio.PyAudio()
     default_input_index = p.get_default_input_device_info()["index"]

@@ -47,7 +47,7 @@ def main():
     if args.method is not None:
         method = args.method
     else:
-        method = "outerhmm" if input_mode == "midi" else "arzt"
+        method = "pthmm" if input_mode == "midi" else "arzt"
 
     # Initialize matchmaker (simulation mode)
     try:

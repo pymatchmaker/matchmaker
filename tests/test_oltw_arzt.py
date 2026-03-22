@@ -9,12 +9,12 @@ import unittest
 import numpy as np
 from scipy.spatial import distance as sp_distance
 
-from matchmaker.dp.oltw_arzt import OnlineTimeWarpingArzt
+from matchmaker.dp.oltw_arzt import OnlineTimeWarpingArztFrame as OnlineTimeWarpingArzt
 from matchmaker.utils import (
     CYTHONIZED_METRICS_W_ARGUMENTS,
     CYTHONIZED_METRICS_WO_ARGUMENTS,
 )
-from matchmaker.utils.misc import (
+from matchmaker.utils.errors import (
     MatchmakerInvalidOptionError,
     MatchmakerInvalidParameterTypeError,
 )

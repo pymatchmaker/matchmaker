@@ -1,84 +1,130 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 """
-Top module for alignment methods imported from the parangonar library:
-https://github.com/sildater/parangonar
+Wrapper around parangonar (https://github.com/sildater/parangonar) online
+note matchers so they can be plugged into the Matchmaker pipeline.
+
+Supported method keys:
+  - "SL_OLTW"  : parangonar.OLTWMatcher  (symbolic-level OLTW)
+  - "SLT_OLTW" : parangonar.TOLTWMatcher (symbolic-level tempo OLTW)
+  - "OTM"      : parangonar.OnlineTransformerMatcher
+  - "OPTM"     : parangonar.OnlinePureTransformerMatcher
 """
+
+from typing import Generator, Optional
+
+import numpy as np
 import parangonar as pa
-# from matchmaker.base import OnlineAlignment
-from typing import Callable, Dict, Generator
-from numpy.typing import NDArray
+import partitura as pt
 
-QUEUE_SENTINEL = object()
+from matchmaker.base import OnlineAlignment
 
-class OnlineParangonarAlignment():#(OnlineAlignment):
-    def __init__(self, 
-                 queue,
-                 score_note_array,
-                 parangonar_tracker_type: str = "SLT_OLTW"):
-        # an instance of 
+_BATCH_MATCHERS = {"SL_OLTW", "SLT_OLTW"}
+_INCREMENTAL_MATCHERS = {"OTM", "OPTM"}
+
+
+def _ensure_unique_ids(note_array: np.ndarray, prefix: str) -> np.ndarray:
+    """Guarantee unique string ids in the note array, copying if needed."""
+    ids = note_array["id"]
+    if len(set(ids)) == len(ids) and all(bool(i) for i in ids):
+        return note_array
+    out = note_array.copy()
+    out["id"] = np.array([f"{prefix}{i}" for i in range(len(out))])
+    return out
+
+
+class OnlineParangonarAlignment(OnlineAlignment):
+    """
+    Adapter that exposes a parangonar online matcher through the
+    `OnlineAlignment` interface Matchmaker expects.
+
+    Parameters
+    ----------
+    reference_features : np.ndarray
+        Score note array (structured, with `onset_beat`, `pitch`, `id`,
+        `is_grace`).
+    performance_file : str
+        Path to the performance MIDI file. The adapter reads it directly
+        rather than consuming the MidiStream queue, because parangonar
+        matchers operate on full note rows.
+    method : str
+        One of {"SL_OLTW", "SLT_OLTW", "OTM", "OPTM"}.
+    queue : RECVQueue or None
+        The MidiStream queue. Drained but not used; kept so Matchmaker's
+        stream lifecycle stays intact.
+    """
+
+    def __init__(
+        self,
+        reference_features: np.ndarray,
+        performance_file: str,
+        method: str,
+        queue=None,
+    ):
+        super().__init__(reference_features=reference_features)
+        if method not in _BATCH_MATCHERS | _INCREMENTAL_MATCHERS:
+            raise ValueError(f"Unknown parangonar method: {method}")
+        self.method = method
+        self.performance_file = performance_file
         self.queue = queue
-        if parangonar_tracker_type == "SLT_OLTW":
-            self.parangonar_tracker = pa.TOLTWMatcher(score_note_array, 
-                                                      tracker_type=parangonar_tracker_type)
-        elif parangonar_tracker_type == "SL_OLTW":
-            self.parangonar_tracker = pa.OLTWMatcher(score_note_array, 
-                                                    tracker_type=parangonar_tracker_type)
-        elif parangonar_tracker_type == "OPTM":
-            self.parangonar_tracker = pa.OnlinePureTransformerMatcher(score_note_array)
-        elif parangonar_tracker_type == "OTM":
-            self.parangonar_tracker = pa.OnlineTransformerMatcher(score_note_array)
+
+        self.score_note_array = _ensure_unique_ids(reference_features, prefix="s")
+        self.matcher = self._build_matcher(method, self.score_note_array)
+
+        self.warping_path: Optional[np.ndarray] = None
+        self.input_features = None
+        self.state_space = np.unique(self.score_note_array["onset_beat"])
+
+    @staticmethod
+    def _build_matcher(method: str, sna: np.ndarray):
+        if method == "SLT_OLTW":
+            return pa.TOLTWMatcher(sna)
+        if method == "SL_OLTW":
+            return pa.OLTWMatcher(sna)
+        if method == "OTM":
+            return pa.OnlineTransformerMatcher(sna)
+        if method == "OPTM":
+            return pa.OnlinePureTransformerMatcher(sna)
+        raise ValueError(method)
 
     def __call__(self, performance_note):
-        # process
-        score_position = self.parangonar_tracker(performance_note)
-        return score_position
+        return float(performance_note["onset_sec"])
 
-    def run(self) -> Generator[int, None, float]:
-        while self.parangonar_tracker.is_still_following():
-            input_feature = self.queue.get(block=True)
-            if input_feature is QUEUE_SENTINEL:
-                print("empty queue")
-                return None
-            else:
-                current_state = self(input_feature)
-                yield current_state
+    def _load_performance_note_array(self) -> np.ndarray:
+        perf = pt.load_performance_midi(self.performance_file)
+        pna = perf.note_array()
+        return _ensure_unique_ids(pna, prefix="p")
 
-        return None
-    
-    def run_offline(self):
-        self.queue.put(QUEUE_SENTINEL)
-        for position in self.run():
-            print(position, self.parangonar_tracker.unique_onsets[position])
-        
-        return self.parangonar_tracker.warping_path
-    
-if __name__ == "__main__":
-    import partitura as pt
-    from queue import Queue
-    # load the example match file included in the library
-    perf_match, groundtruth_alignment, score_match = pt.load_match(
-        filename= pa.EXAMPLE, # 
-        create_score=True
-    )
+    def run(self, verbose: bool = True) -> Generator[float, None, None]:
+        pna = self._load_performance_note_array()
+        unique_onsets = np.unique(self.score_note_array["onset_beat"])
 
-    # compute note arrays from the loaded score and performance
-    pna_match = perf_match[0].note_array()
-    sna_match = score_match[0].note_array(include_grace_notes=True)
+        if self.method in _BATCH_MATCHERS:
+            tracking_path = self.matcher(pna)
+            score_idx = np.asarray(tracking_path[0], dtype=int)
+            perf_idx = np.asarray(tracking_path[1], dtype=int)
+            score_beats = unique_onsets[score_idx]
+            perf_secs = pna["onset_sec"][perf_idx]
+            for beat in score_beats:
+                yield float(beat)
+            self.warping_path = np.vstack(
+                [score_beats.astype(float), perf_secs.astype(float)]
+            )
+            return
 
-    # create queue
-    input_queue = Queue()
-    for note_row in pna_match:
-        input_queue.put(note_row)
-
-    # create matchmaker follower
-    score_follower = OnlineParangonarAlignment(
-        input_queue, sna_match, "OTM")
-
-    # run the follower offline
-    warping_path = score_follower.run_offline()
-
-
-
-    
-
+        self.matcher.prepare_performance(float(pna[0]["onset_sec"]))
+        score_beats_list = []
+        perf_secs_list = []
+        for note in pna:
+            self.matcher.online(note)
+            s_onset = float(self.matcher._prev_score_onset)
+            p_onset = float(note["onset_sec"])
+            score_beats_list.append(s_onset)
+            perf_secs_list.append(p_onset)
+            yield s_onset
+        self.warping_path = np.vstack(
+            [
+                np.asarray(score_beats_list, dtype=float),
+                np.asarray(perf_secs_list, dtype=float),
+            ]
+        )

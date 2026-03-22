@@ -6,12 +6,17 @@ from typing import Optional, Union
 
 import numpy as np
 import partitura
-import scipy.interpolate
 from partitura.io.exportmidi import get_ppq
 from partitura.musicanalysis.performance_codec import get_time_maps_from_alignment
 from partitura.score import Part, merge_parts
 
-from matchmaker.dp import OnlineTimeWarpingArzt, OnlineTimeWarpingDixon
+from matchmaker.dp import (
+    OnlineTimeWarpingArztEvent,
+    OnlineTimeWarpingArztFrame,
+    OnlineTimeWarpingDixonEvent,
+    OnlineTimeWarpingDixonFrame,
+)
+from matchmaker.external import OnlineParangonarAlignment
 from matchmaker.features.audio import (
     FRAME_RATE,
     SAMPLE_RATE,
@@ -21,26 +26,23 @@ from matchmaker.features.audio import (
     LogSpectralEnergyProcessor,
     MelSpectrogramProcessor,
     MFCCProcessor,
+    RawSpectrumProcessor,
 )
 from matchmaker.features.midi import (
+    CHORD_THRESHOLD,
+    OnsetPianoRollProcessor,
     PianoRollProcessor,
     PitchClassPianoRollProcessor,
     PitchIOIProcessor,
+    PitchProcessor,
+    onset_pianoroll,
 )
-from matchmaker.io.audio import AudioStream
-from matchmaker.io.midi import MidiStream
-from matchmaker.prob.hmm import (
-    GaussianAudioPitchHMM,
-    GaussianAudioPitchTempoHMM,
-    PitchHMM,
-    PitchIOIHMM,
-)
-from matchmaker.prob.outer_product_hmm import OuterProductHMM
-from matchmaker.prob.outer_product_hmm_audio import AudioOuterProductHMM
+from matchmaker.prob import AudioOuterProductHMM, OuterProductHMM, PitchHMM, PitchIOIHMM
+from matchmaker.prob.skf import SwitchingKalmanFilterFollower
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
-    get_evaluation_results,
+    evaluate_alignment,
     transfer_positions,
 )
 from matchmaker.utils.misc import (
@@ -57,55 +59,56 @@ PathLike = Union[str, bytes, os.PathLike]
 sys.setrecursionlimit(10_000)
 
 DEFAULT_TEMPO = 120
-DEFAULT_METHODS = {
-    "audio": "arzt",
-    "midi": "outerhmm",
+MIDI_FRAME_RATE = 1  # dummy value for MIDI input
+OLTW_METHODS = {"arzt", "dixon"}
+PARANGONAR_METHODS = {"SLT_OLTW", "SL_OLTW", "OTM", "OPTM"}
+AVAILABLE_METHODS = {
+    "audio": sorted(OLTW_METHODS) + ["outerhmm", "skf"],
+    "midi": sorted(OLTW_METHODS) + ["hmm", "pthmm", "outerhmm"] + sorted(PARANGONAR_METHODS),
 }
-AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm", "outerhmm", "audio_outerhmm"]
-KWARGS = {
+DEFAULT_METHOD = {"audio": "arzt", "midi": "outerhmm"}
+DEFAULT_PROCESSOR = {"audio": "chroma", "midi": "pitch_ioi"}
+DEFAULT_KWARGS = {
     "audio": {
-        "dixon": {
-            "feature_type": "lse",
-            "window_size": 10,
-        },
-        "arzt": {
-            "window_size": 10,
-            "start_window_size": 0.1,
-            "step_size": 3,
-        },
-        "audio_outerhmm": {
-            "feature_type": "cqt_spectral_flux",
+        "arzt": {"window_size": 10, "start_window_size": 0.1, "step_size": 3},
+        "dixon": {"processor": "lse", "window_size": 10},
+        "outerhmm": {
+            "processor": "cqt_spectral_flux",
             "sample_rate": 16000,
             "frame_rate": 25,
             "s_j": 0.0,
+        },
+        "skf": {
+            "processor": "raw_spectrum",
+            "sample_rate": 8000,
+            "hop_length": 128,
+            "n_fft": 512,
         },
     },
     "midi": {
         "arzt": {
             "processor": "pianoroll",
             "piano_range": True,
-            "window_size": 200,
-            "start_window_size": 200,
+            "window_size": 2,
+            "start_window_size": 2,
             "step_size": 5,
         },
         "dixon": {
             "processor": "pianoroll",
             "piano_range": True,
-            "window_size": 30,
+            "window_size": 0.3,
         },
         "hmm": {
             "processor": "pitch_ioi",
             "tempo_model": KalmanTempoModel,
             "piano_range": True,
         },
-        "pthmm": {
-            "processor": "pitch_ioi",
-            "piano_range": True,
-        },
-        "outerhmm": {
-            "processor": "pitch_ioi",
-            "piano_range": True,
-        },
+        "pthmm": {"processor": "pitch_ioi", "piano_range": True},
+        "outerhmm": {"processor": "pitch_ioi", "piano_range": True},
+        "SLT_OLTW": {"processor": "pitch_ioi", "piano_range": True},
+        "SL_OLTW": {"processor": "pitch_ioi", "piano_range": True},
+        "OTM": {"processor": "pitch_ioi", "piano_range": True},
+        "OPTM": {"processor": "pitch_ioi", "piano_range": True},
     },
 }
 
@@ -120,23 +123,47 @@ class Matchmaker(object):
         Path to the score file
     performance_file : Union[str, bytes, os.PathLike, None]
         Path to the performance file. If None, live input is used.
-    wait : bool (default: True)
-        only for offline option. For debugging or fast testing, set to False
     input_type : str
-        Type of input to use: audio or midi
-    feature_type : str
-        Type of feature to use
+        Type of input to use: ``"audio"`` or ``"midi"``.
     method : str
-        Score following method to use
+        Score following method to use.
+    processor : str
+        Feature processor type. Overrides the value in ``kwargs``.
     device_name_or_index : Union[str, int]
-        Name or index of the audio device to be used.
-        Ignored if `file_path` is given.
+        Name or index of the audio/MIDI device. Ignored if ``performance_file``
+        is given.
     tempo : float, optional
         Tempo in BPM. If None, reads from score; if score has no tempo marking,
         defaults to 120 BPM.
-    adjust_tempo : bool (default: False)
+    auto_adjust_tempo : bool (default: False)
         If True and performance_file is provided, adjusts tempo based on
-        performance audio analysis. Applies to all methods.
+        performance audio analysis.
+    wait : bool (default: False)
+        Offline mode only. If True, simulates real-time playback speed.
+    unfold_score : bool (default: True)
+        If True, unfolds score repeats maximally before processing.
+    kwargs : dict, optional
+        Method-specific configuration dict. If None, uses built-in defaults
+        for the given ``input_type`` and ``method``.
+
+        **audio keys**
+
+        - ``processor`` (str): Feature type. Default: ``"chroma"``.
+          Choices: ``"chroma"``, ``"mfcc"``, ``"cqt"``, ``"mel"``,
+          ``"lse"``, ``"cqt_spectral_flux"``, ``"raw_spectrum"``.
+        - ``sample_rate`` (int): Sample rate in Hz. Default: 22050.
+        - ``frame_rate`` (int): Frames per second. Default: 50.
+          Ignored if ``hop_length`` is set.
+        - ``hop_length`` (int): Hop length in samples. Overrides ``frame_rate``.
+
+        **midi keys**
+
+        - ``processor`` (str): Feature type. Default: ``"pitch_ioi"``.
+          Choices: ``"pitch_ioi"``, ``"pianoroll"``.
+        - ``piano_range`` (bool): Restrict pitch to 88-key piano range
+          (MIDI 21-108). Default: True.
+        - ``polling_period`` (float or None): Window size in seconds for
+          frame-based MIDI accumulation. ``None`` = event-based (default).
 
     """
 
@@ -147,15 +174,14 @@ class Matchmaker(object):
         input_type: str = "audio",
         method: str = None,
         *,
-        feature_type: str = None,
+        stream=None,
+        processor: str = None,
         device_name_or_index: Union[str, int] = None,
         tempo: Optional[float] = None,
-        sample_rate: int = SAMPLE_RATE,
-        frame_rate: int = FRAME_RATE,
         auto_adjust_tempo: bool = False,
         wait: bool = False,
         unfold_score=True,
-        kwargs=KWARGS,
+        kwargs=None,
     ):
         self.score_file = str(score_file)
         self.performance_file = (
@@ -163,10 +189,6 @@ class Matchmaker(object):
         )
 
         self.input_type = input_type
-        self.feature_type = feature_type
-        self.frame_rate = frame_rate if input_type == "audio" else 1
-        self.sample_rate = sample_rate
-        self.hop_length = sample_rate // self.frame_rate
         self.score_part: Optional[Part] = None
         self.device_name_or_index = device_name_or_index
         self.processor = None
@@ -176,22 +198,35 @@ class Matchmaker(object):
         self._has_run = False
         self.alignment_duration = None
 
-        # validate method first
+        # validate method
         if method is None:
-            method = DEFAULT_METHODS[self.input_type]
-        elif method not in AVAILABLE_METHODS:
-            raise ValueError(f"Invalid method. Available methods: {AVAILABLE_METHODS}")
+            method = DEFAULT_METHOD[self.input_type]
+        elif method not in AVAILABLE_METHODS.get(self.input_type, []):
+            raise ValueError(
+                f"Invalid method '{method}' for {input_type}. "
+                f"Available: {AVAILABLE_METHODS.get(self.input_type, [])}"
+            )
 
         self.method = method
-        self.config = dict(kwargs[self.input_type][self.method])
+        self.config = dict(
+            kwargs if kwargs is not None else DEFAULT_KWARGS[self.input_type].get(self.method, {})
+        )
         self.auto_adjust_tempo = auto_adjust_tempo
 
-        # Apply method-specific defaults from config (only if not explicitly provided by caller)
-        if sample_rate == SAMPLE_RATE and "sample_rate" in self.config:
-            self.sample_rate = self.config["sample_rate"]
-        if frame_rate == FRAME_RATE and "frame_rate" in self.config:
-            self.frame_rate = self.config["frame_rate"]
-        self.hop_length = self.sample_rate // self.frame_rate
+        if input_type == "midi":
+            self.polling_period = self.config.pop("polling_period", None)
+            self.frame_rate = MIDI_FRAME_RATE
+        else:
+            # Audio: hop_length (if given) is primary; else derive from frame_rate.
+            self.sample_rate = self.config.pop("sample_rate", SAMPLE_RATE)
+            hop_length_cfg = self.config.pop("hop_length", None)
+            if hop_length_cfg is not None:
+                self.hop_length = int(hop_length_cfg)
+                self.frame_rate = self.sample_rate / self.hop_length
+                self.config.pop("frame_rate", None)
+            else:
+                self.frame_rate = self.config.pop("frame_rate", FRAME_RATE)
+                self.hop_length = int(self.sample_rate // self.frame_rate)
 
         # setup score file
         try:
@@ -232,49 +267,10 @@ class Matchmaker(object):
             score_tempo = get_tempo_from_score(self.score_part, self.score_file)
             self.tempo = score_tempo if score_tempo is not None else DEFAULT_TEMPO
 
-        # setup feature processor
-        if self.feature_type is None:
-            default = "chroma" if input_type == "audio" else "pitch_ioi"
-            self.feature_type = self.config.get("feature_type", default)
-
-        if self.feature_type == "chroma":
-            self.processor = ChromagramProcessor(
-                sample_rate=self.sample_rate,
-                hop_length=self.hop_length,
-            )
-        elif self.feature_type == "mfcc":
-            self.processor = MFCCProcessor(
-                sample_rate=self.sample_rate,
-                hop_length=self.hop_length,
-            )
-        elif self.feature_type == "cqt":
-            self.processor = CQTProcessor(
-                sample_rate=self.sample_rate,
-                hop_length=self.hop_length,
-            )
-        elif self.feature_type == "mel":
-            self.processor = MelSpectrogramProcessor(
-                sample_rate=self.sample_rate,
-                hop_length=self.hop_length,
-            )
-        elif self.feature_type == "lse":
-            self.processor = LogSpectralEnergyProcessor(
-                sample_rate=self.sample_rate,
-                hop_length=self.hop_length,
-            )
-        elif self.feature_type == "pitch_ioi":
-            self.processor = PitchIOIProcessor(piano_range=self.config["piano_range"])
-        elif self.feature_type == "pitchclass":
-            self.processor = PitchClassPianoRollProcessor()
-        elif self.feature_type == "pianoroll":
-            self.processor = PianoRollProcessor(piano_range=self.config["piano_range"])
-        elif self.feature_type == "cqt_spectral_flux":
-            self.processor = CQTSpectralFluxProcessor(
-                sample_rate=self.sample_rate,
-                hop_length=self.hop_length,
-            )
-        else:
-            raise ValueError(f"Invalid feature type `{self.feature_type}`")
+        processor_type = processor or self.config.pop(
+            "processor", DEFAULT_PROCESSOR[self.input_type]
+        )
+        self.processor = self._build_processor(method, processor_type)
 
         if self.performance_file is not None:
             if self.input_type == "audio" and not is_audio_file(self.performance_file):
@@ -286,132 +282,230 @@ class Matchmaker(object):
                     f"Invalid performance file. Expected MIDI file, but got {self.performance_file}"
                 )
 
-        # setup stream device
-
-        if self.input_type == "audio":
-            self.stream = AudioStream(
-                processor=self.processor,
-                device_name_or_index=self.device_name_or_index,
-                file_path=self.performance_file,
-                wait=wait,
-                target_sr=self.sample_rate,
-                sample_rate=self.sample_rate,
-                hop_length=self.hop_length,
-            )
-        elif self.input_type == "midi":
-            self.stream = MidiStream(
-                processor=self.processor,
-                port=self.device_name_or_index,
-                file_path=self.performance_file,
-                **({"polling_period": None} if method == "outerhmm" else {}),
-            )
-        else:
-            raise ValueError(f"Invalid input type {self.input_type}")
-
+        self.stream = stream if stream is not None else self._build_stream(method, wait)
         self.reference_features = self.preprocess_score()
+        self.score_follower = self._build_score_follower(method)
 
-        if method == "arzt":
-            try:
-                state_to_ref_time_map, ref_to_state_time_map = self.get_time_maps()
-            except Exception:
-                state_to_ref_time_map, ref_to_state_time_map = None, None
-            self.score_follower = OnlineTimeWarpingArzt(
-                reference_features=self.reference_features,
-                queue=self.stream.queue,
-                frame_rate=self.frame_rate,
-                state_to_ref_time_map=state_to_ref_time_map,
-                ref_to_state_time_map=ref_to_state_time_map,
-                state_space=np.unique(self.score_part.note_array()["onset_beat"]),
-                ref_frame_to_beat=self._build_ref_frame_to_beat(),
-                **self.config,
-            )
-        elif method == "dixon":
-            try:
-                state_to_ref_time_map, ref_to_state_time_map = self.get_time_maps()
-            except Exception:
-                state_to_ref_time_map, ref_to_state_time_map = None, None
-            self.score_follower = OnlineTimeWarpingDixon(
-                reference_features=self.reference_features,
-                queue=self.stream.queue,
-                frame_rate=self.frame_rate,
-                state_to_ref_time_map=state_to_ref_time_map,
-                ref_to_state_time_map=ref_to_state_time_map,
-                state_space=np.unique(self.score_part.note_array()["onset_beat"]),
-                ref_frame_to_beat=self._build_ref_frame_to_beat(),
-                **self.config,
-            )
-        elif method == "hmm" and self.input_type == "midi":
-            self.score_follower = PitchIOIHMM(
-                reference_features=self.reference_features,
-                queue=self.stream.queue,
-                has_insertions=True,
-                **self.config,
-            )
-        elif method == "pthmm" and self.input_type == "audio":
-            self.score_follower = GaussianAudioPitchTempoHMM(
-                reference_features=self.reference_features,
-                queue=self.stream.queue,
-                **self.config,
-            )
-        elif method == "audio_outerhmm" and self.input_type == "audio":
-            self.score_follower = AudioOuterProductHMM(
-                reference_features=self.reference_features,
-                queue=self.stream.queue,
-                tempo=self.tempo,
-                hop_length=self.hop_length,
-                **self.config,
-            )
-        elif method == "pthmm" and self.input_type == "midi":
-            self.score_follower = PitchHMM(
-                reference_features=self.reference_features,
-                queue=self.stream.queue,
-                has_insertions=True,
-                **self.config,
-            )
-        elif method == "outerhmm" and self.input_type == "midi":
-            self.score_follower = OuterProductHMM(
-                reference_features=self.reference_features,
-                queue=self.stream.queue,
-                **self.config,
-            )
-        else:
-            raise ValueError("Invalid method")
+    def _build_processor(self, method, processor_type):
+        if self.input_type == "audio":
+            audio_kw = dict(sample_rate=self.sample_rate, hop_length=self.hop_length)
+            AUDIO_PROCESSORS = {
+                "chroma": lambda: ChromagramProcessor(**audio_kw),
+                "mfcc": lambda: MFCCProcessor(**audio_kw),
+                "cqt": lambda: CQTProcessor(**audio_kw),
+                "mel": lambda: MelSpectrogramProcessor(**audio_kw),
+                "lse": lambda: LogSpectralEnergyProcessor(**audio_kw),
+                "cqt_spectral_flux": lambda: CQTSpectralFluxProcessor(**audio_kw),
+                "raw_spectrum": lambda: RawSpectrumProcessor(
+                    sample_rate=self.sample_rate,
+                    hop_length=self.hop_length,
+                    n_fft=self.config.get("n_fft", 512),
+                ),
+            }
+            if processor_type in AUDIO_PROCESSORS:
+                return AUDIO_PROCESSORS[processor_type]()
+            raise ValueError(f"Invalid feature type '{processor_type}'")
 
-    def preprocess_score(self):
-        """Preprocess score to extract reference features."""
-        if self.auto_adjust_tempo and self.performance_file is not None:
-            self.tempo = adjust_tempo_for_performance_file(
-                self.score_part, self.performance_file, self.tempo
+        # MIDI OLTW needs onset-level pianoroll for event-based processing
+        if method in OLTW_METHODS:
+            return OnsetPianoRollProcessor(
+                piano_range=self.config.get("piano_range", True),
             )
 
-        if self.method in {"arzt", "dixon"}:
+        chord_threshold = 0.0 if self.polling_period is not None else CHORD_THRESHOLD
+        MIDI_PROCESSORS = {
+            "pitch_ioi": lambda: PitchIOIProcessor(
+                piano_range=self.config["piano_range"],
+                return_pitch_list=(method == "hmm"),
+                chord_threshold=chord_threshold,
+            ),
+            "pitch": lambda: PitchProcessor(
+                piano_range=self.config["piano_range"],
+                return_pitch_list=(method == "hmm"),
+            ),
+            "pitchclass": lambda: PitchClassPianoRollProcessor(),
+            "pianoroll": lambda: PianoRollProcessor(
+                piano_range=self.config["piano_range"],
+            ),
+        }
+        if processor_type in MIDI_PROCESSORS:
+            return MIDI_PROCESSORS[processor_type]()
+        raise ValueError(f"Invalid feature type '{processor_type}'")
+
+    def _build_stream(self, method, wait):
+        try:
+            if self.input_type == "audio":
+                from matchmaker.io.audio import AudioStream
+
+                return AudioStream(
+                    processor=self.processor,
+                    device_name_or_index=self.device_name_or_index,
+                    file_path=self.performance_file,
+                    wait=wait,
+                    target_sr=self.sample_rate,
+                    sample_rate=self.sample_rate,
+                    hop_length=self.hop_length,
+                )
+            elif self.input_type == "midi":
+                from matchmaker.io.midi import MidiStream
+
+                return MidiStream(
+                    processor=self.processor,
+                    port=self.device_name_or_index,
+                    file_path=self.performance_file,
+                    polling_period=self.polling_period,
+                )
+        except ImportError as e:
+            raise ImportError(
+                f"{e}. To use local audio/MIDI devices, "
+                "install with: pip install pymatchmaker[devices]"
+            ) from e
+        raise ValueError(f"Invalid input type '{self.input_type}'")
+
+    def _build_score_follower(self, method):
+        if self.input_type == "audio":
+            return self._build_audio_follower(method)
+        elif self.input_type == "midi":
+            return self._build_symbolic_follower(method)
+        raise ValueError(f"Invalid input_type '{self.input_type}'")
+
+    def _build_audio_follower(self, method):
+        ref = self.reference_features
+        queue = self.stream.queue
+        state_space = np.unique(self.score_part.note_array()["onset_beat"])
+
+        if method in OLTW_METHODS:
             self.ppart = partitura.utils.music.performance_from_part(
                 self.score_part, bpm=self.tempo
             )
             self.ppart.sustain_pedal_threshold = 127
-            if self.input_type == "audio":
-                self.score_audio = generate_score_audio(
-                    self.score_part, self.tempo, self.sample_rate
-                ).astype(np.float32)
-                reference_features = self.processor(self.score_audio)
-                self.processor.reset()
-                return reference_features
-            else:
-                polling_period = 0.01
-                reference_features = (
-                    partitura.utils.music.compute_pianoroll(
-                        note_info=self.ppart,
-                        time_unit="sec",
-                        time_div=int(np.round(1 / polling_period)),
-                        binary=True,
-                        piano_range=self.config["piano_range"],
-                    )
-                    .toarray()
-                    .T
-                ).astype(np.float32)
-                return reference_features
+            try:
+                stm, rtm = self.get_time_maps()
+            except Exception:
+                stm, rtm = None, None
+            cls = (
+                OnlineTimeWarpingArztFrame
+                if method == "arzt"
+                else OnlineTimeWarpingDixonFrame
+            )
+            return cls(
+                reference_features=ref,
+                queue=queue,
+                state_space=state_space,
+                frame_rate=self.frame_rate,
+                state_to_ref_time_map=stm,
+                ref_to_state_time_map=rtm,
+                ref_frame_to_beat=self._build_ref_frame_to_beat(),
+                **self.config,
+            )
+        elif method == "outerhmm":
+            return AudioOuterProductHMM(
+                reference_features=ref,
+                queue=queue,
+                tempo=self.tempo,
+                hop_length=self.hop_length,
+                **self.config,
+            )
+        elif method == "skf":
+            return SwitchingKalmanFilterFollower(
+                reference_features=self.score_part.note_array(),
+                queue=queue,
+                tempo=self.tempo,
+                sample_rate=self.sample_rate,
+                n_fft=self.config.get("n_fft", 512),
+                hop_length=self.hop_length,
+            )
+        raise ValueError(f"No audio follower for method '{method}'")
+
+    def _build_symbolic_follower(self, method):
+        ref = self.reference_features
+        queue = self.stream.queue
+
+        if method in OLTW_METHODS:
+            # Convert note_array to onset pianoroll for event-level OLTW
+            onset_ref, state_space = onset_pianoroll(
+                ref,
+                onset_key="onset_beat",
+                piano_range=self.config.get("piano_range", True),
+            )
+            # Filter out frame-level config keys
+            skip = {
+                "window_size",
+                "start_window_size",
+                "processor",
+                "piano_range",
+            }
+            config = {k: v for k, v in self.config.items() if k not in skip}
+            cls = (
+                OnlineTimeWarpingArztEvent
+                if method == "arzt"
+                else OnlineTimeWarpingDixonEvent
+            )
+            return cls(
+                reference_features=onset_ref,
+                queue=queue,
+                state_space=state_space,
+                **config,
+            )
+        elif method == "hmm":
+            return PitchIOIHMM(
+                reference_features=ref,
+                queue=queue,
+                has_insertions=True,
+                **self.config,
+            )
+        elif method == "pthmm":
+            return PitchHMM(
+                reference_features=ref,
+                queue=queue,
+                has_insertions=True,
+                **self.config,
+            )
+        elif method == "outerhmm":
+            return OuterProductHMM(
+                reference_features=ref,
+                queue=queue,
+                **self.config,
+            )
+        elif method in PARANGONAR_METHODS:
+            sna = self.score_part.note_array(include_grace_notes=True)
+            return OnlineParangonarAlignment(
+                reference_features=sna,
+                performance_file=self.performance_file,
+                method=method,
+                queue=queue,
+            )
+        raise ValueError(f"No MIDI follower for method '{method}'")
+
+    def _wp_perf_to_seconds(self, wp_perf):
+        """Convert warping path performance axis to absolute seconds."""
+        if self.input_type == "audio":
+            return wp_perf / self.frame_rate
+        elif self.method in OLTW_METHODS | PARANGONAR_METHODS:
+            return wp_perf  # already absolute timestamps
         else:
-            return self.score_part.note_array()
+            # HMM: IOI-accumulated from 0; shift by first note onset
+            _perf = partitura.load_performance_midi(self.performance_file)
+            return wp_perf + float(_perf.note_array()["onset_sec"].min())
+
+    def preprocess_score(self):
+        """Extract reference features from the score."""
+        if (
+            self.auto_adjust_tempo or self.method == "skf"
+        ) and self.performance_file is not None:
+            self.tempo = adjust_tempo_for_performance_file(
+                self.score_part, self.performance_file, self.tempo
+            )
+
+        if self.input_type == "audio" and self.method in OLTW_METHODS:
+            score_audio = generate_score_audio(
+                self.score_part, self.tempo, self.sample_rate
+            ).astype(np.float32)
+            features = self.processor(score_audio)
+            self.processor.reset()
+            return features
+
+        return self.score_part.note_array()
 
     def get_time_maps(self):
         sna = self.score_part.note_array()
@@ -502,34 +596,6 @@ class Matchmaker(object):
 
         return score_annots
 
-    def convert_timestamps_to_beats(self, timestamps):
-        """
-        Convert an array of timestamps (in seconds) to beat positions.
-
-        Parameters
-        ----------
-        timestamps : array-like
-            Array of timestamps in seconds
-
-        Returns
-        -------
-        beats : np.ndarray
-            Array of beat positions corresponding to the input timestamps
-        """
-        beats = []
-        tick = get_ppq(self.score_part)
-
-        for timestamp in timestamps:
-            timeline_time = timestamp * tick * (self.tempo / 60)
-
-            beat_position = np.round(
-                self.score_part.beat_map(timeline_time),
-                decimals=2,
-            )
-            beats.append(beat_position)
-
-        return np.array(beats)
-
     def get_latency_stats(self):
         feature_stats = self.stream.latency_stats
         inference_stats = self.score_follower.latency_stats
@@ -598,85 +664,25 @@ class Matchmaker(object):
         else:
             perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
 
-        return_type = "seconds" if domain == "performance" else "beats"
-        score_annots = self.build_score_annotations(level, musical_beat, return_type)
-
-        original_perf_annots_counts = len(perf_annots)
-
-        # min_length = min(len(score_annots), len(perf_annots))
-        # score_annots = score_annots[:min_length]
-        # perf_annots = perf_annots[:min_length]
-
         wp = self.score_follower.warping_path
+        wp_score = wp[0].astype(float)
+        wp_perf_sec = self._wp_perf_to_seconds(wp[1].astype(float))
+
         score_annots_beats = self.build_score_annotations(
             level, musical_beat, return_type="beats"
         )
+        min_length = min(len(score_annots_beats), len(perf_annots))
+        score_annots_beats = score_annots_beats[:min_length]
+        perf_annots = perf_annots[:min_length]
 
-        # --- Per-frame evaluation ---
-        # Build GT interpolator: score beat → perf time (seconds)
-        valid_gt = np.isfinite(perf_annots)
-        gt_interp = scipy.interpolate.interp1d(
-            score_annots_beats[valid_gt],
-            perf_annots[valid_gt],
-            kind="linear",
-            bounds_error=False,
-            fill_value=np.nan,
-        )
-
-        wp_score = wp[0].astype(float)
-        wp_perf = wp[1].astype(float)
-
-        # Convert wp perf axis to seconds
-        if self.input_type == "midi":
-            # MIDI: wp_perf is IOI-accumulated from 0; shift by first note onset
-            _perf = partitura.load_performance_midi(self.performance_file)
-            midi_offset = float(_perf.note_array()["onset_sec"].min())
-            wp_perf_sec = wp_perf + midi_offset
-        else:
-            # Audio: wp_perf is frame index
-            wp_perf_sec = wp_perf / self.frame_rate
-
-        # For each wp entry: GT perf time for predicted beat vs actual perf time
-        gt_perf_times = gt_interp(wp_score)
-        perf_annots_predicted = transfer_positions(
-            wp,
+        eval_results = evaluate_alignment(
+            wp_score,
+            wp_perf_sec,
             score_annots_beats,
-            frame_rate=self.frame_rate,
-            domain="performance",
+            perf_annots,
+            beat_tolerances=tolerances if domain == "score" else TOLERANCES_IN_BEATS,
+            ms_tolerances=TOLERANCES_IN_MILLISECONDS,
         )
-
-        if domain == "performance":
-            eval_results = get_evaluation_results(
-                gt_perf_times,
-                wp_perf_sec,
-                total_counts=len(wp_score),
-                tolerances=tolerances,
-            )
-        else:
-            # Score domain: beat-based (primary) + ms-based (secondary)
-            score_annots_predicted = transfer_positions(
-                wp, perf_annots, frame_rate=self.frame_rate, domain="score"
-            )
-            score_annots = score_annots[: len(score_annots_predicted)]
-            beat_tolerances = (
-                tolerances
-                if tolerances != TOLERANCES_IN_MILLISECONDS
-                else TOLERANCES_IN_BEATS
-            )
-            beat_results = get_evaluation_results(
-                score_annots,
-                score_annots_predicted,
-                total_counts=original_perf_annots_counts,
-                tolerances=beat_tolerances,
-                in_seconds=False,
-            )
-            ms_results = get_evaluation_results(
-                gt_perf_times,
-                wp_perf_sec,
-                total_counts=len(wp_score),
-                tolerances=TOLERANCES_IN_MILLISECONDS,
-            )
-            eval_results = {"beat": beat_results, "ms": ms_results}
 
         # Real-Time Factor (domain-independent)
         if self.alignment_duration is not None:
@@ -692,50 +698,47 @@ class Matchmaker(object):
             latency_results = self.get_latency_stats()
             eval_results.update(latency_results)
 
-        # Debug: save warping path TSV, results JSON, and plots
         if debug and save_dir is not None:
-            # For plot y-axis: use beats when wp[0] is in beats
-            debug_score_annots = score_annots_beats
+            wp_sec = np.array([wp_score, wp_perf_sec])
+            sf = self.score_follower
             save_debug_results(
-                warping_path=self.score_follower.warping_path,
-                score_annots=debug_score_annots,
+                warping_path=wp_sec,
+                score_annots=score_annots_beats,
                 perf_annots=perf_annots,
-                perf_annots_predicted=perf_annots_predicted,
+                perf_annots_predicted=transfer_positions(
+                    wp_sec,
+                    score_annots_beats,
+                    frame_rate=1,
+                    domain="performance",
+                ),
                 eval_results=eval_results,
                 frame_rate=self.frame_rate,
                 save_dir=save_dir,
                 run_name=run_name or "results",
-                state_space=getattr(self.score_follower, "state_space", None),
+                state_space=sf.state_space if hasattr(sf, "state_space") else None,
                 ref_features=(
-                    getattr(self.score_follower, "reference_features", None)
-                    if plot_dist_matrix
+                    sf.reference_features
+                    if plot_dist_matrix and hasattr(sf, "reference_features")
                     else None
                 ),
                 input_features=(
-                    getattr(self.score_follower, "input_features", None)
-                    if plot_dist_matrix
+                    sf.input_features
+                    if plot_dist_matrix and hasattr(sf, "input_features")
                     else None
                 ),
                 distance_func=(
-                    getattr(self.score_follower, "distance_func", None)
-                    if plot_dist_matrix
-                    else None
+                    sf.distance_func if hasattr(sf, "distance_func") else None
                 ),
-                ref_frame_to_beat=getattr(
-                    self.score_follower, "_ref_frame_to_beat", None
+                ref_frame_to_beat=(
+                    sf._ref_frame_to_beat if hasattr(sf, "_ref_frame_to_beat") else None
                 ),
             )
 
         return eval_results
 
-    def run(self, verbose: bool = True, wait: bool = True):
+    def run(self, verbose: bool = True):
         """
         Run the score following process.
-
-        Measures wall-clock time as ``alignment_duration`` (seconds),
-        which covers both feature extraction (producer thread) and
-        score following inference (main thread) running concurrently.
-        RTF is computed as ``alignment_duration / performance_duration``.
 
         Yields
         ------
@@ -744,8 +747,8 @@ class Matchmaker(object):
 
         Returns
         -------
-        list
-            Alignment results with warping path
+        np.ndarray
+            Warping path (2, T)
         """
         with self.stream:
             self.stream.stream_start.wait()

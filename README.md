@@ -14,19 +14,27 @@ The full documentation for matchmaker is available online at [readthedocs.org](h
 
 ### Prerequisites
 
-- Available Python version: 3.11, 3.12, 3.13
-- [Fluidsynth](https://www.fluidsynth.org/)
-- [PortAudio](http://www.portaudio.com/)
+- Available Python version: 3.10, 3.11, 3.12, 3.13
 
-First, install Fluidsynth, and then install the `pyfluidsynth` Python library. We recommend to install Fluidsynth using conda as well (see instructions below).
+### Install
 
-Note that `pyfluidsynth` only provides Python bindings for Fluidsynth; it does not install Fluidsynth itself. Be aware that there is also a `fluidsynth` Python library (without the `py-` prefix), but it is not compatible with `matchmaker`. We recommend installing Fluidsynth using conda
+```bash
+pip install pymatchmaker
+```
+
+The base installation supports **simulation mode** (testing with performance files). You can also implement your own `Stream` subclass to integrate external input sources (e.g., WebSocket) without any extra dependencies.
+
+To use **local audio/MIDI devices** (microphone, MIDI keyboard), install with the `devices` extra, which adds [PyAudio](https://pypi.org/project/PyAudio/), [python-rtmidi](https://pypi.org/project/python-rtmidi/), and [pyfluidsynth](https://pypi.org/project/pyfluidsynth/):
+
+```bash
+pip install pymatchmaker[devices]
+```
+
+> **Note:** `pyfluidsynth` requires [Fluidsynth](https://www.fluidsynth.org/) to be installed on your system, and `pyaudio` requires [PortAudio](http://www.portaudio.com/). We recommend installing them via conda: `conda install -c conda-forge fluidsynth portaudio`.
 
 ### Install from source using conda
 
 Setting up the code as described here requires [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html). Follow the instructions for your OS.
-
-To setup the experiments, use the following script.
 
 ```bash
 # Clone matchmaker
@@ -40,14 +48,14 @@ conda activate matchmaker
 # Go to matchmaker directory
 cd matchmaker
 
-# Install matchmaker in editable mode
-pip install -e ."[dev]"
+# Install matchmaker in editable mode (dev includes devices)
+pip install -e ".[dev]"
 
 # Install GCC
 conda install -c conda-forge gcc=12.1.0
 
-# Install glib and fluidsynth
-conda install -c conda-forge glib fluidsynth
+# Install glib, fluidsynth, and portaudio
+conda install -c conda-forge glib fluidsynth portaudio
 ```
 
 Because of the dependency of `partitura`, which uses `MuseScore_General.sf3` (free soundfont provided by MuseScore) as the default soundfont, the soundfont will be installed automatically inside the `partitura` package. This might take a while for the first time.
@@ -75,16 +83,17 @@ We recommend to install Fluidsynth from conda in a dedicated environemnt. If how
 
 ## Usage Examples
 
-### Quickstart for live streaming
+### Quickstart (simulation mode)
 
-To get started quickly, you can use the `Matchmaker` class, which provides a simple interface for running the alignment process. You can use a `musicxml` or `midi` file as the score file. Specify `"audio"` or `"midi"` as the `input_type` argument, and the default device for that input type will be automatically set up.
+You can test the alignment with a score and a performance file. No extra dependencies needed beyond the base install.
 
 ```python
 from matchmaker import Matchmaker
 
 mm = Matchmaker(
-    score_file="path/to/score",
-    input_type="audio",
+    score_file=”path/to/score.musicxml”,
+    performance_file=”path/to/performance.wav”,
+    input_type=”audio”,
 )
 for current_position in mm.run():
     print(current_position)  # beat position in the score
@@ -94,34 +103,65 @@ The returned value is the current position in the score, represented in beats de
 Specifically, each position is calculated for every frame input and interpolated within the score's `onset_beat` array.
 Please refer to [here](https://partitura.readthedocs.io/en/latest/Tutorial/notebook.html) for more information about the `onset_beat` concept.
 
-### Testing with the performance file
+### Live streaming (requires `[devices]`)
 
-You can simulate the real-time alignment by putting a specific performance file as input, rather than running it as a live stream.
-The type of performance file can be either audio file or midi file, depending on the `input_type`.
+To run with a live audio or MIDI input, install with `pip install pymatchmaker[devices]`.
 
 ```python
 from matchmaker import Matchmaker
 
+# Audio input (microphone)
 mm = Matchmaker(
-    score_file="path/to/score",
-    performance_file="path/to/performance.mid",
-    input_type="midi",
+    score_file=”path/to/score.musicxml”,
+    input_type=”audio”,
 )
 for current_position in mm.run():
     print(current_position)
 ```
 
-### Testing with Specific Input Device
-
-To use a specific audio or MIDI device that is not the default device, you can pass the device name or index.
-By default, `input_type` is set to `“audio”`. If you are using a MIDI device, you can change the input type to `“midi”`.
+You can also specify a device by name or index:
 
 ```python
+mm = Matchmaker(
+    score_file=”path/to/score.musicxml”,
+    input_type=”audio”,
+    device_name_or_index=”MacBookPro Microphone”,
+)
+```
+
+### Using a Custom Stream
+
+You can inject your own stream (e.g., from a WebSocket or any external source) without needing `pyaudio` or `python-rtmidi`:
+
+```python
+import queue
 from matchmaker import Matchmaker
+from matchmaker.io.stream import Stream
+from matchmaker.features.audio import ChromagramProcessor
+
+class MyStream(Stream):
+    """Custom stream that receives audio data from an external source."""
+
+    def __init__(self, processor, data_source):
+        super().__init__(processor=processor, mock=False)
+        self.data_source = data_source
+        self.queue = queue.Queue()
+
+    def run(self):
+        """Read data from your source and push features to the queue."""
+        for chunk in self.data_source:
+            features = self.processor(chunk)
+            self.queue.put((features, time.time()))
+
+my_stream = MyStream(
+    processor=ChromagramProcessor(),
+    data_source=my_websocket_source,
+)
 
 mm = Matchmaker(
     score_file="path/to/score",
-    device_name_or_index="MacBookPro Microphone",
+    input_type="audio",
+    stream=my_stream,
 )
 for current_position in mm.run():
     print(current_position)
@@ -132,18 +172,18 @@ for current_position in mm.run():
 The repository includes a ready-to-use example script that demonstrates the complete workflow:
 
 ```bash
-# Run with audio input (default)
-python run_examples.py
+# Run with audio input (uses arzt method as default)
+python run_examples.py --audio
 
-# Run with MIDI input
-python run_examples.py --midi
+# Run with MIDI input and specific method
+python run_examples.py --midi --method hmm
 ```
 
 This script runs a complete example with score following and evaluation, saving results to the `results/` directory.
 
 ### Testing with Different Methods or Features
 
-For testing with Audio input, you can specify the alignment method as follows:
+You can specify the alignment method and feature processor as follows:
 
 ```python
 from matchmaker import Matchmaker
@@ -151,37 +191,42 @@ from matchmaker import Matchmaker
 mm = Matchmaker(
     score_file="path/to/score",
     input_type="audio",
-    method="dixon",  # or "arzt" (default)
+    method="arzt",       # see Alignment Methods section
+    processor="chroma",  # see Features section
 )
 for current_position in mm.run():
     print(current_position)
 ```
 
 For options regarding the `method`, please refer to the [Alignment Methods](#alignment-methods) section.
-For options regarding the `feature_type`, please refer to the [Features](#features) section.
+For options regarding the `processor`, please refer to the [Features](#features) section.
 
 
 ## Alignment Methods
 
 Matchmaker currently supports the following alignment methods:
 
-- `"dixon"`: On-line time warping algorithm by S. Dixon (2005). Currently supports audio input; MIDI support coming soon.
-- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010)). Currently supports audio input; MIDI support coming soon.
-- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020). Currently supports MIDI input; Audio support coming soon.
+- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010)). Supports audio and MIDI input.
+- `"dixon"`: On-line time warping algorithm by S. Dixon (2005). Supports audio and MIDI input.
+- `"outerhmm"`: Outer-product HMM score follower by E. Nakamura (2014). Supports audio and MIDI input.
+- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020). Supports MIDI input.
+- `"pthmm"`: Pitch-based HMM score follower. Supports MIDI input.
 
 ## Features
 
 Matchmaker currently supports the following feature types:
 
 - For audio:
-  - `"chroma"`: Chroma features. Default feature type for audio input.
+  - `"chroma"`: Chroma features. Default for audio input.
   - `"mfcc"`: Mel-frequency cepstral coefficients.
-  - `"mel"`: Mel-Spectrogram.
-  - `"logspectral"`: Log-spectral features used in Dixon (2005).
+  - `"cqt"`: Constant-Q transform.
+  - `"mel"`: Mel-spectrogram.
+  - `"lse"`: Log-spectral energy features used in Dixon (2005).
+  - `"cqt_spectral_flux"`: CQT-based spectral flux used in Nakamura et al. (2014).
 - For MIDI:
-  - `pianoroll`: Piano-roll features. Default feature type for MIDI input.
-  - `"pitch"`: Pitch features for MIDI input.
-  - `"pitchclass"`: Pitch class features for MIDI input.
+  - `"pitch_ioi"`: Pitch and inter-onset interval features. Default for MIDI input.
+  - `"pianoroll"`: Piano-roll features.
+  - `"pitchclass"`: Pitch class features.
 
 ## Configurations
 
@@ -189,11 +234,10 @@ Initialization parameters for the `Matchmaker` class:
 
 - `score_file` (str): Path to the score file.
 - `input_type` (str): Type of input data. Options: `"audio"`, `"midi"`.
-- `feature_type` (str): Type of feature to use. Options: `"chroma"`, `"mfcc"`, `"cqt"`, `"spectrogram"`, `"onset"`.
-- `method` (str): Alignment method to use. Options: `"dixon"`, `"arzt"`, `"hmm"`.
-- `sample_rate` (int): Sample rate of the input audio data.
-- `frame_rate` (int): Frame rate of the input audio/MIDI data.
-- `device_name_or_index` (str or int): The audio/MIDI device name or index you want to use. If `None`, the default device will be used.
+- `method` (str): Alignment method to use. See [Alignment Methods](#alignment-methods) for available options.
+- `processor` (str): Type of feature processor to use. See [Features](#features) for available options.
+- `stream` (Stream or None): A custom `Stream` instance to use instead of the built-in `AudioStream`/`MidiStream`. Useful for integrating external input sources (e.g., WebSocket). If `None`, the stream is built automatically based on `input_type`.
+- `device_name_or_index` (str or int): The audio/MIDI device name or index you want to use. If `None`, the default device will be used. Requires `pymatchmaker[devices]`.
 
 ## Citing Matchmaker
 
