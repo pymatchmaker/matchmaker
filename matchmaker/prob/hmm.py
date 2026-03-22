@@ -22,9 +22,10 @@ from scipy.signal import convolve
 from scipy.stats import gumbel_l, norm
 
 from matchmaker.base import OnlineAlignment
+from matchmaker.io.queue import RECVQueue
+from matchmaker.io.stream import STREAM_END
+from matchmaker.utils.errors import MatchmakerMissingParameterError
 from matchmaker.utils.misc import (
-    MatchmakerMissingParameterError,
-    RECVQueue,
     get_window_indices,
     interleave_with_constant,
     set_latency_stats,
@@ -110,39 +111,37 @@ class BaseHMM(HiddenMarkovModel):
         }
 
     @property
-    def warping_path(self) -> NDArrayInt:
-        return (np.array(self._warping_path).T).astype(np.int32)
+    def warping_path(self):
+        return np.array(self._warping_path).T
 
-    def __call__(self, input: NDArrayFloat) -> float:
+    def __call__(self, input: NDArrayFloat, *args, **kwargs) -> float:
         current_state = self.forward_algorithm_step(
             observation=input,
             log_probabilities=False,
         )
 
-        self._warping_path.append((current_state, self.input_index))
+        try:
+            beat = float(self.state_space[current_state])
+        except (ValueError, TypeError):
+            beat = current_state
+        self._warping_path.append((beat, self.input_index))
         self.input_index += 1
         self.current_state = current_state
 
         return current_state
 
-    def run(self) -> Generator[int, None, NDArrayInt]:
+    def run(self, verbose: bool = True) -> Generator[int, None, NDArrayInt]:
         if self.queue is not None:
-            prev_state = self.current_state
-            same_state_counter = 0
             while self.is_still_following():
-                target_feature = self.queue.get()
+                item = self.queue.get()
+                if item is STREAM_END:
+                    break
+                if item is None:
+                    continue
 
-                current_state = self(target_feature)
+                current_state = self(item)
 
-                if current_state == prev_state:
-                    if same_state_counter < self.patience:
-                        same_state_counter += 1
-                    else:
-                        break
-                else:
-                    same_state_counter = 0
-
-                yield current_state
+                yield float(self.state_space[current_state])
 
             return self.warping_path
 
@@ -229,6 +228,7 @@ class PitchHMM(OnlineAlignment, BaseHMM):
             reference_features=reference_features,
         )
         self.reference_features = reference_features
+        self.perf_onset = None
         (
             observation_model,
             transition_matrix,
@@ -284,17 +284,25 @@ class PitchHMM(OnlineAlignment, BaseHMM):
         )
 
     def __call__(self, input, *args, **kwargs):
-        frame_index = args[0] if args else None
-
-        pitch_obs = input
+        # PitchIOIProcessor returns (pitch_array, ioi). Use pitch for
+        # observation, ioi for time tracking.
+        if isinstance(input, tuple):
+            pitch_obs, ioi_obs = input
+            if self.perf_onset is None:
+                self.perf_onset = 0
+            else:
+                self.perf_onset += ioi_obs
+        else:
+            pitch_obs = input
 
         current_state = self.forward_algorithm_step(
             observation=pitch_obs,
             log_probabilities=False,
         )
-        self._warping_path.append((current_state, self.input_index))
-        self.input_index = self.input_index + 1 if frame_index is None else frame_index
-
+        beat = float(self.state_space[current_state])
+        perf_time = getattr(self, "perf_onset", self.input_index) or self.input_index
+        self._warping_path.append((beat, perf_time))
+        self.input_index += 1
         self.current_state = current_state
 
         return self.current_state
@@ -1605,6 +1613,7 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             tempo_model=tempo_model,
             has_insertions=has_insertions,
             queue=queue,
+            **kwargs,
         )
 
     def __call__(self, input, *args, **kwargs):
@@ -1623,7 +1632,8 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
             ),
             log_probabilities=False,
         )
-        self._warping_path.append((current_state, self.input_index))
+        score_beat = float(self.state_space[current_state])
+        self._warping_path.append((score_beat, self.perf_onset))
         self.input_index = self.input_index + 1 if frame_index is None else frame_index
 
         if self.current_state is None:
@@ -1732,44 +1742,20 @@ class PitchIOIHMM(OnlineAlignment, BaseHMM):
         )
 
     def run(self, verbose: bool = True):
-        same_state_counter = 0
-        empty_counter = 0
-        verbose = False
-        if verbose:
-            pbar = progressbar.ProgressBar(
-                maxval=self.n_states,  # redirect_stdout=True
-            )
-            pbar.start()
-
         while self.is_still_following():
-            prev_state = self.current_state
-            # TODO: check self.queue.get() format. maybe this should actually be a tuple
             try:
-                queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
-                # features, f_time = queue_input
-                # print(f'{features=}, {f_time=}')
+                item = self.queue.get(timeout=QUEUE_TIMEOUT)
             except:
                 break
-            # TODO: try MidiStream.return_midi_messages = True
+            if item is STREAM_END:
+                break
+            if item is None:
+                continue
 
-            if queue_input is not None:
-                # print(f'pitch_ioi: {queue_input=}')
-                current_state = self.__call__(queue_input)
-                empty_counter = 0
-                if current_state == prev_state:
-                    if same_state_counter < self.patience:
-                        same_state_counter += 1
-                    else:
-                        break
-                else:
-                    same_state_counter = 0
+            current_state = self.__call__(item)
 
-                if verbose:
-                    pbar.update(int(current_state))
-                yield current_state
+            yield float(self.state_space[current_state])
 
-            if verbose:
-                pbar.finish()
         return self.warping_path
 
 
@@ -1945,6 +1931,8 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
         while self.is_still_following():
             prev_state = self.current_state
             queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
+            if queue_input is STREAM_END:
+                break
             features, f_time = queue_input
             self.last_queue_update = time.time()
             self.input_features = (
@@ -1968,7 +1956,7 @@ class GaussianAudioPitchHMM(OnlineAlignment, BaseHMM):
                 )
                 if verbose:
                     pbar.update(int(current_state))
-                yield current_state
+                yield float(self.state_space[current_state])
 
             if verbose:
                 pbar.finish()
@@ -2160,6 +2148,8 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
         while self.is_still_following():
             prev_state = self.current_state
             queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
+            if queue_input is STREAM_END:
+                break
             features, f_time = queue_input
             self.last_queue_update = time.time()
             self.input_features = (
@@ -2183,7 +2173,7 @@ class GaussianAudioPitchTempoHMM(OnlineAlignment, BaseHMM):
                 )
                 if verbose:
                     pbar.update(int(current_state))
-                yield current_state
+                yield float(self.state_space[current_state])
 
             if verbose:
                 pbar.finish()

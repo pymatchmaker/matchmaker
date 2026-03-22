@@ -1,23 +1,35 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 """
-On-line Dynamic Time Warping (Dixon 2005)
+On-line Time Warping (OLTWDixon)
+
+OLTW with backward-forward search, based on:
+  Dixon (2005) "An On-Line Time Warping Algorithm for Tracking Musical
+               Performances" (IJCAI)
+  Dixon (2005) "Live Tracking of Musical Performances Using On-Line Time
+               Warping" (DAFx)
+
+Classes:
+  OnlineTimeWarpingDixon      — base class (common properties, run loop)
+  OnlineTimeWarpingDixonFrame — frame-level variant for audio (backward-forward search)
+  OnlineTimeWarpingDixonEvent — event-level variant for MIDI (onset-by-onset)
 """
 
 import time
 from enum import IntEnum
-from typing import Dict
+from typing import Dict, Generator, Optional
 
 import numpy as np
 import progressbar
-import scipy
+import scipy.spatial.distance
 from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.features.audio import FRAME_RATE
 from matchmaker.io.audio import QUEUE_TIMEOUT
+from matchmaker.io.queue import RECVQueue
+from matchmaker.io.stream import STREAM_END
 from matchmaker.utils.misc import set_latency_stats
-from matchmaker.utils.stream import STREAM_END
 
 
 class Direction(IntEnum):
@@ -28,84 +40,56 @@ class Direction(IntEnum):
 
 MAX_RUN_COUNT: int = 3
 FRAME_PER_SEG = 1
-WINDOW_SIZE = 10  # seconds
+WINDOW_SIZE = 10  # seconds for frame, events for event
+
+
+# ---------------------------------------------------------------------------
+# Base class
+# ---------------------------------------------------------------------------
 
 
 class OnlineTimeWarpingDixon(OnlineAlignment):
-    """
-    On-line Dynamic Time Warping (Dixon)
+    """Base class for Dixon-style OLTW.
+
+    Subclasses must implement ``step()``, ``reset()``, ``is_still_following()``,
+    and the ``current_beat`` / ``warping_path`` properties.
 
     Parameters
     ----------
     reference_features : np.ndarray
-        A 2D array with dimensions (`F(n_features)`, `T(n_timesteps)`) containing the
-        features of the reference the input is going to be aligned to.
-
-    distance_func : str, tuple (str, dict) or callable
-        Distance function for computing pairwise distances.
-
-    window_size : int
-        Size of the window for searching the optimal path in the cumulative cost matrix.
-
+        Feature matrix for the reference (score) sequence.
+    queue : RECVQueue or None
+        Input queue for streaming.
     max_run_count : int
-        Maximum consecutive advances in one direction before the other
-        direction is forced. Constrains the slope to [1/max_run_count, max_run_count].
-
-    frame_per_seg : int
-        Number of frames per segment (audio chunk).
-
-    frame_rate : int
-        Frame rate of the audio stream.
-
-    Attributes
-    ----------
-    warping_path : np.ndarray [shape=(2, T)]
-        Warping path. ``warping_path[0]`` = reference index,
-        ``warping_path[1]`` = input index.
+        Max consecutive same-direction advances.
+    distance_func : str
+        Distance metric.
+    state_space : np.ndarray or None
+        Score positions (beats).
     """
 
     DEFAULT_DISTANCE_FUNC: str = "euclidean"
-    distance_func: str
 
     def __init__(
         self,
         reference_features,
-        queue,
-        window_size=WINDOW_SIZE,
-        distance_func=DEFAULT_DISTANCE_FUNC,
+        queue=None,
         max_run_count=MAX_RUN_COUNT,
-        frame_per_seg=FRAME_PER_SEG,
-        frame_rate=FRAME_RATE,
-        state_to_ref_time_map=None,
-        ref_to_state_time_map=None,
+        distance_func=DEFAULT_DISTANCE_FUNC,
         state_space=None,
         **kwargs,
     ):
         super().__init__(reference_features=reference_features)
         self.queue = queue
         self.N_ref = self.reference_features.shape[0]
-        self.frame_rate = frame_rate
-        self.w = int(window_size * self.frame_rate)
-        self.distance_func = distance_func.lower()
         self.max_run_count = max_run_count
-        self.frame_per_seg = frame_per_seg
-        self.state_to_ref_time_map = state_to_ref_time_map
-        self.ref_to_state_time_map = ref_to_state_time_map
+        self.distance_func = (
+            distance_func if isinstance(distance_func, str) else "euclidean"
+        )
         self.state_space = state_space
         self._ref_frame_to_beat = kwargs.get("ref_frame_to_beat", None)
-        self.reset()
-
-    def reset(self):
-        """Reset mutable state for a new alignment run."""
-        self.input_features = np.empty((0, self.reference_features.shape[1]))
-        self.acc_dist_matrix = np.full((self.w, self.w), np.inf, dtype=np.float32)
-        self.wp = np.array([[0, 0]]).T  # [shape=(2, T)]
-        self.ref_pointer = 0
-        self.input_pointer = 0
-        self.run_count_ref = 0
-        self.run_count_input = 0
-        self.best_ref = 0
-        self.best_input = 0
+        self.state_to_ref_time_map = kwargs.get("state_to_ref_time_map", None)
+        self.ref_to_state_time_map = kwargs.get("ref_to_state_time_map", None)
         self.current_position = 0
         self.input_index = 0
         self.last_queue_update = time.time()
@@ -115,19 +99,129 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             "max_latency": 0,
             "min_latency": float("inf"),
         }
+
+    def __call__(self, input_features: NDArray[np.float32]) -> int:
+        self.step(input_features)
+        return self.current_position
+
+    def run(self, verbose=True) -> Generator[float, None, NDArray]:
+        """Run alignment from queue."""
+        self.reset()
+
+        if verbose:
+            n = len(self.state_space) if self.state_space is not None else self.N_ref
+            pbar = progressbar.ProgressBar(
+                max_value=n,
+                redirect_stdout=True,
+                redirect_stderr=True,
+            )
+            pbar.start()
+
+        while self.is_still_following():
+            item = self.queue.get(timeout=QUEUE_TIMEOUT)
+            if item is STREAM_END:
+                break
+            if item is None:
+                continue
+            input_feature = item[0] if isinstance(item, tuple) else item
+            self.last_queue_update = time.time()
+            self.step(input_feature)
+
+            if verbose:
+                pbar.update(
+                    int(np.searchsorted(self.state_space, self.current_beat))
+                    if self.state_space is not None
+                    else min(self.current_position, self.N_ref - 1)
+                )
+
+            latency = time.time() - self.last_queue_update
+            self.latency_stats = set_latency_stats(
+                latency, self.latency_stats, self.input_index
+            )
+            yield self.current_beat
+
+        if verbose:
+            pbar.finish()
+
+        return self.warping_path
+
+
+# ---------------------------------------------------------------------------
+# Frame-level subclass (audio)
+# ---------------------------------------------------------------------------
+
+
+class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
+    """Frame-level OLTW with backward-forward search for audio input.
+
+    Window size is in seconds (converted to frames via frame_rate).
+    """
+
+    def __init__(
+        self,
+        reference_features,
+        queue=None,
+        window_size=WINDOW_SIZE,
+        distance_func=OnlineTimeWarpingDixon.DEFAULT_DISTANCE_FUNC,
+        max_run_count=MAX_RUN_COUNT,
+        frame_per_seg=FRAME_PER_SEG,
+        frame_rate=FRAME_RATE,
+        state_to_ref_time_map=None,
+        ref_to_state_time_map=None,
+        state_space=None,
+        **kwargs,
+    ):
+        super().__init__(
+            reference_features=reference_features,
+            queue=queue,
+            max_run_count=max_run_count,
+            distance_func=distance_func,
+            state_space=state_space,
+            state_to_ref_time_map=state_to_ref_time_map,
+            ref_to_state_time_map=ref_to_state_time_map,
+            **kwargs,
+        )
+        self.frame_rate = frame_rate
+        self.w = int(window_size * self.frame_rate)
+        self.frame_per_seg = frame_per_seg
+        self.reset()
+
+    def reset(self):
+        self.input_features = np.empty((0, self.reference_features.shape[1]))
+        self.acc_dist_matrix = np.full((self.w, self.w), np.inf, dtype=np.float32)
+        self.wp = np.array([[0, 0]]).T
+        self.ref_pointer = 0
+        self.input_pointer = 0
+        self.run_count_ref = 0
+        self.run_count_input = 0
+        self.best_ref = 0
+        self.best_input = 0
+        self.current_position = 0
+        self.input_index = 0
+        self.last_queue_update = time.time()
+        self.latency_stats = {
+            "total_latency": 0,
+            "total_frames": 0,
+            "max_latency": 0,
+            "min_latency": float("inf"),
+        }
         self._initialized = False
 
     @property
     def current_beat(self) -> float:
-        """Current score position in beats."""
         if self._ref_frame_to_beat is not None:
             idx = min(self.best_ref, len(self._ref_frame_to_beat) - 1)
             return float(self._ref_frame_to_beat[idx])
         return float(self.best_ref)
 
     @property
-    def warping_path(self) -> NDArray[np.float32]:  # [shape=(2, T)]
+    def warping_path(self) -> NDArray[np.float32]:
         return self.wp
+
+    def is_still_following(self):
+        return self.ref_pointer <= (self.N_ref - self.frame_per_seg)
+
+    # ---- internal methods ----
 
     def _ref_offset(self):
         return max(0, self.ref_pointer - self.w)
@@ -142,24 +236,13 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         return min(self.w, self.input_pointer)
 
     def offset(self):
-        """Calculate the offset for the current window position."""
         return np.array([self._ref_offset(), self._input_offset()])
 
     def _compute_cell(self, r_win, i_win):
-        """
-        Compute DTW accumulated cost for cell (r_win, i_win) in window coordinates.
-
-        Uses Sakoe-Chiba symmetric weighting (DAFx 2005, Eq. 3):
-            D[i,j] = min(D[i-1,j] + d, D[i,j-1] + d, D[i-1,j-1] + 2d)
-
-        Matrix convention: acc_dist_matrix[ref_win, input_win]
-        """
         abs_ref = self._ref_offset() + r_win
         abs_input = self._input_offset() + i_win
-
         ref_feature = self.reference_features[abs_ref]
         input_feature = self.input_features[abs_input]
-
         local_dist = scipy.spatial.distance.cdist(
             ref_feature.reshape(1, -1),
             input_feature.reshape(1, -1),
@@ -177,136 +260,77 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
                 self.acc_dist_matrix[r_win - 1, i_win] + local_dist
             )
         else:
-            candidates = [
+            self.acc_dist_matrix[r_win, i_win] = min(
                 self.acc_dist_matrix[r_win - 1, i_win] + local_dist,
                 self.acc_dist_matrix[r_win, i_win - 1] + local_dist,
                 self.acc_dist_matrix[r_win - 1, i_win - 1] + 2 * local_dist,
-            ]
-            self.acc_dist_matrix[r_win, i_win] = min(candidates)
+            )
 
     def _accept_input(self, input_features):
-        """Store input features and advance input pointer."""
         self.input_features = np.vstack([self.input_features, input_features])
         self.input_pointer += self.frame_per_seg
 
     def _compute_input_column(self):
-        """Shift the window left if full, then fill the new rightmost column."""
         if self.input_pointer > self.w:
             self.acc_dist_matrix[:, :-1] = self.acc_dist_matrix[:, 1:]
             self.acc_dist_matrix[:, -1] = np.inf
-
         input_col = self._input_win_size() - 1
         for r in range(self._ref_win_size()):
             self._compute_cell(r, input_col)
 
     def _advance_ref(self):
-        """Advance ref pointer, shift the window up if full, then fill the new bottom row."""
         self.ref_pointer += self.frame_per_seg
-
         if self.ref_pointer > self.w:
             self.acc_dist_matrix[:-1, :] = self.acc_dist_matrix[1:, :]
             self.acc_dist_matrix[-1, :] = np.inf
-
         ref_row = self._ref_win_size() - 1
         for c in range(self._input_win_size()):
             self._compute_cell(ref_row, c)
 
     def _determine_direction(self):
-        """Apply MaxRunCount slope constraint to the suggested direction"""
-        suggested_direction = self.get_expand_direction()
-
+        suggested = self._get_expand_direction()
         if self.run_count_ref >= self.max_run_count:
             return Direction.TARGET
         elif self.run_count_input >= self.max_run_count:
             return Direction.REF
-        else:
-            return suggested_direction
+        return suggested
 
-    def get_expand_direction(self):
-        """
-        Determine expansion direction (GetInc from Dixon 2005, IJCAI Fig. 1).
-
-        Searches the L-shaped boundary of the sliding window — the last ref row
-        and the last input column — for the cell with minimum normalised
-        accumulated cost.  The direction is chosen based on where that minimum
-        falls:
-        - Corner (last row AND last col) → BOTH
-        - In the column (not at last row) → TARGET (advance input to catch up)
-        - In the row (not at last col)    → REF    (advance ref to catch up)
-
-        Normalization: cost / (1 + i + j), an O(1) approximation of the true
-        path-length divisor (DAFx 2005, Sec. 2).
-        """
+    def _get_expand_direction(self):
         ref_ws = self._ref_win_size()
         input_ws = self._input_win_size()
         ref_off = self._ref_offset()
         input_off = self._input_offset()
-
-        # Current row and column in window coordinates
-        row = ref_ws - 1  # last ref row
-        col = input_ws - 1  # last input column
-
+        row = ref_ws - 1
+        col = input_ws - 1
         best_cost = np.inf
-        best_row = row
-        best_col = col
+        best_row, best_col = row, col
 
-        # Search current column (last input column) across all ref rows
         for r in range(ref_ws):
-            abs_r = ref_off + r
-            abs_i = input_off + col
-            cost = self.acc_dist_matrix[r, col]
-            norm_cost = cost / (1 + abs_r + abs_i)
-            if norm_cost < best_cost:
-                best_cost = norm_cost
-                best_row = r
-                best_col = col
+            cost = self.acc_dist_matrix[r, col] / (1 + ref_off + r + input_off + col)
+            if cost < best_cost:
+                best_cost = cost
+                best_row, best_col = r, col
 
-        # Search current row (last ref row) across all input columns
         for c in range(input_ws):
-            abs_r = ref_off + row
-            abs_i = input_off + c
-            cost = self.acc_dist_matrix[row, c]
-            norm_cost = cost / (1 + abs_r + abs_i)
-            if norm_cost < best_cost:
-                best_cost = norm_cost
-                best_row = row
-                best_col = c
+            cost = self.acc_dist_matrix[row, c] / (1 + ref_off + row + input_off + c)
+            if cost < best_cost:
+                best_cost = cost
+                best_row, best_col = row, c
 
-        # Convert best window coords to absolute
         self.best_ref = ref_off + best_row
         self.best_input = input_off + best_col
 
-        # Determine direction based on where the best point is
         if best_row == row and best_col == col:
             return Direction.BOTH
         elif best_row < row:
-            # Best is in the column (not at current row) → input needs to catch up
             return Direction.TARGET
-        else:
-            # Best is in the row (not at current col) → ref needs to catch up
-            return Direction.REF
+        return Direction.REF
 
     def save_history(self):
-        """Append current best alignment point to warping path (beats, input_frame)."""
         new_point = np.array([[self.current_beat], [self.best_input]])
         self.wp = np.concatenate((self.wp, new_point), axis=1)
 
-    def __call__(self, input_features: NDArray[np.float32]) -> int:
-        self.step(input_features)
-        return self.current_position
-
     def step(self, input_features):
-        """Process one input frame and update alignment state.
-
-        Handles REF-only catch-up internally so that each call
-        consumes exactly one input frame.
-
-        Parameters
-        ----------
-        input_features : NDArray[np.float32]
-            A single input feature frame.
-        """
-        # First call: initialization (matches run()'s pre-loop logic)
         if not self._initialized:
             self._accept_input(input_features)
             self.ref_pointer += self.frame_per_seg
@@ -315,7 +339,6 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             self.input_index += 1
             return
 
-        # Phase 1: REF-only catch-up (0 or more iterations)
         direction = None
         while self.is_still_following():
             direction = self._determine_direction()
@@ -330,18 +353,16 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         if not self.is_still_following():
             return
 
-        # Phase 2: consume input (direction is TARGET or BOTH)
         self._accept_input(input_features)
         self._compute_input_column()
 
-        if direction is not Direction.TARGET:  # BOTH
+        if direction is not Direction.TARGET:
             self._advance_ref()
 
-        # Update run counts
         if direction == Direction.TARGET:
             self.run_count_input += 1
             self.run_count_ref = 0
-        else:  # BOTH
+        else:
             self.run_count_ref = 1
             self.run_count_input = 0
 
@@ -349,33 +370,182 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         self.current_position = self.best_ref
         self.input_index += 1
 
-    def is_still_following(self):
-        return self.ref_pointer <= (self.N_ref - self.frame_per_seg)
 
-    def run(self, verbose=True):
-        """Run the online alignment process.
+# ---------------------------------------------------------------------------
+# Event-level subclass (MIDI)
+# ---------------------------------------------------------------------------
 
-        Parameters
-        ----------
-        verbose : bool, optional
-            Whether to show progress bar, by default True
 
-        Yields
-        ------
-        int
-            Current position in the reference sequence
+class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
+    """Event-level OLTW for MIDI input.
 
-        Returns
-        -------
-        NDArray[np.float32]
-            The warping path as a 2D array where each column contains
-            (reference_position, input_position)
-        """
+    Each step processes one onset event. Uses sparse cost matrix with
+    path-length normalization and reference catch-up based on argmin
+    of normalized path cost.
+
+    Parameters
+    ----------
+    c : int
+        Search width in number of events.
+    """
+
+    def __init__(
+        self,
+        reference_features: NDArray[np.float32],
+        queue: Optional[RECVQueue] = None,
+        c: int = 30,
+        max_run_count: int = MAX_RUN_COUNT,
+        distance_func: str = "euclidean",
+        state_space=None,
+        **kwargs,
+    ) -> None:
+        super().__init__(
+            reference_features=reference_features,
+            queue=queue,
+            max_run_count=max_run_count,
+            distance_func=distance_func,
+            state_space=state_space,
+            **kwargs,
+        )
+        self.ref = self.reference_features.astype(np.float32)
+        self.c = c
         self.reset()
 
+    def reset(self) -> None:
+        self._D: Dict = {}
+        self._L: Dict = {}
+        self._inputs = []
+        self.t = -1
+        self.j = -1
+        self.run_count_input = 0
+        self.run_count_ref = 0
+        self.current_position = 0
+        self.input_index = 0
+        self._warping_path = []
+        self.last_queue_update = time.time()
+        self.latency_stats = {
+            "total_latency": 0,
+            "total_frames": 0,
+            "max_latency": 0,
+            "min_latency": float("inf"),
+        }
+
+    @property
+    def current_beat(self) -> float:
+        if self.state_space is not None:
+            idx = min(self.current_position, len(self.state_space) - 1)
+            return float(self.state_space[idx])
+        return float(self.current_position)
+
+    @property
+    def warping_path(self) -> NDArray:
+        return (
+            np.array(self._warping_path).T if self._warping_path else np.empty((2, 0))
+        )
+
+    def is_still_following(self) -> bool:
+        return self.current_position < self.N_ref - 1
+
+    # ---- cost matrix (sparse) ----
+
+    def _local_cost(self, ref_idx, input_idx):
+        return scipy.spatial.distance.cdist(
+            self.ref[ref_idx].reshape(1, -1),
+            self._inputs[input_idx].reshape(1, -1),
+            metric=self.distance_func,
+        )[0, 0]
+
+    def _get_D(self, i, j):
+        return self._D.get((i, j), np.inf)
+
+    def _get_L(self, i, j):
+        return self._L.get((i, j), 0)
+
+    def _evaluate(self, ref_i, inp_j):
+        if ref_i < 0 or inp_j < 0 or ref_i >= self.N_ref:
+            return
+        d = self._local_cost(ref_i, inp_j)
+        if ref_i == 0 and inp_j == 0:
+            self._D[(ref_i, inp_j)] = d
+            self._L[(ref_i, inp_j)] = 1
+            return
+        best_cost, best_len = np.inf, 0
+        for prev_i, prev_j, w in [
+            (ref_i - 1, inp_j, 1),
+            (ref_i, inp_j - 1, 1),
+            (ref_i - 1, inp_j - 1, 2),
+        ]:
+            prev = self._D.get((prev_i, prev_j), np.inf)
+            if prev < np.inf:
+                c = prev + w * d
+                if c < best_cost:
+                    best_cost = c
+                    best_len = self._L.get((prev_i, prev_j), 0) + 1
+        if best_cost < np.inf:
+            self._D[(ref_i, inp_j)] = best_cost
+            self._L[(ref_i, inp_j)] = best_len
+
+    def _norm_cost(self, ref_i, inp_j):
+        L = self._get_L(ref_i, inp_j)
+        return self._get_D(ref_i, inp_j) / L if L > 0 else np.inf
+
+    def _argmin_path_cost(self):
+        best_cost, best_ref, best_inp = np.inf, self.j, self.t
+        for k in range(max(0, self.t - self.c + 1), self.t + 1):
+            nc = self._norm_cost(self.j, k)
+            if nc < best_cost:
+                best_cost, best_ref, best_inp = nc, self.j, k
+        for k in range(max(0, self.j - self.c + 1), self.j + 1):
+            nc = self._norm_cost(k, self.t)
+            if nc < best_cost:
+                best_cost, best_ref, best_inp = nc, k, self.t
+        return best_ref, best_inp
+
+    def _compute_input_column(self):
+        for k in range(max(0, self.j - self.c + 1), self.j + 1):
+            self._evaluate(k, self.t)
+
+    def _compute_ref_row(self):
+        for k in range(max(0, self.t - self.c + 1), self.t + 1):
+            self._evaluate(self.j, k)
+
+    def step(self, input_feat: NDArray[np.float32], perf_time: float = None) -> None:
+        self._inputs.append(np.asarray(input_feat, dtype=np.float32))
+        self.t += 1
+        self._compute_input_column()
+
+        if self.t < self.c and self.j + 1 < self.N_ref:
+            self.j += 1
+            self._compute_ref_row()
+            self.run_count_input = 0
+            self.run_count_ref = 0
+        else:
+            self.run_count_input += 1
+            self.run_count_ref = 0
+            while self.j + 1 < self.N_ref:
+                best_ref, best_inp = self._argmin_path_cost()
+                if best_ref >= self.j and best_inp < self.t:
+                    self.j += 1
+                    self._compute_ref_row()
+                    self.run_count_ref += 1
+                    self.run_count_input = 0
+                    if self.run_count_ref >= self.max_run_count:
+                        break
+                else:
+                    break
+
+        best_ref, _ = self._argmin_path_cost()
+        self.current_position = min(best_ref, self.N_ref - 1)
+        t = perf_time if perf_time is not None else self.input_index
+        self._warping_path.append((self.current_beat, t))
+        self.input_index += 1
+
+    def run(self, verbose=True) -> Generator[float, None, NDArray]:
+        """Run from queue. Extracts timestamp from (feature, time) tuples."""
+        self.reset()
         if verbose:
             pbar = progressbar.ProgressBar(
-                max_value=len(self.state_space),
+                max_value=self.N_ref,
                 redirect_stdout=True,
                 redirect_stderr=True,
             )
@@ -385,13 +555,17 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
             item = self.queue.get(timeout=QUEUE_TIMEOUT)
             if item is STREAM_END:
                 break
-            input_feature, f_time = item
+            if item is None:
+                continue
+            if isinstance(item, tuple):
+                features, perf_time = item[0], float(item[1])
+            else:
+                features, perf_time = item, None
             self.last_queue_update = time.time()
-            self.step(input_feature)
+            self.step(features, perf_time=perf_time)
 
             if verbose:
-                pbar.update(int(np.searchsorted(self.state_space, self.current_beat)))
-
+                pbar.update(min(self.current_position, self.N_ref - 1))
             latency = time.time() - self.last_queue_update
             self.latency_stats = set_latency_stats(
                 latency, self.latency_stats, self.input_index
@@ -400,5 +574,8 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
 
         if verbose:
             pbar.finish()
+        return self.warping_path
 
-        return self.wp
+
+if __name__ == "__main__":
+    pass  # pragma: no cover

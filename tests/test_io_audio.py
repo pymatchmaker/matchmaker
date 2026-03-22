@@ -19,9 +19,9 @@ from matchmaker.features.audio import (
     MelSpectrogramProcessor,
     MFCCProcessor,
 )
+from matchmaker.features.processor import DummyProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.utils.audio import check_input_audio_devices, get_audio_devices
-from matchmaker.utils.processor import DummyProcessor
 from tests.utils import generate_sine_wave
 
 HAS_AUDIO_INPUT = check_input_audio_devices()
@@ -227,7 +227,7 @@ class TestAudioStream(unittest.TestCase):
             print("current time", self.stream.current_time)
             self.stream.join()
 
-            from matchmaker.utils.stream import STREAM_END
+            from matchmaker.io.stream import STREAM_END
 
             outputs = [
                 item for item in self.stream.queue.queue if item is not STREAM_END

@@ -102,7 +102,7 @@ class TestMatchmaker(unittest.TestCase):
 
     def test_matchmaker_audio_run_with_evaluation(self):
         for dataset in self.test_datasets:
-            for method in ["arzt", "dixon", "audio_outerhmm"]:
+            for method in ["arzt", "dixon", "outerhmm"]:
                 with self.subTest(dataset=dataset["name"], method=method):
                     mm = Matchmaker(
                         score_file=dataset["score"],
@@ -139,7 +139,7 @@ class TestMatchmaker(unittest.TestCase):
             performance_file=self.performance_file_audio,
             wait=False,
             input_type="audio",
-            feature_type="cqt",
+            processor="cqt",
             method="arzt",
         )
         try:
@@ -232,7 +232,7 @@ class TestMatchmaker(unittest.TestCase):
             score_file=self.score_file,
             performance_file=self.performance_file_audio,
             input_type="audio",
-            method="audio_outerhmm",
+            method="outerhmm",
         )
 
         self.assertIsInstance(mm.stream, AudioStream)
@@ -243,7 +243,7 @@ class TestMatchmaker(unittest.TestCase):
             score_file=self.score_file,
             performance_file=self.performance_file_audio,
             input_type="audio",
-            method="audio_outerhmm",
+            method="outerhmm",
         )
 
         for position_in_beat in mm.run(verbose=False):
@@ -251,7 +251,7 @@ class TestMatchmaker(unittest.TestCase):
             break
 
     def test_matchmaker_audio_rtf(self):
-        for method in ["arzt", "dixon", "audio_outerhmm"]:
+        for method in ["arzt", "dixon", "outerhmm"]:
             with self.subTest(method=method):
                 mm = Matchmaker(
                     score_file=self.score_file,
@@ -340,6 +340,48 @@ class TestMatchmaker(unittest.TestCase):
             self.assertIsInstance(position_in_beat, (int, float, np.integer))
             if position_in_beat >= 10:
                 break
+
+    def test_matchmaker_midi_run_with_evaluation(self):
+        """Test all MIDI methods: run + evaluate on test datasets."""
+        for dataset in self.test_datasets:
+            for method in ["hmm", "pthmm", "outerhmm", "arzt", "dixon"]:
+                with self.subTest(dataset=dataset["name"], method=method):
+                    mm = Matchmaker(
+                        score_file=dataset["score"],
+                        performance_file=dataset["midi"],
+                        input_type="midi",
+                        method=method,
+                    )
+
+                    try:
+                        positions = list(mm.run())
+                    except queue.Empty as e:
+                        print(f"Error: {type(e)}, {e}")
+                        traceback.print_exc()
+                        mm._has_run = True
+
+                    # All methods should produce positions
+                    self.assertGreater(len(positions), 0)
+
+                    # WP should be valid
+                    wp = mm.score_follower.warping_path
+                    self.assertEqual(wp.shape[0], 2)
+                    self.assertGreater(wp.shape[1], 0)
+
+                    # Evaluate all methods
+                    results = mm.run_evaluation(
+                        dataset["annotations"],
+                        debug=False,
+                    )
+                    current_test = f"{dataset['name']}_{method}_midi"
+                    print(
+                        f"[{current_test}] beat_0.5b={results['beat']['0.5b']:.3f}, ms_300ms={results['ms']['300ms']:.3f}"
+                    )
+
+                    for threshold in ["0.5b", "1b"]:
+                        self.assertGreaterEqual(results["beat"][threshold], 0.3)
+                    for threshold in ["300ms", "500ms", "1000ms"]:
+                        self.assertGreaterEqual(results["ms"][threshold], 0.3)
 
 
 if __name__ == "__main__":

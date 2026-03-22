@@ -14,7 +14,7 @@ The full documentation for matchmaker is available online at [readthedocs.org](h
 
 ### Prerequisites
 
-- Available Python version: 3.11, 3.12, 3.13
+- Available Python version: 3.10, 3.11, 3.12, 3.13
 - [Fluidsynth](https://www.fluidsynth.org/)
 - [PortAudio](http://www.portaudio.com/)
 
@@ -121,6 +121,7 @@ from matchmaker import Matchmaker
 
 mm = Matchmaker(
     score_file="path/to/score",
+    input_type="audio",
     device_name_or_index="MacBookPro Microphone",
 )
 for current_position in mm.run():
@@ -132,18 +133,18 @@ for current_position in mm.run():
 The repository includes a ready-to-use example script that demonstrates the complete workflow:
 
 ```bash
-# Run with audio input (default)
-python run_examples.py
+# Run with audio input (uses arzt method as default)
+python run_examples.py --audio
 
-# Run with MIDI input
-python run_examples.py --midi
+# Run with MIDI input and specific method
+python run_examples.py --midi --method hmm
 ```
 
 This script runs a complete example with score following and evaluation, saving results to the `results/` directory.
 
 ### Testing with Different Methods or Features
 
-For testing with Audio input, you can specify the alignment method as follows:
+You can specify the alignment method and feature processor as follows:
 
 ```python
 from matchmaker import Matchmaker
@@ -151,37 +152,42 @@ from matchmaker import Matchmaker
 mm = Matchmaker(
     score_file="path/to/score",
     input_type="audio",
-    method="dixon",  # or "arzt" (default)
+    method="arzt",       # see Alignment Methods section
+    processor="chroma",  # see Features section
 )
 for current_position in mm.run():
     print(current_position)
 ```
 
 For options regarding the `method`, please refer to the [Alignment Methods](#alignment-methods) section.
-For options regarding the `feature_type`, please refer to the [Features](#features) section.
+For options regarding the `processor`, please refer to the [Features](#features) section.
 
 
 ## Alignment Methods
 
 Matchmaker currently supports the following alignment methods:
 
-- `"dixon"`: On-line time warping algorithm by S. Dixon (2005). Currently supports audio input; MIDI support coming soon.
-- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010)). Currently supports audio input; MIDI support coming soon.
-- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020). Currently supports MIDI input; Audio support coming soon.
+- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010)). Supports audio and MIDI input.
+- `"dixon"`: On-line time warping algorithm by S. Dixon (2005). Supports audio and MIDI input.
+- `"outerhmm"`: Outer-product HMM score follower by E. Nakamura (2014). Supports audio and MIDI input.
+- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020). Supports MIDI input.
+- `"pthmm"`: Pitch-based HMM score follower. Supports MIDI input.
 
 ## Features
 
 Matchmaker currently supports the following feature types:
 
 - For audio:
-  - `"chroma"`: Chroma features. Default feature type for audio input.
+  - `"chroma"`: Chroma features. Default for audio input.
   - `"mfcc"`: Mel-frequency cepstral coefficients.
-  - `"mel"`: Mel-Spectrogram.
-  - `"logspectral"`: Log-spectral features used in Dixon (2005).
+  - `"cqt"`: Constant-Q transform.
+  - `"mel"`: Mel-spectrogram.
+  - `"lse"`: Log-spectral energy features used in Dixon (2005).
+  - `"cqt_spectral_flux"`: CQT-based spectral flux used in Nakamura et al. (2014).
 - For MIDI:
-  - `pianoroll`: Piano-roll features. Default feature type for MIDI input.
-  - `"pitch"`: Pitch features for MIDI input.
-  - `"pitchclass"`: Pitch class features for MIDI input.
+  - `"pitch_ioi"`: Pitch and inter-onset interval features. Default for MIDI input.
+  - `"pianoroll"`: Piano-roll features.
+  - `"pitchclass"`: Pitch class features.
 
 ## Configurations
 
@@ -189,10 +195,8 @@ Initialization parameters for the `Matchmaker` class:
 
 - `score_file` (str): Path to the score file.
 - `input_type` (str): Type of input data. Options: `"audio"`, `"midi"`.
-- `feature_type` (str): Type of feature to use. Options: `"chroma"`, `"mfcc"`, `"cqt"`, `"spectrogram"`, `"onset"`.
-- `method` (str): Alignment method to use. Options: `"dixon"`, `"arzt"`, `"hmm"`.
-- `sample_rate` (int): Sample rate of the input audio data.
-- `frame_rate` (int): Frame rate of the input audio/MIDI data.
+- `method` (str): Alignment method to use. See [Alignment Methods](#alignment-methods) for available options.
+- `processor` (str): Type of feature processor to use. See [Features](#features) for available options.
 - `device_name_or_index` (str or int): The audio/MIDI device name or index you want to use. If `None`, the default device will be used.
 
 ## Citing Matchmaker

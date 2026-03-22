@@ -17,13 +17,14 @@ from matchmaker.features.audio import (
     SAMPLE_RATE,
     ChromagramProcessor,
 )
+from matchmaker.io.queue import RECVQueue
+from matchmaker.io.stream import STREAM_END, Stream
 from matchmaker.utils.audio import (
     get_audio_devices,
     get_default_input_device_index,
     get_device_index_from_name,
 )
-from matchmaker.utils.misc import RECVQueue, set_latency_stats
-from matchmaker.utils.stream import STREAM_END, Stream
+from matchmaker.utils.misc import set_latency_stats
 
 CHANNELS = 1
 QUEUE_TIMEOUT = 10

@@ -16,7 +16,7 @@ STREAM_START = threading.Event  # call STREAM_START() to create per-instance eve
 STREAM_END = object()  # put into queue to signal end-of-stream
 
 if TYPE_CHECKING:  # pragma: no cover
-    from matchmaker.utils.processor import Processor
+    from matchmaker.features.processor import Processor
 
 
 class Stream(Thread):

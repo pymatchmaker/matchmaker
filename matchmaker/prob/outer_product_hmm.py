@@ -4,7 +4,8 @@ import progressbar
 from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
-from matchmaker.utils.misc import RECVQueue
+from matchmaker.io.queue import RECVQueue
+from matchmaker.io.stream import STREAM_END
 
 try:
     # import the compiled function (name depends on your .pyx)
@@ -285,15 +286,18 @@ class OuterProductHMM(OnlineAlignment):
         )
 
         self.current_state = 0
+        self.input_index = 0
+        self.perf_time = 0.0
         self._warping_path = []
         self._current_chord = np.zeros(88, dtype=int)
         self.patience = patience
-        self.state_probabilities = np.ones(self.n_states) / self.n_states
+        self.state_probabilities = np.zeros(self.n_states)
+        self.state_probabilities[0] = 1.0
         self.is_first_observation = True
 
     @property
-    def warping_path(self) -> NDArrayInt:
-        return (np.array(self._warping_path).T).astype(np.int32)
+    def warping_path(self) -> NDArray:
+        return np.array(self._warping_path).T
 
     def is_still_following(self) -> bool:
         if self.current_state is not None:
@@ -305,17 +309,22 @@ class OuterProductHMM(OnlineAlignment):
         self, input: tuple[np.ndarray, float], *args, **kwargs
     ) -> Optional[int]:
         pitch_obs, ioi = input
+        self.perf_time += ioi
 
         if ioi < IOI_THRESHOLD:
             self._current_chord = np.maximum(self._current_chord, pitch_obs)
-            return self.current_state
+            # Return None to signal "chord continuation" (no state advance);
+            # run() uses this to skip the patience counter.
+            return None
         else:
             self._current_chord = pitch_obs
             self.state_probabilities = self.viterbi_step(
                 self.state_probabilities, self._current_chord
             )
             self.current_state = np.argmax(self.state_probabilities)
-            self._warping_path.append(self.current_state)
+            score_beat = float(self.state_space[self.current_state])
+            self._warping_path.append((score_beat, self.perf_time))
+            self.input_index += 1
 
             return self.current_state
 
@@ -337,8 +346,10 @@ class OuterProductHMM(OnlineAlignment):
             b[i] = likelihood of observing `observation` at state i.
         """
 
-        b = self.b_table[:, 21:109] * observation
-        return b
+        log_b = np.log(np.maximum(self.b_table[:, 21:109], 1e-300))  # (N, 88)
+        log_em = log_b @ observation  # (N,): log-product over active pitches
+        log_em -= log_em.max()  # shift for numerical stability
+        return np.exp(log_em)  # (N,)
 
     # Viterbi update
     def viterbi_step(
@@ -392,8 +403,8 @@ class OuterProductHMM(OnlineAlignment):
                     local_max = val
             skip_contrib = self.r[i] * global_skip_max
 
-            new_probs[i] = sum(
-                b[i] * (skip_contrib if skip_contrib >= local_max else local_max)
+            new_probs[i] = b[i] * (
+                skip_contrib if skip_contrib >= local_max else local_max
             )
         if np.sum(new_probs) > 0:
             new_probs /= np.sum(new_probs)
@@ -417,8 +428,13 @@ class OuterProductHMM(OnlineAlignment):
             prev_state = self.current_state
 
             queue_input = self.queue.get()
+            if queue_input is STREAM_END:
+                break
             if queue_input is not None:
                 current_state = self(queue_input)
+                if current_state is None:
+                    # Chord continuation: no state advance, skip patience.
+                    continue
                 empty_counter = 0
                 if current_state == prev_state:
                     if same_state_counter < self.patience:
@@ -429,10 +445,8 @@ class OuterProductHMM(OnlineAlignment):
                     same_state_counter = 0
 
                 if verbose:
-                    # current_state may be None (no state yet); guard the update
-                    if current_state is not None:
-                        pbar.update(int(current_state))
-                yield current_state
+                    pbar.update(int(current_state))
+                yield float(self.state_space[current_state])
 
             if verbose:
                 pbar.finish()

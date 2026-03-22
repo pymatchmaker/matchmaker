@@ -9,8 +9,9 @@ from partitura.score import Part, Score, ScoreLike
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.io.audio import QUEUE_TIMEOUT
-from matchmaker.utils.misc import RECVQueue, set_latency_stats
-from matchmaker.utils.stream import STREAM_END
+from matchmaker.io.queue import RECVQueue
+from matchmaker.io.stream import STREAM_END
+from matchmaker.utils.misc import set_latency_stats
 
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]

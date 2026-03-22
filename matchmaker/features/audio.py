@@ -9,7 +9,7 @@ from typing import Dict, Optional, Tuple, Union
 import librosa
 import numpy as np
 
-from matchmaker.utils.processor import Processor
+from matchmaker.features.processor import Processor
 
 SAMPLE_RATE = 44100
 FRAME_RATE = 30

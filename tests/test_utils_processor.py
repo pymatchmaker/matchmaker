@@ -8,7 +8,7 @@ import unittest
 
 import numpy as np
 
-from matchmaker.utils.processor import DummyProcessor, Processor, ProcessorWrapper
+from matchmaker.features.processor import DummyProcessor, Processor, ProcessorWrapper
 
 RNG = np.random.RandomState(1984)
 

@@ -13,12 +13,14 @@ from partitura.performance import PerformanceLike, PerformedPart
 from partitura.score import Part, Score, ScoreLike, merge_parts
 from partitura.utils.music import performance_from_part
 
-from matchmaker.utils.processor import Processor
+from matchmaker.features.processor import Processor
 from matchmaker.utils.symbolic import (
     framed_midi_messages_from_performance,
     midi_messages_from_performance,
 )
 from matchmaker.utils.typing import InputMIDIFrame, NDArrayFloat
+
+CHORD_THRESHOLD: float = 0.035  # seconds; matches IOI_THRESHOLD in outer_product_hmm
 
 
 class PitchProcessor(Processor):
@@ -102,6 +104,11 @@ class PitchIOIProcessor(Processor):
     return_pitch_list: bool
         If True, it will return an array of MIDI pitch values, instead of
         a "piano roll" slice.
+
+    chord_threshold : float
+        Maximum gap (seconds) between note-ons to be considered part of
+        the same chord. Notes within this gap are accumulated and flushed
+        together. Set to 0 to disable chord grouping.
     """
 
     prev_time: Optional[float]
@@ -111,12 +118,40 @@ class PitchIOIProcessor(Processor):
         self,
         piano_range: bool = False,
         return_pitch_list: bool = False,
+        chord_threshold: float = CHORD_THRESHOLD,
     ) -> None:
         super().__init__()
         self.prev_time = None
         self.piano_range = piano_range
         self.return_pitch_list = return_pitch_list
         self.piano_shift = 21 if piano_range else 0
+        self.chord_threshold = chord_threshold
+        self._pending_pitch = np.zeros(128, dtype=np.float32)
+        self._pending_list: List[int] = []
+        self._pending_time: Optional[float] = None
+
+    def _flush(self) -> Tuple[NDArrayFloat, float]:
+        if self.prev_time is None:
+            ioi_obs = 0.0
+        else:
+            ioi_obs = self._pending_time - self.prev_time
+        self.prev_time = self._pending_time
+
+        if self.return_pitch_list:
+            result = (
+                np.array(self._pending_list, dtype=np.float32),
+                ioi_obs,
+            )
+        else:
+            pitch = self._pending_pitch
+            if self.piano_range:
+                pitch = pitch[21:109]
+            result = (pitch.copy(), ioi_obs)
+
+        self._pending_pitch = np.zeros(128, dtype=np.float32)
+        self._pending_list = []
+        self._pending_time = None
+        return result
 
     def __call__(
         self,
@@ -126,46 +161,37 @@ class PitchIOIProcessor(Processor):
             data, f_time = frame
         else:
             data = frame
-        # pitch_obs = []
-        pitch_obs = np.zeros(
-            128,
-            dtype=np.float32,
-        )
 
-        # TODO: Replace the for loop with list comprehension
-        pitch_obs_list = []
-        for msg, _ in data:
+        result = None
+        for msg, m_time in data:
             if (
                 getattr(msg, "type", "other") == "note_on"
                 and getattr(msg, "velocity", 0) > 0
             ):
-                pitch_obs[msg.note] = 1
-                pitch_obs_list.append(msg.note - self.piano_shift)
+                if (
+                    self._pending_time is not None
+                    and (m_time - self._pending_time) > self.chord_threshold
+                ):
+                    result = self._flush()
 
-        if pitch_obs.sum() > 0:
-            if self.prev_time is None:
-                # There is no IOI for the first observed note
-                ioi_obs = 0.0
-            else:
-                ioi_obs = f_time - self.prev_time
-            self.prev_time = f_time
-            if self.piano_range:
-                pitch_obs = pitch_obs[21:109]
+                self._pending_pitch[msg.note] = 1
+                self._pending_list.append(msg.note - self.piano_shift)
+                if self._pending_time is None:
+                    self._pending_time = m_time
 
-            if self.return_pitch_list:
-                return (
-                    np.array(
-                        pitch_obs_list,
-                        dtype=np.float32,
-                    ),
-                    ioi_obs,
-                )
-            return (pitch_obs, ioi_obs)
-        else:
-            return None
+        return result
+
+    def flush_remaining(self) -> Optional[Tuple[NDArrayFloat, float]]:
+        """Flush any remaining pending notes (call at end of stream)."""
+        if self._pending_time is not None:
+            return self._flush()
+        return None
 
     def reset(self) -> None:
-        pass
+        self.prev_time = None
+        self._pending_pitch = np.zeros(128, dtype=np.float32)
+        self._pending_list = []
+        self._pending_time = None
 
 
 class PianoRollProcessor(Processor):
@@ -232,6 +258,84 @@ class PianoRollProcessor(Processor):
     def reset(self) -> None:
         self.piano_roll_slices = []
         self.active_notes = dict()
+
+
+class OnsetPianoRollProcessor(Processor):
+    """Binary pianoroll per chord onset, with streaming chord grouping.
+
+    Accumulates note-on events and flushes a chord vector when the time
+    gap between consecutive note-ons exceeds ``chord_threshold``.
+
+    Returns ``(pianoroll, timestamp)`` when a chord is flushed, ``None``
+    while accumulating.
+
+    Parameters
+    ----------
+    piano_range : bool
+        If True, 88 keys (21-108). Otherwise 128.
+    chord_threshold : float
+        Maximum gap (seconds) between note-ons in the same chord.
+    """
+
+    def __init__(
+        self,
+        piano_range: bool = True,
+        chord_threshold: float = CHORD_THRESHOLD,
+        dtype: type = np.float32,
+    ):
+        Processor.__init__(self)
+        self.piano_range = piano_range
+        self.chord_threshold = chord_threshold
+        self.dtype = dtype
+        self._dim = 88 if piano_range else 128
+        self._offset = 21 if piano_range else 0
+        self._pending_notes: List[int] = []
+        self._pending_time: Optional[float] = None
+
+    def _flush(self) -> Tuple[np.ndarray, float]:
+        vec = np.zeros(self._dim, dtype=self.dtype)
+        for note in self._pending_notes:
+            idx = note - self._offset
+            if 0 <= idx < self._dim:
+                vec[idx] = 1.0
+        t = self._pending_time
+        self._pending_notes = []
+        self._pending_time = None
+        return (vec, t)
+
+    def __call__(self, frame: InputMIDIFrame) -> Optional[Tuple[np.ndarray, float]]:
+        if isinstance(frame, tuple):
+            data, f_time = frame
+        else:
+            data = frame
+            f_time = 0.0
+
+        result = None
+        for msg, m_time in data:
+            if msg.type == "note_on" and msg.velocity > 0:
+                # Flush previous chord if gap exceeded
+                if (
+                    self._pending_time is not None
+                    and (m_time - self._pending_time) > self.chord_threshold
+                    and self._pending_notes
+                ):
+                    result = self._flush()
+
+                self._pending_notes.append(msg.note)
+                if self._pending_time is None:
+                    self._pending_time = m_time
+
+        return result
+
+    def flush_remaining(self) -> Optional[Tuple[np.ndarray, float]]:
+        """Flush any remaining pending notes (call at end of stream)."""
+        if self._pending_notes:
+            return self._flush()
+        return None
+
+    def reset(self) -> None:
+        self._pending_notes = []
+        self._pending_time = None
 
 
 class PitchClassPianoRollProcessor(Processor):
@@ -351,6 +455,89 @@ def compute_features_from_symbolic(
         outputs.append(output)
 
     return outputs
+
+
+# ---------------------------------------------------------------------------
+# Onset-level features (for event-level OLTW)
+# ---------------------------------------------------------------------------
+
+
+def onset_pianoroll(
+    note_array: NDArray,
+    onset_key: str = "onset_beat",
+    piano_range: bool = True,
+) -> Tuple[NDArray, NDArray]:
+    """One binary pitch vector per unique onset.
+
+    Parameters
+    ----------
+    note_array : np.ndarray
+        Structured array with "pitch" and ``onset_key`` fields.
+    onset_key : str
+        Column name for onset times ("onset_beat" or "onset_sec").
+    piano_range : bool
+        If True, 88 keys (MIDI 21-108). Otherwise 128.
+
+    Returns
+    -------
+    features : np.ndarray [N_onsets, D]
+    onsets : np.ndarray [N_onsets]
+    """
+    dim = 88 if piano_range else 128
+    offset = 21 if piano_range else 0
+    onsets = np.unique(note_array[onset_key])
+    features = np.zeros((len(onsets), dim), dtype=np.float32)
+    for i, t in enumerate(onsets):
+        for p in note_array["pitch"][note_array[onset_key] == t]:
+            idx = p - offset
+            if 0 <= idx < dim:
+                features[i, idx] = 1.0
+    return features, onsets
+
+
+def group_onsets(
+    note_array: NDArray,
+    threshold: float = CHORD_THRESHOLD,
+    piano_range: bool = True,
+) -> Tuple[NDArray, NDArray]:
+    """Group note onsets within ``threshold`` seconds into chords.
+
+    Parameters
+    ----------
+    note_array : np.ndarray
+        Structured array with "pitch" and "onset_sec" fields.
+    threshold : float
+        Maximum time gap (seconds) to merge into one chord.
+    piano_range : bool
+        If True, 88 keys. Otherwise 128.
+
+    Returns
+    -------
+    features : np.ndarray [N_chords, D]
+    times : np.ndarray [N_chords]
+        Mean onset time per chord group.
+    """
+    dim = 88 if piano_range else 128
+    offset = 21 if piano_range else 0
+    onsets = note_array["onset_sec"]
+    si = np.argsort(onsets)
+    groups, cur = [], [si[0]]
+    for i in range(1, len(si)):
+        if onsets[si[i]] - onsets[si[i - 1]] < threshold:
+            cur.append(si[i])
+        else:
+            groups.append(cur)
+            cur = [si[i]]
+    groups.append(cur)
+    features = np.zeros((len(groups), dim), dtype=np.float32)
+    times = np.zeros(len(groups))
+    for i, g in enumerate(groups):
+        times[i] = np.mean(onsets[g])
+        for idx in g:
+            p = note_array["pitch"][idx] - offset
+            if 0 <= p < dim:
+                features[i, p] = 1.0
+    return features, times
 
 
 if __name__ == "__main__":  # pragma: no cover
