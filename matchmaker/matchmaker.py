@@ -15,6 +15,7 @@ from matchmaker.dp import (
     OnlineTimeWarpingArztFrame,
     OnlineTimeWarpingDixonEvent,
     OnlineTimeWarpingDixonFrame,
+    SoftOnlineTimeWarping,
 )
 from matchmaker.features.audio import (
     FRAME_RATE,
@@ -65,7 +66,7 @@ DEFAULT_METHODS = {
     "audio": "arzt",
     "midi": "outerhmm",
 }
-AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm", "outerhmm"]
+AVAILABLE_METHODS = ["arzt", "dixon", "hmm", "pthmm", "outerhmm", "oltw_soft"]
 OLTW_METHODS = {"arzt", "dixon"}
 KWARGS = {
     "audio": {
@@ -83,6 +84,11 @@ KWARGS = {
             "sample_rate": 16000,
             "frame_rate": 25,
             "s_j": 0.0,
+        },
+        "oltw_soft": {
+            "gamma": 0.05,
+            "prior_lambda": 0.0,
+            "w_horizontal": 5.0,
         },
     },
     "midi": {
@@ -320,7 +326,7 @@ class Matchmaker(object):
         queue = self.stream.queue
         state_space = np.unique(self.score_part.note_array()["onset_beat"])
 
-        if method in OLTW_METHODS:
+        if method in {"arzt", "dixon"}:
             self.ppart = partitura.utils.music.performance_from_part(
                 self.score_part, bpm=self.tempo
             )
@@ -343,6 +349,27 @@ class Matchmaker(object):
                 ref_to_state_time_map=rtm,
                 ref_frame_to_beat=self._build_ref_frame_to_beat(),
                 **self.config,
+            )
+        elif method == "oltw_soft":
+            return SoftOnlineTimeWarping(
+                reference_features=ref,
+                queue=queue,
+                frame_rate=self.frame_rate,
+                gamma=self.config.pop("gamma", 1.0),
+                ref_frame_to_beat=self._build_ref_frame_to_beat(),
+                **{
+                    k: v
+                    for k, v in self.config.items()
+                    if k in (
+                        "prior_lambda",
+                        "prior_sigma",
+                        "process_var",
+                        "obs_var",
+                        "window_size",
+                        "step_size",
+                        "w_horizontal",
+                    )
+                },
             )
         elif method == "outerhmm":
             return AudioOuterProductHMM(
@@ -425,7 +452,7 @@ class Matchmaker(object):
                 self.score_part, self.performance_file, self.tempo
             )
 
-        if self.input_type == "audio" and self.method in OLTW_METHODS:
+        if self.input_type == "audio" and self.method in OLTW_METHODS | {"oltw_soft"}:
             score_audio = generate_score_audio(
                 self.score_part, self.tempo, self.sample_rate
             ).astype(np.float32)

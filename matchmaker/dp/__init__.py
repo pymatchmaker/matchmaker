@@ -18,3 +18,4 @@ from .oltw_dixon import (
     OnlineTimeWarpingDixonEvent,
     OnlineTimeWarpingDixonFrame,
 )
+from .oltw_soft import SoftOnlineTimeWarping

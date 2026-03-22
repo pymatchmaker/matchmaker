@@ -445,7 +445,8 @@ class OuterProductHMM(OnlineAlignment):
                     same_state_counter = 0
 
                 if verbose:
-                    pbar.update(int(current_state))
+                    if current_state is not None:
+                        pbar.update(int(current_state))
                 yield float(self.state_space[current_state])
 
             if verbose:

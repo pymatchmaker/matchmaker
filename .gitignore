@@ -168,6 +168,7 @@ cython_debug/
 
 # Matchmaker
 matchmaker/dp/dtw_loop.c
+matchmaker/dp/soft_dtw_loop.c
 matchmaker/utils/distances.c
 tests/dev*.py
 tests/tmp/
@@ -199,4 +200,3 @@ notebook/
 .claude/
 src/
 scripts/
-
