@@ -38,7 +38,7 @@ conda create -n matchmaker python=3.12
 conda activate matchmaker
 
 # Go to matchmaker directory
-cd ../matchmaker
+cd matchmaker
 
 # Install matchmaker in editable mode
 pip install -e ."[dev]"
