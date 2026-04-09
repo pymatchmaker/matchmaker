@@ -86,17 +86,18 @@ KWARGS = {
             "s_j": 0.0,
         },
         "oltw_soft": {
+            "processor": "chroma",
+            "distance_func": "Euclidean",
             "gamma": 0.05,
             "w_horizontal": 1.0,
             "w_vertical": 1.0,
-            "w_diagonal": 2.0,
-            "prior_lambda": 0.0,
-            "prior_sigma_frames": 12.0,
+            "w_diagonal": 1.5,
             "process_var": 0.02,
             "obs_var": 3.0,
             "init_tempo": 1.0,
             "window_size": 10,
-            "max_run_count": 3,
+            "step_size": 3,
+            "prior_lambda": 0.015,
         },
     },
     "midi": {
@@ -370,17 +371,16 @@ class Matchmaker(object):
                     for k, v in self.config.items()
                     if k
                     in (
-                        "prior_lambda",
-                        "prior_sigma_frames",
                         "process_var",
                         "obs_var",
                         "init_tempo",
                         "window_size",
-                        "max_run_count",
+                        "step_size",
                         "w_horizontal",
                         "w_vertical",
                         "w_diagonal",
                         "distance_func",
+                        "prior_lambda",
                     )
                 },
             )
