@@ -8,10 +8,12 @@ from matchmaker import Matchmaker
 
 ROOT_DIR = Path(__file__).parent
 SCORE_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.musicxml"
-PERFORMANCE_AUDIO_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.mp3"
+PERFORMANCE_AUDIO_FILE = (
+    ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1_tempo.mp3"
+)
 PERFORMANCE_MIDI_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.mid"
 ANNOTATION_FILE = (
-    ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1_note_annotations.txt"
+    ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1_tempo_note_annotations.txt"
 )
 
 
