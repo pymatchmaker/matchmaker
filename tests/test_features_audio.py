@@ -11,6 +11,7 @@ import librosa
 import numpy as np
 from partitura.utils.music import midi_pitch_to_frequency, note_name_to_midi_pitch
 
+from matchmaker import EXAMPLE_PIECES
 from matchmaker.features.audio import (
     ChromagramIOIProcessor,
     ChromagramProcessor,
@@ -174,7 +175,7 @@ class TestAudioProcessors(unittest.TestCase):
 class TestComputeFeaturesFromAudio(unittest.TestCase):
     def test_compute_features_from_audio_input_str(self):
         features = compute_features_from_audio(
-            ref_info=os.path.join(CURRENT_PATH, "resources", "Bach-fugue_bwv_858.mp3")
+            ref_info=EXAMPLE_PIECES["bach_fugue"]["audio"]
         )
 
         self.assertIsInstance(features, np.ndarray)

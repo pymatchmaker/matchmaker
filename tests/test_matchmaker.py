@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from matchmaker import Matchmaker
+from matchmaker import EXAMPLE_PIECES, Matchmaker
 from matchmaker.dp import OnlineTimeWarpingArzt
 from matchmaker.dp.oltw_dixon import OnlineTimeWarpingDixon
 from matchmaker.features.audio import ChromagramProcessor
@@ -25,31 +25,17 @@ warnings.filterwarnings("ignore", module="librosa")
 class TestMatchmaker(unittest.TestCase):
     def setUp(self):
         # Set up paths to test files
-        self.score_file = "./matchmaker/assets/simple_mozart_k265_var1.musicxml"
-        self.performance_file_audio = "./matchmaker/assets/simple_mozart_k265_var1.mp3"
-        self.performance_file_midi = "./matchmaker/assets/simple_mozart_k265_var1.mid"
-        self.performance_file_annotations = (
-            "./matchmaker/assets/simple_mozart_k265_var1_note_annotations.txt"
-        )
-        self.performance_file_beat_annotations = (
-            "./matchmaker/assets/simple_mozart_k265_var1_beat_annotations.txt"
-        )
+        self.score_file = EXAMPLE_PIECES["bach_fugue"]["score"]
+        self.performance_file_audio = EXAMPLE_PIECES["bach_fugue"]["audio"]
+        self.performance_file_midi = EXAMPLE_PIECES["bach_fugue"]["midi"]
+        self.performance_file_annotations = EXAMPLE_PIECES["bach_fugue"]["annotations"]
+        self.performance_file_beat_annotations = EXAMPLE_PIECES["bach_fugue"][
+            "beat_annotations"
+        ]
 
         self.test_datasets = [
-            {
-                "name": "simple_mozart_k265_var1",
-                "score": "./matchmaker/assets/simple_mozart_k265_var1.musicxml",
-                "audio": "./matchmaker/assets/simple_mozart_k265_var1.mp3",
-                "midi": "./matchmaker/assets/simple_mozart_k265_var1.mid",
-                "annotations": "./matchmaker/assets/simple_mozart_k265_var1_note_annotations.txt",
-            },
-            {
-                "name": "bach_fugue_bwv_858",
-                "score": "./tests/resources/Bach-fugue_bwv_858.musicxml",
-                "audio": "./tests/resources/Bach-fugue_bwv_858.mp3",
-                "midi": "./tests/resources/Bach-fugue_bwv_858.mid",
-                "annotations": "./tests/resources/Bach-fugue_bwv_858_note_annotations.txt",
-            },
+            {"name": "simple_mozart_k265_var1", **EXAMPLE_PIECES["simple_mozart"]},
+            {"name": "bach_fugue_bwv_858", **EXAMPLE_PIECES["bach_fugue"]},
         ]
 
     def test_matchmaker_audio_init(self):
@@ -135,8 +121,8 @@ class TestMatchmaker(unittest.TestCase):
     def test_matchmaker_audio_run_with_evaluation_cqt(self):
         # Given: a Matchmaker instance with audio input
         mm = Matchmaker(
-            score_file=self.score_file,
-            performance_file=self.performance_file_audio,
+            score_file=EXAMPLE_PIECES["simple_mozart"]["score"],
+            performance_file=EXAMPLE_PIECES["simple_mozart"]["audio"],
             wait=False,
             input_type="audio",
             feature_type="cqt",
@@ -150,10 +136,8 @@ class TestMatchmaker(unittest.TestCase):
             mm._has_run = True
 
         results = mm.run_evaluation(
-            self.performance_file_annotations,
-            debug=True,
-            save_dir=Path("./tests/results"),
-            run_name="test_matchmaker_audio_run_with_evaluation_cqt",
+            EXAMPLE_PIECES["simple_mozart"]["annotations"],
+            debug=False,
         )
         print(f"RESULTS: {json.dumps(results, indent=4)}")
 
@@ -177,8 +161,7 @@ class TestMatchmaker(unittest.TestCase):
             mm._has_run = True
 
         results = mm.run_evaluation(
-            self.performance_file_annotations,
-            domain="score",
+            self.performance_file_annotations, domain="score", debug=False
         )
         print(f"RESULTS: {json.dumps(results, indent=4)}")
 
@@ -197,7 +180,7 @@ class TestMatchmaker(unittest.TestCase):
 
         # When: calling run_evaluation before run()
         with self.assertRaises(ValueError):
-            mm.run_evaluation(self.performance_file_annotations)
+            mm.run_evaluation(self.performance_file_annotations, debug=False)
 
     def test_matchmaker_audio_dixon_init(self):
         # Given: a Matchmaker instance with audio input and Dixon method
@@ -254,15 +237,15 @@ class TestMatchmaker(unittest.TestCase):
         for method in ["arzt", "dixon", "audio_outerhmm"]:
             with self.subTest(method=method):
                 mm = Matchmaker(
-                    score_file=self.score_file,
-                    performance_file=self.performance_file_audio,
+                    score_file=EXAMPLE_PIECES["simple_mozart"]["score"],
+                    performance_file=EXAMPLE_PIECES["simple_mozart"]["audio"],
                     input_type="audio",
                     method=method,
                 )
                 list(mm.run(verbose=False))
 
                 results = mm.run_evaluation(
-                    self.performance_file_annotations,
+                    EXAMPLE_PIECES["simple_mozart"]["annotations"], debug=False
                 )
                 self.assertIn("rtf", results)
                 self.assertGreater(results["rtf"], 0)

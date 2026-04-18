@@ -4,36 +4,41 @@
 Matchmaker is a library for real-time music alignment
 """
 
-import pkg_resources
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
-from . import dp, features, io, prob, utils, external
+from . import dp, external, features, io, prob, utils
 from .matchmaker import *
 
 __all__ = ["dp", "features", "io", "prob", "utils"]
 
 try:
-    import pkg_resources
-
-    __version__ = pkg_resources.get_distribution("pymatchmaker").version
-except Exception:  # pragma: no cover
+    __version__ = version("pymatchmaker")
+except PackageNotFoundError:  # pragma: no cover
     __version__ = "0.2.1"
 
-EXAMPLE_SCORE = pkg_resources.resource_filename(
-    "matchmaker",
-    "assets/mozart_k265_var1.musicxml",
-)
+ASSETS_DIR = Path(__file__).parent / "assets"
 
-EXAMPLE_PERFORMANCE = pkg_resources.resource_filename(
-    "matchmaker",
-    "assets/mozart_k265_var1.mid",
-)
+EXAMPLE_PIECES = {
+    "simple_mozart": {
+        "score": str(ASSETS_DIR / "simple_mozart_k265_var1.musicxml"),
+        "midi": str(ASSETS_DIR / "simple_mozart_k265_var1.mid"),
+        "audio": str(ASSETS_DIR / "simple_mozart_k265_var1.mp3"),
+        "match": str(ASSETS_DIR / "simple_mozart_k265_var1.match"),
+        "annotations": str(ASSETS_DIR / "simple_mozart_k265_var1_note_annotations.txt"),
+    },
+    "bach_fugue": {
+        "score": str(ASSETS_DIR / "Bach-fugue_bwv_858.musicxml"),
+        "midi": str(ASSETS_DIR / "Bach-fugue_bwv_858.mid"),
+        "audio": str(ASSETS_DIR / "Bach-fugue_bwv_858.mp3"),
+        "match": str(ASSETS_DIR / "Bach-fugue_bwv_858.match"),
+        "annotations": str(ASSETS_DIR / "Bach-fugue_bwv_858_note_annotations.txt"),
+        "beat_annotations": str(ASSETS_DIR / "Bach-fugue_bwv_858_beat_annotations.txt"),
+    },
+}
 
-EXAMPLE_MATCH = pkg_resources.resource_filename(
-    "matchmaker",
-    "assets/mozart_k265_var1.match",
-)
-
-EXAMPLE_AUDIO = pkg_resources.resource_filename(
-    "matchmaker",
-    "assets/mozart_k265_var1.mp3",
-)
+# Legacy constants
+EXAMPLE_SCORE = str(ASSETS_DIR / "mozart_k265_var1.musicxml")
+EXAMPLE_PERFORMANCE = str(ASSETS_DIR / "mozart_k265_var1.mid")
+EXAMPLE_MATCH = str(ASSETS_DIR / "mozart_k265_var1.match")
+EXAMPLE_AUDIO = str(ASSETS_DIR / "mozart_k265_var1.mp3")

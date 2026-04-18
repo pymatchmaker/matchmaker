@@ -618,6 +618,7 @@ class Matchmaker(object):
         gt_interp = scipy.interpolate.interp1d(
             score_annots_beats[valid_gt],
             perf_annots[valid_gt],
+            kind="linear",
             bounds_error=False,
             fill_value=np.nan,
         )

@@ -10,7 +10,7 @@ import numpy as np
 import partitura as pt
 from hiddenmarkov import CategoricalObservationModel, ConstantTransitionModel
 
-from matchmaker import EXAMPLE_MATCH
+from matchmaker import EXAMPLE_MATCH, EXAMPLE_PIECES
 from matchmaker.features.midi import PitchIOIProcessor, PitchProcessor
 from matchmaker.prob.hmm import (
     BaseHMM,
@@ -190,12 +190,10 @@ class TestPitchIOIHMM(unittest.TestCase):
 
 class TestBernoulliGaussianPitchIOIHMM(unittest.TestCase):
     def test_init(self):
-        self.score_file = "./tests/resources/Bach-fugue_bwv_858.musicxml"
-        self.performance_file_audio = "./tests/resources/Bach-fugue_bwv_858.mp3"
-        self.performance_file_midi = "./tests/resources/Bach-fugue_bwv_858.mid"
-        self.performance_file_annotations = (
-            "./tests/resources/Bach-fugue_bwv_858_annotations.txt"
-        )
+        self.score_file = EXAMPLE_PIECES["bach_fugue"]["score"]
+        self.performance_file_audio = EXAMPLE_PIECES["bach_fugue"]["audio"]
+        self.performance_file_midi = EXAMPLE_PIECES["bach_fugue"]["midi"]
+        self.performance_file_annotations = EXAMPLE_PIECES["bach_fugue"]["annotations"]
 
         self.performance = process_midi_offline(
             perf_info=self.performance_file_midi,

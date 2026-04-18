@@ -4,15 +4,14 @@ import json
 from _queue import Empty
 from pathlib import Path
 
-from matchmaker import Matchmaker
+from matchmaker import EXAMPLE_PIECES, Matchmaker
 
 ROOT_DIR = Path(__file__).parent
-SCORE_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.musicxml"
-PERFORMANCE_AUDIO_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.mp3"
-PERFORMANCE_MIDI_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.mid"
-ANNOTATION_FILE = (
-    ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1_note_annotations.txt"
-)
+_piece = EXAMPLE_PIECES["simple_mozart"]
+SCORE_FILE = Path(_piece["score"])
+PERFORMANCE_AUDIO_FILE = Path(_piece["audio"])
+PERFORMANCE_MIDI_FILE = Path(_piece["midi"])
+ANNOTATION_FILE = Path(_piece["annotations"])
 
 
 def select_performance_file(input_mode):
