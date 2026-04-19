@@ -13,7 +13,6 @@ except Exception:
     viterbi_step_cy = None
 
 import numpy as np
-
 from partitura.score import Part, Score, ScoreLike
 
 NDArrayFloat = NDArray[np.float32]
@@ -216,6 +215,7 @@ class OuterProductHMM(OnlineAlignment):
         r: Optional[np.ndarray] = None,
         other_prob: float = 1e-6,
         patience: int = 10,
+        **kwargs,
     ) -> None:
         """
         Outer-product Hidden Markov Model for score following.

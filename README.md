@@ -14,7 +14,7 @@ The full documentation for matchmaker is available online at [readthedocs.org](h
 
 ### Prerequisites
 
-- Available Python version: 3.12
+- Available Python version: 3.11, 3.12, 3.13
 - [Fluidsynth](https://www.fluidsynth.org/)
 - [PortAudio](http://www.portaudio.com/)
 

@@ -8,43 +8,42 @@ from numpy.typing import NDArray
 from partitura.score import Part, Score, ScoreLike
 
 from matchmaker.base import OnlineAlignment
-from matchmaker.features.audio import QUEUE_TIMEOUT
+from matchmaker.io.audio import QUEUE_TIMEOUT
 from matchmaker.utils.misc import RECVQueue, set_latency_stats
+from matchmaker.utils.stream import STREAM_END
 
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]
 
-DEFAULT_PITCH_ERROR_PROBS = {
-    "correct_pitch_prob": 0.9497,
-    "semi_tone_error_prob": 0.0145 / 2.0,
-    "whole_tone_error_prob": 0.0224 / 2.0,
-    "octave_error_prob": 0.0047 / 2.0,
-    "within_one_octave_error_prob": 0.0086 / 9.0 / 2.0,
-}
-
-# DEFAULT_TRANSITIONS = [
-#     (1, 1.0),  # normal (i→i+1)
-#     (2, 1e-50),  # deletion (i→i+2), HHMMState_simple.hpp: log10(-50)
-# ]
+# Nakamura et al. 2016 Section IV-B experimental parameters.
+# Neighbourhood transitions a^{(nbh)}_{j,i} from nakamura_data.py:
+#   These are the "small transition probabilities" for the banded structure.
+#   Paper: a_{i,i} = 0 (self-transition handled by bottom HMM a00),
+#          a_{i,i+2} = 1e-50 (deletion, effectively 0).
+# We use the empirical values from [13] (Nakamura JNMR 2014).
 DEFAULT_TRANSITIONS = [
-    (-3, 0.001),
-    (-2, 0.001),
-    (-1, 0.002),
-    (0, 0.01342),
-    (1, 0.96),
-    (2, 0.01),
-    (3, 0.002),
+    (-3, 0.00509),
+    (-2, 0.00516),
+    (-1, 0.00886),
+    (0, 0.01342),  # insertion (staying at same top state)
+    (1, 0.94531),  # normal forward progression
+    (2, 0.00610),  # deletion (skip one note)
+    (3, 0.00073),
 ]
 
 DEFAULT_D1 = 3
 DEFAULT_D2 = 3
 
 IOI_THRESHOLD = 0.035  # seconds
+SUSTAINED_DECAY: float = 0.3  # exponential decay rate for sustained notes
 
 _FLUX_EXIT_BOOST: float = 1.0
 _OTHER_PROB: float = 1e-6
-_PAUSE_ENTRY_PROB: float = 0.01  # probability of entering pause state from sound
-_PAUSE_DURATION_SEC: float = 0.5
+# Paper IV-B:
+#   a_{0,1}^{(i)} = 1e-100  (pause entry: almost never enter pause)
+#   a_{1,1}^{(i)} = 0.999   (pause self-transition: once in pause, stay)
+_PAUSE_ENTRY_PROB: float = 1e-100
+_PAUSE_SELF_TRANSITION: float = 0.999
 _PAUSE_EMISSION_MAX: float = 1e-3
 
 
@@ -56,27 +55,41 @@ def _preprocess_obs(obs: np.ndarray) -> np.ndarray:
     return obs.reshape(-1)
 
 
-def get_chords_from_score(
+def get_weighted_chords_from_score(
     score: ScoreLike,
-    return_unique_onsets: bool = False,
-) -> List[set]:
+    decay: float = SUSTAINED_DECAY,
+) -> tuple[list[dict[int, float]], np.ndarray]:
+    """Get weighted chords at each unique onset.
+
+    Onset notes get weight 1.0, sustained notes get exp(-decay * beats_elapsed).
+
+    Returns (chords, unique_onsets) where each chord is a dict {pitch: weight}.
+    """
     if isinstance(score, (Score, Part)):
         note_array = score.note_array()
     if isinstance(score, np.ndarray):
         note_array = score
-        if "onset_beat" not in note_array.dtype.names:
-            raise ValueError("`score` is not a valid note array")
 
     unique_onsets = np.unique(note_array["onset_beat"])
-    unique_onset_idxs = [
-        np.where(note_array["onset_beat"] == uo)[0] for uo in unique_onsets
-    ]
-    chords = [set(note_array["pitch"][ui]) for ui in unique_onset_idxs]
+    onsets = note_array["onset_beat"]
+    durations = note_array["duration_beat"]
+    pitches = note_array["pitch"]
 
-    if return_unique_onsets:
-        return chords, unique_onsets
-    else:
-        return chords
+    chords = []
+    for uo in unique_onsets:
+        starting = onsets == uo
+        sustained = (onsets < uo) & (onsets + durations > uo)
+        chord = {}
+        for p in pitches[starting]:
+            chord[int(p)] = 1.0
+        for idx in np.where(sustained)[0]:
+            ip = int(pitches[idx])
+            if ip not in chord:
+                elapsed = float(uo - onsets[idx])
+                chord[ip] = float(np.exp(-decay * elapsed))
+        chords.append(chord)
+
+    return chords, unique_onsets
 
 
 def compute_transition_matrix(
@@ -127,11 +140,13 @@ class AudioOuterProductHMM:
         reference_features: np.ndarray,
         queue: Optional[RECVQueue] = None,
         transitions: Optional[List[tuple[int, float]]] = None,
-        pitch_error_probs: Optional[dict[str, float]] = None,
         patience: int = 0,
         tempo: float = 120.0,
         sample_rate: int = 16000,
         hop_length: int = 320,
+        s_j: float = 1e-5,
+        r_i: Optional[np.ndarray] = None,
+        **kwargs,
     ) -> None:
         self.reference_features = reference_features
         OnlineAlignment.__init__(
@@ -140,49 +155,28 @@ class AudioOuterProductHMM:
         )
 
         self.queue = queue
-        chords, unique_onsets = get_chords_from_score(
-            self.reference_features, return_unique_onsets=True
+        weighted_chords, unique_onsets = get_weighted_chords_from_score(
+            self.reference_features,
         )
-        self.n_states = len(chords)
+        self.n_states = len(weighted_chords)
         self.state_space = unique_onsets
-        # Harmonic mask includes fundamental + harmonics (II-C)
         self.chord_harmonic_mask = np.zeros((self.n_states, 88), dtype=float)
-        for i, chord in enumerate(chords):
-            # build harmonic mask for this chord (in 0..87 pitch-index domain)
-            # offsets are approximate: octave=+12, 12th≈+19, 2oct=+24, etc.
-            harm = [
-                (0, 1.0),
-                (12, 0.7),
-                (19, 0.5),
-                (24, 0.4),
-                (28, 0.3),
-                (31, 0.25),
-                (34, 0.2),
-            ]
-            for p in chord:
+        for i, chord in enumerate(weighted_chords):
+            for p, note_weight in chord.items():
                 if not (21 <= p <= 108):
                     continue
                 base = int(p - 21)
-                for off, w in harm:
-                    idx = base + int(off)
-                    if 0 <= idx < 88:
-                        self.chord_harmonic_mask[i, idx] += float(w)
+                self.chord_harmonic_mask[i, base] += note_weight
             s = float(np.sum(self.chord_harmonic_mask[i]))
             if s > 0:
                 self.chord_harmonic_mask[i] /= s
         self.transitions = (
             transitions if transitions is not None else DEFAULT_TRANSITIONS
         )
-        self.pitch_error_probs = (
-            pitch_error_probs
-            if pitch_error_probs is not None
-            else DEFAULT_PITCH_ERROR_PROBS
-        )
         self.other_prob = _OTHER_PROB
         self.sample_rate = int(sample_rate)
         self.hop_length = int(hop_length)
         self.pause_entry_prob = _PAUSE_ENTRY_PROB
-        self.pause_duration_sec = _PAUSE_DURATION_SEC
         self.pause_emission_max = _PAUSE_EMISSION_MAX
 
         # Transition setup with banded structure
@@ -202,7 +196,23 @@ class AudioOuterProductHMM:
                 row_sums = self.alpha.sum(axis=1, keepdims=True)
             self.alpha = self.alpha / row_sums
 
-        self.current_state = 0
+        # Repeat/skip factorization (Nakamura Eq.11):
+        #   a_{j,i} = a^{(nbh)}_{j,i} + s_j * r_i
+        # s_j: probability of stopping at event j before a repeat/skip
+        # r_i: probability of resuming at event i after a repeat/skip
+        self.S = np.full(self.n_states, float(s_j), dtype=float)
+        if r_i is not None:
+            self.r = np.asarray(r_i, dtype=float)
+        else:
+            self.r = np.ones(self.n_states, dtype=float) / self.n_states
+
+        # Renormalize alpha to account for s_j mass:
+        # Σ_i a_{j,i} = Σ_i a^{(nbh)}_{j,i} + s_j * Σ_i r_i = 1
+        # => Σ_i a^{(nbh)}_{j,i} = 1 - s_j  (since Σ_i r_i = 1)
+        if s_j > 0:
+            self.alpha = self.alpha * (1.0 - self.S[:, None])
+
+        self.current_state_index = 0
         self._warping_path = []
         self._current_chord = np.zeros(88, dtype=int)
         self.patience = int(patience)
@@ -223,13 +233,8 @@ class AudioOuterProductHMM:
             tempo=tempo,
             frame_rate=frame_rate,
         )
-        self.a11 = float(
-            np.clip(
-                self._pause_self_transition_prob(self.pause_duration_sec, frame_rate),
-                0.0,
-                1.0,
-            )
-        )
+        # Paper IV-B: a_{1,1}^{(i)} = 0.999 (pause self-transition)
+        self.a11 = float(_PAUSE_SELF_TRANSITION)
         # Pause entry prob a01 (II-E)
         move_prob = 1.0 - self.a00
         p_pause = float(np.clip(self.pause_entry_prob, 0.0, 1.0))
@@ -243,9 +248,21 @@ class AudioOuterProductHMM:
         self.e0 = np.clip(1.0 - self.a00 - self.a01, 1e-10, 1.0)
         self.e1 = float(np.clip(1.0 - self.a11, 1e-10, 1.0))
 
+        # Precompute alpha diagonals and sliding window indices for vectorized forward_step
+        self._alpha_diags = []
+        for d in range(-self.D2, self.D1 + 1):
+            self._alpha_diags.append(np.diagonal(self.alpha, offset=-d).copy())
+        self._j_starts = np.maximum(0, np.arange(self.n_states) - self.D2)
+        self._j_ends = np.minimum(self.n_states, np.arange(self.n_states) + self.D1 + 1)
+
     @property
-    def warping_path(self) -> NDArrayInt:
-        return (np.array(self._warping_path).T).astype(np.int32)
+    def warping_path(self) -> np.ndarray:
+        return np.array(self._warping_path).T
+
+    @property
+    def current_position(self) -> float:
+        """Current score position in beats."""
+        return float(self.state_space[self.current_state_index])
 
     @staticmethod
     def _pause_self_transition_prob(
@@ -286,8 +303,8 @@ class AudioOuterProductHMM:
         return np.clip(1.0 - 1.0 / d_i, 1e-6, 1.0 - 1e-6)
 
     def is_still_following(self) -> bool:
-        if self.current_state is not None:
-            return self.current_state <= self.n_states - 1
+        if self.current_state_index is not None:
+            return self.current_state_index <= self.n_states - 1
         return False
 
     def __call__(self, input, *args, **kwargs) -> Optional[int]:
@@ -321,10 +338,12 @@ class AudioOuterProductHMM:
         top_scores = probs[0::2] + probs[1::2]
         new_top = int(np.argmax(top_scores))
 
-        self.current_state = new_top
-        self._warping_path.append((self.current_state, self.input_index))
+        self.current_state_index = new_top
+        self._warping_path.append(
+            (float(self.state_space[self.current_state_index]), self.input_index)
+        )
         self.input_index += 1
-        return self.current_state
+        return self.current_state_index
 
     def compute_obs_likelihood(
         self,
@@ -390,14 +409,31 @@ class AudioOuterProductHMM:
         prev_sound = np.asarray(prev_probs[0::2], dtype=float)
         prev_pause = np.asarray(prev_probs[1::2], dtype=float)
 
-        # Emission
-        emit_sound = self.compute_obs_likelihood(observation)
-        emit_pause_scalar = self._compute_pause_emission(observation)
+        # --- Single _preprocess_obs call + inline emission computation ---
+        obs = _preprocess_obs(observation)
+        cqt = np.maximum(obs[:88] if obs.size >= 88 else obs, 0.0)
+        cqt_sum = cqt.sum()
+
+        # Sound emission (from compute_obs_likelihood)
+        if cqt_sum <= 0:
+            emit_sound = np.full(N, 1e-300, dtype=float)
+        else:
+            cqt_norm = cqt / cqt_sum
+            em = self.chord_harmonic_mask @ cqt_norm
+            emit_sound = np.maximum(np.nan_to_num(em, nan=1e-12), 1e-12)
+
+        # Pause emission (from _compute_pause_emission)
+        if cqt_sum <= 0:
+            emit_pause_scalar = min(1.0, self.pause_emission_max)
+        else:
+            var = float(np.var(cqt / cqt_sum))
+            emit_pause_scalar = min(
+                max(1.0 / (1.0 + 200.0 * var), 1e-300), self.pause_emission_max
+            )
         emit_pause = np.full(N, emit_pause_scalar, dtype=float)
 
         # Spectral-flux-driven exit boost
-        obs_flat = _preprocess_obs(observation)
-        flux = float(obs_flat[88]) if obs_flat.size > 88 else 0.0
+        flux = float(obs[88]) if obs.size > 88 else 0.0
         f = flux / (flux + 1.0)  # [0,1)
         boost = 1.0 + _FLUX_EXIT_BOOST * f
         e0 = np.clip(self.e0 * boost, 1e-10, 1.0 - self.a01 - 1e-10)
@@ -406,18 +442,27 @@ class AudioOuterProductHMM:
         # Exit masses from each top state j (Eq.(6))
         exit_mass = prev_sound * e0 + prev_pause * self.e1  # (N,)
 
-        # Compute neigh_sum_i for each i (banded, Eq.(9))
-        neigh_sum = np.zeros(N, dtype=float)
-        for i in range(N):
-            j_start = max(0, i - self.D2)
-            j_end = min(N, i + self.D1 + 1)
-            ssum = 0.0
-            for j in range(j_start, j_end):
-                a = float(self.alpha[j, i])
-                if a <= 0:
-                    continue
-                ssum += exit_mass[j] * a
-            neigh_sum[i] = ssum
+        # --- Vectorized neighbourhood sum (replaces O(N*(D1+D2)) Python loop) ---
+        # Global skip term: Σ_j exit_mass[j] * S[j]  (O(N), computed once)
+        global_skip_sum = float(np.dot(exit_mass, self.S))
+
+        # Local neighbourhood transition: sum over diagonals of alpha
+        local_nbh = np.zeros(N, dtype=float)
+        for k, d in enumerate(range(-self.D2, self.D1 + 1)):
+            diag = self._alpha_diags[k]
+            L = len(diag)
+            src = max(0, d)  # source index offset in exit_mass
+            dst = max(0, -d)  # destination index offset in local_nbh
+            local_nbh[dst : dst + L] += exit_mass[src : src + L] * diag
+
+        # Local skip via cumsum sliding window: O(N) instead of O(N*D)
+        eS = exit_mass * self.S
+        cumsum_eS = np.empty(N + 1, dtype=float)
+        cumsum_eS[0] = 0.0
+        np.cumsum(eS, out=cumsum_eS[1:])
+        local_skip = cumsum_eS[self._j_ends] - cumsum_eS[self._j_starts]
+
+        neigh_sum = local_nbh + self.r * (global_skip_sum - local_skip)
 
         # Within-top bottom transitions
         within_sound = prev_sound * a00
@@ -448,21 +493,27 @@ class AudioOuterProductHMM:
         same_state_counter = 0
         empty_counter = 0
         if verbose:
-            pbar = progressbar.ProgressBar(maxval=self.n_states)
+            pbar = progressbar.ProgressBar(
+                maxval=len(self.state_space),
+                redirect_stdout=True,
+                redirect_stderr=True,
+            )
             pbar.start()
 
         while self.is_still_following():
-            prev_state = self.current_state
+            prev_state = self.current_state_index
 
             try:
                 queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
             except Empty:
                 break
+            if queue_input is STREAM_END:
+                break
             self.last_queue_update = time.time()
             if queue_input is not None:
-                current_state = self(queue_input)
+                self(queue_input)
                 empty_counter = 0
-                if current_state == prev_state:
+                if self.current_state_index == prev_state:
                     if self.patience > 0:
                         if same_state_counter < self.patience:
                             same_state_counter += 1
@@ -472,13 +523,12 @@ class AudioOuterProductHMM:
                     same_state_counter = 0
 
                 if verbose:
-                    if current_state is not None:
-                        pbar.update(int(current_state) + 1)  # states starts with 0
+                    pbar.update(self.current_state_index)
                 latency = time.time() - self.last_queue_update
                 self.latency_stats = set_latency_stats(
                     latency, self.latency_stats, self.input_index
                 )
-                yield current_state
+                yield self.current_position
 
         if verbose:
             pbar.finish()

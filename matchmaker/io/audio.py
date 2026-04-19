@@ -12,16 +12,21 @@ import librosa
 import numpy as np
 import pyaudio
 
-from matchmaker.features.audio import HOP_LENGTH, SAMPLE_RATE, ChromagramProcessor
+from matchmaker.features.audio import (
+    HOP_LENGTH,
+    SAMPLE_RATE,
+    ChromagramProcessor,
+)
 from matchmaker.utils.audio import (
     get_audio_devices,
     get_default_input_device_index,
     get_device_index_from_name,
 )
 from matchmaker.utils.misc import RECVQueue, set_latency_stats
-from matchmaker.utils.stream import Stream
+from matchmaker.utils.stream import STREAM_END, Stream
 
 CHANNELS = 1
+QUEUE_TIMEOUT = 10
 
 
 class AudioStream(Stream):
@@ -53,7 +58,7 @@ class AudioStream(Stream):
         hop_length: int = HOP_LENGTH,
         queue: Optional[RECVQueue] = None,
         device_name_or_index: Optional[Union[str, int]] = None,
-        wait: bool = True,
+        wait: bool = False,
         target_sr: int = SAMPLE_RATE,
     ):
         if processor is None:
@@ -123,9 +128,14 @@ class AudioStream(Stream):
             "min_latency": float("inf"),
         }
         self.input_index = 0
+        self._preloaded_audio = None
 
         if self.mock:
             self.run = self.run_offline
+            # Pre-load and resample audio so the stream thread can start
+            # producing frames immediately (avoids queue-timeout race condition
+            # when librosa.load takes longer than QUEUE_TIMEOUT).
+            self._preload_audio()
         else:
             self.run = self.run_online
 
@@ -159,6 +169,8 @@ class AudioStream(Stream):
         # initial y
         target_audio = np.frombuffer(data, dtype=np.float32)
         self._process_feature(target_audio, time_info["input_buffer_adc_time"])
+        if not self.stream_start.is_set():
+            self.stream_start.set()
 
         return (data, pyaudio.paContinue)
 
@@ -225,6 +237,13 @@ class AudioStream(Stream):
             self.audio_interface.terminate()
         self.listen = False
 
+    def _preload_audio(self) -> None:
+        """Pre-load and resample audio file so run_offline can start immediately."""
+        audio_y, sr = librosa.load(self.file_path, sr=None)
+        if sr != self.target_sr:
+            audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
+        self._preloaded_audio = audio_y
+
     def run_offline(self) -> None:
         """Process audio file in offline mode.
 
@@ -240,12 +259,17 @@ class AudioStream(Stream):
         self.start_listening()
         self.init_time = time.time()
 
-        audio_y, sr = librosa.load(self.file_path, sr=None)
-        if sr != self.target_sr:
-            audio_y = librosa.resample(y=audio_y, orig_sr=sr, target_sr=self.target_sr)
-            sr = self.target_sr
+        if self._preloaded_audio is not None:
+            audio_y = self._preloaded_audio
+            self._preloaded_audio = None  # free memory
+        else:
+            audio_y, sr = librosa.load(self.file_path, sr=None)
+            if sr != self.target_sr:
+                audio_y = librosa.resample(
+                    y=audio_y, orig_sr=sr, target_sr=self.target_sr
+                )
+        sr = self.target_sr
 
-        time_interval = self.hop_length / float(sr)
         # Pad to next hop_length boundary so no trailing samples are lost
         remainder = len(audio_y) % self.hop_length
         if remainder > 0:
@@ -253,6 +277,7 @@ class AudioStream(Stream):
                 (audio_y, np.zeros(self.hop_length - remainder, dtype=np.float32))
             )
         trimmed_audio = audio_y
+        time_interval = self.hop_length / float(sr)
         # Do not stop early on digital silence (all-zeros tails).
         while trimmed_audio.size > 0:
             self.input_index += 1
@@ -260,11 +285,15 @@ class AudioStream(Stream):
             target_audio = trimmed_audio[: self.hop_length]
             self._process_feature(target_audio, self.last_data_received)
             trimmed_audio = trimmed_audio[self.hop_length :]
-            elapsed_time = time.time() - self.last_data_received
+
+            if not self.stream_start.is_set():
+                self.stream_start.set()
 
             if self.wait:
+                elapsed_time = time.time() - self.last_data_received
                 time.sleep(max(time_interval - elapsed_time, 0))
 
+        self.queue.put(STREAM_END)
         self.stop_listening()
 
     def run_online(self) -> None:

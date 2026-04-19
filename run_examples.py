@@ -4,15 +4,14 @@ import json
 from _queue import Empty
 from pathlib import Path
 
-from matchmaker import Matchmaker
+from matchmaker import EXAMPLE_PIECES, Matchmaker
 
 ROOT_DIR = Path(__file__).parent
-SCORE_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.musicxml"
-PERFORMANCE_AUDIO_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.mp3"
-PERFORMANCE_MIDI_FILE = ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1.mid"
-ANNOTATION_FILE = (
-    ROOT_DIR / "matchmaker/assets/simple_mozart_k265_var1_note_annotations.txt"
-)
+_piece = EXAMPLE_PIECES["simple_mozart"]
+SCORE_FILE = Path(_piece["score"])
+PERFORMANCE_AUDIO_FILE = Path(_piece["audio"])
+PERFORMANCE_MIDI_FILE = Path(_piece["midi"])
+ANNOTATION_FILE = Path(_piece["annotations"])
 
 
 def select_performance_file(input_mode):
@@ -31,6 +30,12 @@ def main():
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--audio", action="store_true", help="Use audio input mode")
     group.add_argument("--midi", action="store_true", help="Use MIDI input mode")
+    parser.add_argument(
+        "--method",
+        type=str,
+        default=None,
+        help="Score following method (e.g., arzt, dixon, outerhmm, audio_outerhmm)",
+    )
     args = parser.parse_args()
 
     input_mode = "midi" if args.midi else "audio"
@@ -39,7 +44,10 @@ def main():
     print(f"Running matchmaker with the score file ({SCORE_FILE.name})...")
     print("-" * 50)
 
-    method = "outerhmm" if input_mode == "midi" else "arzt"
+    if args.method is not None:
+        method = args.method
+    else:
+        method = "outerhmm" if input_mode == "midi" else "arzt"
 
     # Initialize matchmaker (simulation mode)
     try:
@@ -54,7 +62,7 @@ def main():
         return
 
     # Run real-time score following
-    for current_position in mm.run(wait=True):
+    for current_position in mm.run():
         timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[{timestamp}] Current beat position: {current_position}")
 

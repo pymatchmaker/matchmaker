@@ -431,7 +431,7 @@ def adjust_tempo_for_performance_file(
 ):
     """
     Adjust the tempo of the score part to match the performance file.
-    We round up the tempo to the nearest 20 bpm to avoid too much optimization.
+    We round the tempo to the nearest 10 bpm to avoid too much optimization.
 
     Parameters
     ----------
@@ -449,9 +449,7 @@ def adjust_tempo_for_performance_file(
     else:
         target_length = librosa.get_duration(path=str(performance_file))
     ratio = target_length / source_length
-    rounded_tempo = int(
-        (default_tempo / ratio + 19) // 20 * 20
-    )  # round up to nearest 20
+    rounded_tempo = int(round(default_tempo / ratio / 10) * 10)  # round to nearest 10
     print(
         f"default tempo: {default_tempo} (score length: {source_length}) -> adjusted_tempo: {rounded_tempo} (perf length: {target_length})"
     )
@@ -521,6 +519,15 @@ def save_nparray_to_csv(array: NDArray, save_path: str):
         writer.writerows(array)
 
 
+def _beats_to_frames(
+    beats: np.ndarray,
+    ref_frame_to_beat: np.ndarray,
+) -> np.ndarray:
+    """Convert beat positions to (float) frame indices via inverse interpolation."""
+    frames = np.arange(len(ref_frame_to_beat), dtype=float)
+    return np.interp(beats, ref_frame_to_beat, frames)
+
+
 def plot_alignment(
     warping_path: np.ndarray,
     perf_annots: np.ndarray,
@@ -533,92 +540,91 @@ def plot_alignment(
     ref_features: Optional[np.ndarray] = None,
     input_features: Optional[np.ndarray] = None,
     distance_func=None,
+    ref_frame_to_beat: Optional[np.ndarray] = None,
 ):
-    """Plot warping path, GT annotations, and predicted points in one figure.
-
-    Layers (back to front): distance matrix → warping path → predicted → GT.
-    """
+    """Plot warping path, GT annotations, and predicted points."""
     save_dir.mkdir(parents=True, exist_ok=True)
     gt = np.asarray(perf_annots, dtype=float)
     pred = np.asarray(perf_annots_predicted, dtype=float)
     n = min(len(gt), len(pred))
     gt, pred = gt[:n], pred[:n]
 
-    has_dist_matrix = (
+    fig, ax = plt.subplots(figsize=(30, 30))
+
+    # Distance matrix background
+    show_dist = False
+    if (
         ref_features is not None
         and input_features is not None
         and distance_func is not None
-    )
+    ):
+        try:
+            if isinstance(distance_func, str):
+                dist = scipy.spatial.distance.cdist(
+                    ref_features, input_features, metric=distance_func
+                )
+            else:
+                dist = np.array(
+                    [
+                        [distance_func(r, i) for i in input_features]
+                        for r in ref_features
+                    ],
+                    dtype=np.float32,
+                )
+            ax.imshow(
+                dist,
+                aspect="auto",
+                origin="lower",
+                interpolation="nearest",
+                extent=(0, input_features.shape[0] - 1, 0, ref_features.shape[0] - 1),
+            )
+            show_dist = True
+        except Exception:
+            pass
 
-    fig, ax = plt.subplots(figsize=(30, 30))
+    # x-axis: performance time in frames
+    x_gt = gt * float(frame_rate)
+    wp_x = warping_path[1]
 
-    if has_dist_matrix:
-        # DTW mode: everything in frame space
-        dist = scipy.spatial.distance.cdist(
-            ref_features,
-            input_features,
-            metric=distance_func,
-        )
-        ax.imshow(
-            dist,
-            aspect="auto",
-            origin="lower",
-            interpolation="nearest",
-            extent=(0, input_features.shape[0] - 1, 0, ref_features.shape[0] - 1),
-        )
-        x_gt = gt * float(frame_rate)
-        x_pred = pred * float(frame_rate)
-        if score_y is not None:
-            y = np.asarray(score_y, dtype=float)[:n] * float(frame_rate)
-        else:
-            y = np.arange(n)
-        ylabel = "score (frames)"
-        wp_x = warping_path[1]
+    # y-axis: score position (beats)
+    wp_in_beats = np.issubdtype(warping_path[0].dtype, np.floating)
+    if state_space is not None and not wp_in_beats:
+        wp_y = state_space[warping_path[0]]
+    elif show_dist and wp_in_beats and ref_frame_to_beat is not None:
+        wp_y = _beats_to_frames(warping_path[0], ref_frame_to_beat)
+    else:
         wp_y = warping_path[0]
-    else:
-        # HMM mode: x in frames, y in beats via state_space
-        x_gt = gt * float(frame_rate)
-        x_pred = pred * float(frame_rate)
-        if score_y is None:
-            y = np.arange(n)
-            ylabel = "annotation index"
-        else:
-            y = np.asarray(score_y, dtype=float)[:n]
-            ylabel = "score position (beats)"
-        wp_x = warping_path[1]
-        if state_space is not None:
-            wp_y = state_space[warping_path[0]]
-        else:
-            wp_y = warping_path[0]
 
-    # 1. Warping path
-    if has_dist_matrix:
-        ax.plot(
-            wp_x,
-            wp_y,
-            ".",
-            color="white",
-            alpha=0.7,
-            markersize=15,
-            label="warping path",
-            zorder=2,
-        )
+    # GT score positions (y-axis for annotation dots)
+    if score_y is not None:
+        y_gt = np.asarray(score_y, dtype=float)[:n]
+        if show_dist and wp_in_beats and ref_frame_to_beat is not None:
+            y_gt = _beats_to_frames(y_gt, ref_frame_to_beat)
     else:
-        ax.plot(
-            wp_x,
-            wp_y,
-            ".",
-            color="lime",
-            alpha=0.5,
-            markersize=15,
-            label="warping path",
-            zorder=2,
-        )
+        y_gt = np.arange(n)
 
-    # 2. Predicted points
+    # Predicted score positions at GT perf times (perf→score direction)
+    wp_x_sorted = np.asarray(wp_x, dtype=float)
+    wp_y_sorted = np.asarray(wp_y, dtype=float)
+    if len(wp_x_sorted) > 1:
+        y_pred = np.interp(x_gt, wp_x_sorted, wp_y_sorted)
+    else:
+        y_pred = y_gt
+
+    # Plot layers
+    ax.plot(
+        wp_x,
+        wp_y,
+        ".",
+        color="white" if show_dist else "lime",
+        alpha=0.7 if show_dist else 0.5,
+        markersize=15,
+        label="warping path",
+        zorder=2,
+    )
     ax.scatter(
-        x_pred,
-        y,
+        x_gt,
+        y_pred,
         label="predicted",
         s=80,
         alpha=0.9,
@@ -627,11 +633,9 @@ def plot_alignment(
         linewidths=0,
         zorder=3,
     )
-
-    # 3. GT annotations (front)
     ax.scatter(
         x_gt,
-        y,
+        y_gt,
         label="ground truth",
         s=120,
         alpha=0.9,
@@ -641,8 +645,26 @@ def plot_alignment(
         zorder=4,
     )
 
+    if show_dist:
+        ax.set_xlim(0, input_features.shape[0] - 1)
+        ax.set_ylim(0, ref_features.shape[0] - 1)
+
+    # Beat tick labels when projected to frame space
+    if show_dist and wp_in_beats and ref_frame_to_beat is not None:
+        finite_beats = ref_frame_to_beat[np.isfinite(ref_frame_to_beat)]
+        beat_min, beat_max = (
+            finite_beats[0],
+            finite_beats[-1] if len(finite_beats) > 0 else (0, 1),
+        )
+        n_ticks = max(2, min(12, int(beat_max - beat_min) + 1))
+        beat_ticks = np.unique(
+            np.round(np.linspace(beat_min, beat_max, n_ticks)).astype(int)
+        )
+        ax.set_yticks(_beats_to_frames(beat_ticks.astype(float), ref_frame_to_beat))
+        ax.set_yticklabels([str(b) for b in beat_ticks])
+
     ax.set_xlabel("performance frame")
-    ax.set_ylabel(ylabel)
+    ax.set_ylabel("score position (beats)")
     ax.set_title(f"[{save_dir.name}] alignment ({name})")
     ax.grid(True, alpha=0.2)
     ax.legend(loc="best")
@@ -664,28 +686,29 @@ def save_debug_results(
     ref_features: Optional[np.ndarray] = None,
     input_features: Optional[np.ndarray] = None,
     distance_func=None,
+    ref_frame_to_beat: Optional[np.ndarray] = None,
 ):
     """Save debug outputs: warping path TSV, results JSON, and alignment plot."""
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Warping path TSV + results JSON
+    # 1. Warping path TSV + results JSON + GT annotations
     save_nparray_to_csv(warping_path.T, (save_dir / f"wp_{run_name}.tsv").as_posix())
+    gt_pairs = np.column_stack([score_annots, perf_annots])
+    save_nparray_to_csv(gt_pairs, (save_dir / f"gt_{run_name}.tsv").as_posix())
     import json
 
     with open(save_dir / f"{run_name}.json", "w") as f:
         json.dump(eval_results, f, indent=4)
 
     # 2. Alignment plot
-    if state_space is not None:
-        score_y = state_space
-    else:
-        sx = np.asarray(score_annots, dtype=float)
-        score_y = (
-            sx
-            if sx.ndim == 1 and len(sx) == len(perf_annots) and np.all(np.diff(sx) >= 0)
-            else None
-        )
+    # score_y = beat positions for each annotation (y-axis of the plot)
+    sx = np.asarray(score_annots, dtype=float)
+    score_y = (
+        sx
+        if sx.ndim == 1 and len(sx) == len(perf_annots) and np.all(np.diff(sx) >= 0)
+        else None
+    )
     plot_alignment(
         warping_path,
         perf_annots,
@@ -698,4 +721,5 @@ def save_debug_results(
         ref_features=ref_features,
         input_features=input_features,
         distance_func=distance_func,
+        ref_frame_to_beat=ref_frame_to_beat,
     )
