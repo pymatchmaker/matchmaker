@@ -12,59 +12,69 @@ The full documentation for matchmaker is available online at [readthedocs.org](h
 
 ## Setup
 
-### Prerequisites
+**Python version:** 3.10, 3.11, 3.12, 3.13
 
-- Available Python version: 3.10, 3.11, 3.12, 3.13
+Choose the installation that fits your use case:
 
-### Install
+| I want to... | Install |
+|---|---|
+| Get started quickly — test with recorded audio or MIDI files | `pip install pymatchmaker` |
+| Use a locally connected microphone or MIDI keyboard | `pip install pymatchmaker[devices]` |
+| Develop or contribute to matchmaker | `pip install -e ".[dev]"` (see below) |
+
+### Option 1: Base install
 
 ```bash
 pip install pymatchmaker
 ```
 
-The base installation supports **simulation mode** (testing with performance files). You can also implement your own `Stream` subclass to integrate external input sources (e.g., WebSocket) without any extra dependencies.
+Supports **simulation mode**: run online alignment against recorded audio or MIDI performance files.
 
-To use **local audio/MIDI devices** (microphone, MIDI keyboard), install with the `devices` extra, which adds [PyAudio](https://pypi.org/project/PyAudio/), [python-rtmidi](https://pypi.org/project/python-rtmidi/), and [pyfluidsynth](https://pypi.org/project/pyfluidsynth/):
+> **Note:** Requires [Fluidsynth](https://www.fluidsynth.org/) to be installed on your system:
+> ```bash
+> conda install -c conda-forge fluidsynth
+> ```
+
+### Option 2: Live device support
 
 ```bash
 pip install pymatchmaker[devices]
 ```
 
-> **Note:** `pyfluidsynth` requires [Fluidsynth](https://www.fluidsynth.org/) to be installed on your system, and `pyaudio` requires [PortAudio](http://www.portaudio.com/). We recommend installing them via conda: `conda install -c conda-forge fluidsynth portaudio`.
+Adds [PyAudio](https://pypi.org/project/PyAudio/) and [python-rtmidi](https://pypi.org/project/python-rtmidi/) for real-time input from a locally connected microphone or MIDI keyboard.
 
-### Install from source using conda
+> **Note:** `pyaudio` requires [PortAudio](http://www.portaudio.com/) to be installed on your system:
+> ```bash
+> conda install -c conda-forge fluidsynth portaudio
+> ```
 
-Setting up the code as described here requires [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html). Follow the instructions for your OS.
+### Option 3: Development install (from source)
+
+For contributors or anyone who wants to modify the source code. Requires [conda](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html).
 
 ```bash
-# Clone matchmaker
+# Clone the repository
 git clone https://github.com/pymatchmaker/matchmaker.git
-
-# Create the conda environment
-conda create -n matchmaker python=3.12
-
-conda activate matchmaker
-
-# Go to matchmaker directory
 cd matchmaker
 
-# Install matchmaker in editable mode (dev includes devices)
+# Create and activate a conda environment
+conda create -n matchmaker python=3.12
+conda activate matchmaker
+
+# Install system dependencies
+conda install -c conda-forge gcc=12.1.0 glib fluidsynth portaudio
+
+# Install matchmaker in editable mode with all dev dependencies (includes [devices])
 pip install -e ".[dev]"
-
-# Install GCC
-conda install -c conda-forge gcc=12.1.0
-
-# Install glib, fluidsynth, and portaudio
-conda install -c conda-forge glib fluidsynth portaudio
 ```
 
-Because of the dependency of `partitura`, which uses `MuseScore_General.sf3` (free soundfont provided by MuseScore) as the default soundfont, the soundfont will be installed automatically inside the `partitura` package. This might take a while for the first time.
+> **Note:** `partitura` will download `MuseScore_General.sf3` (a free soundfont) on first use. This may take a moment.
 
 ### Known Setup Issues
 
 #### Missing Visual C++ build tools (on Windows)
 
-The solution seems to be to download vs_BuildTools.exe from <https://visualstudio.microsoft.com/visual-cpp-build-tools/> and then execute
+Download `vs_BuildTools.exe` from <https://visualstudio.microsoft.com/visual-cpp-build-tools/> and run:
 
 ```bash
 vs_buildtools.exe --norestart --passive --downloadThenInstall --includeRecommended --add Microsoft.VisualStudio.Workload.NativeDesktop --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Workload.MSBuildTools
@@ -72,14 +82,14 @@ vs_buildtools.exe --norestart --passive --downloadThenInstall --includeRecommend
 
 #### Issues with Fluidsynth and pyfluidsynth on Windows
 
-On Windows, pyfluidsynth expects fluidsynth.exe to be located in `C:\tools\bin` (other users have reported that it is expected in `C:\tools\fluidsynth\bin`). You can fix the issue by
+On Windows, pyfluidsynth expects `fluidsynth.exe` to be located in `C:\tools\bin` (some users report `C:\tools\fluidsynth\bin`):
 
-1. Get the ZIP file for your Windows version from <https://github.com/FluidSynth/fluidsynth/releases/latest>
-2. Extract the contents to `C:\tools` (or wherever pyfluidsynth expects the executable to be).
+1. Download the ZIP for your Windows version from <https://github.com/FluidSynth/fluidsynth/releases/latest>
+2. Extract the contents to `C:\tools` (or wherever pyfluidsynth expects the executable).
 
-#### Using Fluidsynth installed from Homebrew on MacOS
+#### Using Fluidsynth installed from Homebrew on macOS
 
-We recommend to install Fluidsynth from conda in a dedicated environemnt. If however, you want to use the system-wide Fluidsynth installed with homebrew, you might run into an `ImportError("Couldn't find the FluidSynth library.")` with `pyfluidsynth`.  Please refer to the following [link](https://stackoverflow.com/a/75339618).
+We recommend installing Fluidsynth via conda in a dedicated environment. If you use the Homebrew-installed Fluidsynth instead, you may encounter `ImportError("Couldn't find the FluidSynth library.")` with `pyfluidsynth`. See this [Stack Overflow answer](https://stackoverflow.com/a/75339618) for a fix.
 
 ## Usage Examples
 
@@ -108,74 +118,88 @@ Please refer to [here](https://partitura.readthedocs.io/en/latest/Tutorial/noteb
 To run with a live audio or MIDI input, install with `pip install pymatchmaker[devices]`.
 
 ```python
-from matchmaker import Matchmaker
-
-# Audio input (microphone)
-mm = Matchmaker(
-    score_file=”path/to/score.musicxml”,
-    input_type=”audio”,
-)
-for current_position in mm.run():
-    print(current_position)
-```
-
-You can also specify a device by name or index:
-
-```python
 mm = Matchmaker(
     score_file=”path/to/score.musicxml”,
     input_type=”audio”,
     device_name_or_index=”MacBookPro Microphone”,
 )
+for current_position in mm.run():
+    print(current_position)
 ```
+
+If no device is specified, the system default is used.
+
+```python
+from matchmaker import Matchmaker
+
+# Audio input
+mm = Matchmaker(
+    score_file=”path/to/score.musicxml”,
+    input_type=”audio”,
+)
+
+# MIDI input
+mm = Matchmaker(
+    score_file=”path/to/score.musicxml”,
+    input_type=”midi”,
+)
+```
+
 
 ### Using a Custom Stream
 
-You can inject your own stream (e.g., from a WebSocket or any external source) without needing `pyaudio` or `python-rtmidi`:
+You can inject your own stream from any external source without needing `pyaudio` or `python-rtmidi`:
 
 ```python
 import queue
+import time
 from matchmaker import Matchmaker
-from matchmaker.io.stream import Stream
+from matchmaker.io.stream import Stream, STREAM_END
 from matchmaker.features.audio import ChromagramProcessor
 
 class MyStream(Stream):
-    """Custom stream that receives audio data from an external source."""
-
-    def __init__(self, processor, data_source):
-        super().__init__(processor=processor, mock=False)
-        self.data_source = data_source
+    def __init__(self, processor):
+        super().__init__(processor=processor)
         self.queue = queue.Queue()
 
     def run(self):
-        """Read data from your source and push features to the queue."""
-        for chunk in self.data_source:
+        self.start_listening()
+        self.stream_start.set()
+        for chunk in ...:  # iterate over your data source
             features = self.processor(chunk)
-            self.queue.put((features, time.time()))
+            self.queue.put((features, time.time() - self.init_time))
+        self.queue.put(STREAM_END)
 
-my_stream = MyStream(
-    processor=ChromagramProcessor(),
-    data_source=my_websocket_source,
-)
+    def __enter__(self):
+        self.start()
+        return self
+
+    def __exit__(self, *args):
+        self.stop()
+
+    def stop(self):
+        self.stop_listening()
 
 mm = Matchmaker(
-    score_file="path/to/score",
+    score_file="path/to/score.musicxml",
     input_type="audio",
-    stream=my_stream,
+    stream=MyStream(processor=ChromagramProcessor()),
 )
 for current_position in mm.run():
     print(current_position)
 ```
+
+For a real-world example, see [`WebSocketAudioStream`](https://github.com/pymatchmaker/matchmaker-demo/blob/main/backend/app/websocket_audio_stream.py) in [matchmaker-demo](https://github.com/pymatchmaker/matchmaker-demo), which feeds raw PCM audio from a Web Audio API into the alignment pipeline.
 
 ### Running Examples
 
 The repository includes a ready-to-use example script that demonstrates the complete workflow:
 
 ```bash
-# Run with audio input (uses arzt method as default)
+# Run with input type (uses default method by each input)
 python run_examples.py --audio
 
-# Run with MIDI input and specific method
+# Run with specific method
 python run_examples.py --midi --method hmm
 ```
 
@@ -204,40 +228,72 @@ For options regarding the `processor`, please refer to the [Features](#features)
 
 ## Alignment Methods
 
-Matchmaker currently supports the following alignment methods:
+### Audio (`input_type="audio"`)
 
-- `"arzt"`: On-line time warping algorithm adapted from Brazier and Widmer (2020) (based on the work by Arzt et al. (2010)). Supports audio and MIDI input.
-- `"dixon"`: On-line time warping algorithm by S. Dixon (2005). Supports audio and MIDI input.
-- `"outerhmm"`: Outer-product HMM score follower by E. Nakamura (2014). Supports audio and MIDI input.
-- `"hmm"`: Hidden Markov Model-based score follower by Cancino-Chacón et al. (2023), based on the state-space score followers by Duan et al. (2011) and Jiang and Raphael (2020). Supports MIDI input.
-- `"pthmm"`: Pitch-based HMM score follower. Supports MIDI input.
+Default method: `"arzt"`
+
+| Method | Description |
+|---|---|
+| `"arzt"` | On-line time warping adapted from Brazier and Widmer (2020) |
+| `"dixon"` | On-line time warping by Dixon (2005) |
+| `"outerhmm"` | Outer-product HMM score follower by Nakamura (2014) |
+| `"skf"` | Switching Kalman Filter with hidden tempo by Jiang and Raphael (2020) |
+
+### MIDI (`input_type="midi"`)
+
+Default method: `"pthmm"`
+
+| Method | Description |
+|---|---|
+| `"arzt"` | On-line time warping adapted from Brazier and Widmer (2020) |
+| `"dixon"` | On-line time warping by Dixon (2005) |
+| `"outerhmm"` | Outer-product HMM score follower by Nakamura (2014) |
+| `"hmm"` | HMM score follower by Cancino-Chacón et al. (2023) |
+| `"pthmm"` | Pitch-based HMM score follower |
 
 ## Features
 
-Matchmaker currently supports the following feature types:
+### Audio (`input_type="audio"`)
 
-- For audio:
-  - `"chroma"`: Chroma features. Default for audio input.
-  - `"mfcc"`: Mel-frequency cepstral coefficients.
-  - `"cqt"`: Constant-Q transform.
-  - `"mel"`: Mel-spectrogram.
-  - `"lse"`: Log-spectral energy features used in Dixon (2005).
-  - `"cqt_spectral_flux"`: CQT-based spectral flux used in Nakamura et al. (2014).
-- For MIDI:
-  - `"pitch_ioi"`: Pitch and inter-onset interval features. Default for MIDI input.
-  - `"pianoroll"`: Piano-roll features.
-  - `"pitchclass"`: Pitch class features.
+Default processor: `"chroma"`
+
+| Processor | Description |
+|---|---|
+| `"chroma"` | Chroma features |
+| `"mfcc"` | Mel-frequency cepstral coefficients |
+| `"cqt"` | Constant-Q transform |
+| `"mel"` | Mel-spectrogram |
+| `"lse"` | Log-spectral energy features used in Dixon (2005) |
+| `"cqt_spectral_flux"` | CQT-based spectral flux used in Nakamura (2014) |
+| `"raw_spectrum"` | Raw power spectrum used in Jiang and Raphael (2020) |
+
+### MIDI (`input_type="midi"`)
+
+Default processor: `"pitch_ioi"`
+
+| Processor | Description |
+|---|---|
+| `"pitch_ioi"` | Pitch and inter-onset interval features |
+| `"pianoroll"` | Piano-roll features |
+| `"pitchclass"` | Pitch class features |
 
 ## Configurations
 
 Initialization parameters for the `Matchmaker` class:
 
-- `score_file` (str): Path to the score file.
-- `input_type` (str): Type of input data. Options: `"audio"`, `"midi"`.
-- `method` (str): Alignment method to use. See [Alignment Methods](#alignment-methods) for available options.
-- `processor` (str): Type of feature processor to use. See [Features](#features) for available options.
-- `stream` (Stream or None): A custom `Stream` instance to use instead of the built-in `AudioStream`/`MidiStream`. Useful for integrating external input sources (e.g., WebSocket). If `None`, the stream is built automatically based on `input_type`.
-- `device_name_or_index` (str or int): The audio/MIDI device name or index you want to use. If `None`, the default device will be used. Requires `pymatchmaker[devices]`.
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `score_file` | str | | Path to the score file (`.musicxml`, `.mid`, etc.) |
+| `performance_file` | str or None | `None` | Path to a recorded performance file for simulation mode. If `None`, live device input is used. |
+| `input_type` | str | `"audio"` | Input modality. Options: `"audio"`, `"midi"`. |
+| `method` | str or None | `None` | Alignment method. Defaults to `"arzt"` for audio, `"pthmm"` for MIDI. See [Alignment Methods](#alignment-methods). |
+| `processor` | str or None | `None` | Feature processor. Defaults to `"chroma"` for audio, `"pitch_ioi"` for MIDI. See [Features](#features). |
+| `kwargs` | dict or None | `None` | Method-specific parameters (e.g., `window_size`, `sample_rate`, `frame_rate`). If `None`, built-in defaults for the chosen method are used. |
+| `stream` | Stream or None | `None` | Custom `Stream` instance for external input sources (e.g., WebSocket). If `None`, the stream is built automatically from `input_type`. |
+| `device_name_or_index` | str or int or None | `None` | Audio/MIDI device name or index for live input. Requires `pymatchmaker[devices]`. |
+| `tempo` | float or None | `None` | Initial tempo in BPM for score rendering. If `None`, inferred from the score. |
+| `wait` | bool | `False` | If `True`, block until the score follower finishes before returning from `run()`. |
+| `unfold_score` | bool | `True` | If `True`, unfold repeat signs in the score before alignment. |
 
 ## Citing Matchmaker
 

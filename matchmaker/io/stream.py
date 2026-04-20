@@ -40,7 +40,7 @@ class Stream(Thread):
     def __init__(
         self,
         processor: Union[Callable, Processor],
-        mock: bool,
+        mock: bool = False,
     ) -> None:
         Thread.__init__(self)
         self.processor = processor

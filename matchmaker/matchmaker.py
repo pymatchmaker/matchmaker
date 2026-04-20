@@ -64,9 +64,11 @@ OLTW_METHODS = {"arzt", "dixon"}
 PARANGONAR_METHODS = {"SLT_OLTW", "SL_OLTW", "OTM", "OPTM"}
 AVAILABLE_METHODS = {
     "audio": sorted(OLTW_METHODS) + ["outerhmm", "skf"],
-    "midi": sorted(OLTW_METHODS) + ["hmm", "pthmm", "outerhmm"] + sorted(PARANGONAR_METHODS),
+    "midi": sorted(OLTW_METHODS)
+    + ["hmm", "pthmm", "outerhmm"]
+    + sorted(PARANGONAR_METHODS),
 }
-DEFAULT_METHOD = {"audio": "arzt", "midi": "outerhmm"}
+DEFAULT_METHOD = {"audio": "arzt", "midi": "pthmm"}
 DEFAULT_PROCESSOR = {"audio": "chroma", "midi": "pitch_ioi"}
 DEFAULT_KWARGS = {
     "audio": {
@@ -209,7 +211,9 @@ class Matchmaker(object):
 
         self.method = method
         self.config = dict(
-            kwargs if kwargs is not None else DEFAULT_KWARGS[self.input_type].get(self.method, {})
+            kwargs
+            if kwargs is not None
+            else DEFAULT_KWARGS[self.input_type].get(self.method, {})
         )
         self.auto_adjust_tempo = auto_adjust_tempo
 
