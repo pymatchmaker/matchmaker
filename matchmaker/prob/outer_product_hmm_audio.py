@@ -1,16 +1,13 @@
 import time
-from queue import Empty
 from typing import List, Optional
 
 import numpy as np
-import progressbar
 from numpy.typing import NDArray
 from partitura.score import Part, Score, ScoreLike
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.io.audio import QUEUE_TIMEOUT
 from matchmaker.io.queue import RECVQueue
-from matchmaker.io.stream import STREAM_END
 from matchmaker.utils.misc import set_latency_stats
 
 NDArrayFloat = NDArray[np.float32]
@@ -135,13 +132,12 @@ def compute_transition_matrix(
     return alpha, D1, D2
 
 
-class AudioOuterProductHMM:
+class AudioOuterProductHMM(OnlineAlignment):
     def __init__(
         self,
         reference_features: np.ndarray,
         queue: Optional[RECVQueue] = None,
         transitions: Optional[List[tuple[int, float]]] = None,
-        patience: int = 0,
         tempo: float = 120.0,
         sample_rate: int = 16000,
         hop_length: int = 320,
@@ -149,18 +145,13 @@ class AudioOuterProductHMM:
         r_i: Optional[np.ndarray] = None,
         **kwargs,
     ) -> None:
-        self.reference_features = reference_features
-        OnlineAlignment.__init__(
-            self,
-            reference_features=reference_features,
-        )
+        super().__init__(reference_features=reference_features, queue=queue)
 
-        self.queue = queue
         weighted_chords, unique_onsets = get_weighted_chords_from_score(
             self.reference_features,
         )
         self.n_states = len(weighted_chords)
-        self.state_space = unique_onsets
+        self.score_positions = unique_onsets
         self.chord_harmonic_mask = np.zeros((self.n_states, 88), dtype=float)
         for i, chord in enumerate(weighted_chords):
             for p, note_weight in chord.items():
@@ -213,14 +204,13 @@ class AudioOuterProductHMM:
         if s_j > 0:
             self.alpha = self.alpha * (1.0 - self.S[:, None])
 
-        self.current_state_index = 0
-        self._warping_path = []
+        self.current_index = 0
         self._current_chord = np.zeros(88, dtype=int)
-        self.patience = int(patience)
         self.state_probabilities = np.zeros(self.n_states * 2, dtype=float)
         self.state_probabilities[0] = 1.0
         self.is_first_observation = True
         self.input_index = 0
+        self.queue_timeout = QUEUE_TIMEOUT
         self.latency_stats = {
             "total_latency": 0,
             "total_frames": 0,
@@ -255,15 +245,6 @@ class AudioOuterProductHMM:
             self._alpha_diags.append(np.diagonal(self.alpha, offset=-d).copy())
         self._j_starts = np.maximum(0, np.arange(self.n_states) - self.D2)
         self._j_ends = np.minimum(self.n_states, np.arange(self.n_states) + self.D1 + 1)
-
-    @property
-    def warping_path(self) -> np.ndarray:
-        return np.array(self._warping_path).T
-
-    @property
-    def current_position(self) -> float:
-        """Current score position in beats."""
-        return float(self.state_space[self.current_state_index])
 
     @staticmethod
     def _pause_self_transition_prob(
@@ -304,27 +285,28 @@ class AudioOuterProductHMM:
         return np.clip(1.0 - 1.0 / d_i, 1e-6, 1.0 - 1e-6)
 
     def is_still_following(self) -> bool:
-        if self.current_state_index is not None:
-            return self.current_state_index <= self.n_states - 1
-        return False
+        # Argmax over hierarchical states can lock onto the final state
+        # mid-piece; rely on STREAM_END to terminate.
+        return True
 
-    def __call__(self, input, *args, **kwargs) -> Optional[int]:
-        """
-        Frame-based audio HMM update.
+    def __call__(self, input, *args, **kwargs) -> float:
+        """Frame-based audio HMM update.
 
         Parameters
         ----------
         input : np.ndarray or tuple
             Current frame observation y_t (CQT magnitude 88-bin vector).
-            If tuple, uses first element for backward compatibility.
+            If tuple, uses (features, perf_time_sec).
 
         Returns
         -------
-        current_state : int or None
-            Current estimated score state index.
+        float
+            Current beat position from score_positions[current_index].
         """
+        t0 = time.time()
         if isinstance(input, tuple):
             observation = np.asarray(input[0], dtype=float)
+            self.current_perf_time = float(input[1])
         else:
             observation = np.asarray(input, dtype=float)
 
@@ -339,12 +321,14 @@ class AudioOuterProductHMM:
         top_scores = probs[0::2] + probs[1::2]
         new_top = int(np.argmax(top_scores))
 
-        self.current_state_index = new_top
-        self._warping_path.append(
-            (float(self.state_space[self.current_state_index]), self.input_index)
-        )
+        self.current_index = new_top
+        self.current_position = float(self.score_positions[self.current_index])
+        self._alignment_path.append((self.current_position, self.current_perf_time))
         self.input_index += 1
-        return self.current_state_index
+        self.latency_stats = set_latency_stats(
+            time.time() - t0, self.latency_stats, self.input_index
+        )
+        return self.current_position
 
     def compute_obs_likelihood(
         self,
@@ -486,51 +470,3 @@ class AudioOuterProductHMM:
             new_probs[:] = 0.0
             new_probs[0] = 1.0
         return new_probs
-
-    def run(
-        self,
-        verbose: bool = True,
-    ) -> NDArrayInt:
-        same_state_counter = 0
-        empty_counter = 0
-        if verbose:
-            pbar = progressbar.ProgressBar(
-                maxval=len(self.state_space),
-                redirect_stdout=True,
-                redirect_stderr=True,
-            )
-            pbar.start()
-
-        while self.is_still_following():
-            prev_state = self.current_state_index
-
-            try:
-                queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
-            except Empty:
-                break
-            if queue_input is STREAM_END:
-                break
-            self.last_queue_update = time.time()
-            if queue_input is not None:
-                self(queue_input)
-                empty_counter = 0
-                if self.current_state_index == prev_state:
-                    if self.patience > 0:
-                        if same_state_counter < self.patience:
-                            same_state_counter += 1
-                        else:
-                            break
-                else:
-                    same_state_counter = 0
-
-                if verbose:
-                    pbar.update(self.current_state_index)
-                latency = time.time() - self.last_queue_update
-                self.latency_stats = set_latency_stats(
-                    latency, self.latency_stats, self.input_index
-                )
-                yield self.current_position
-
-        if verbose:
-            pbar.finish()
-        return self.warping_path

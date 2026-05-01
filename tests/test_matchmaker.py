@@ -11,7 +11,7 @@ from matchmaker import EXAMPLE_PIECES, Matchmaker
 from matchmaker.dp import OnlineTimeWarpingArzt
 from matchmaker.dp.oltw_dixon import OnlineTimeWarpingDixon
 from matchmaker.features.audio import ChromagramProcessor
-from matchmaker.features.midi import PitchIOIProcessor
+from matchmaker.features.midi import PitchChordProcessor
 from matchmaker.io.audio import AudioStream
 from matchmaker.io.midi import MidiStream
 from matchmaker.prob.hmm import PitchHMM, PitchIOIHMM
@@ -307,7 +307,7 @@ class TestMatchmaker(unittest.TestCase):
         # Then: the Matchmaker instance should be correctly initialized
         self.assertIsInstance(mm.stream, MidiStream)
         self.assertIsInstance(mm.score_follower, PitchHMM)
-        self.assertIsInstance(mm.processor, PitchIOIProcessor)
+        self.assertIsInstance(mm.processor, PitchChordProcessor)
 
     def test_matchmaker_midi_run(self):
         # Given: a Matchmaker instance with midi input
@@ -347,7 +347,7 @@ class TestMatchmaker(unittest.TestCase):
                     self.assertGreater(len(positions), 0)
 
                     # WP should be valid
-                    wp = mm.score_follower.warping_path
+                    wp = mm.score_follower.alignment_path
                     self.assertEqual(wp.shape[0], 2)
                     self.assertGreater(wp.shape[1], 0)
 

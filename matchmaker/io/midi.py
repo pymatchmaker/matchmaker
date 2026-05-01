@@ -11,7 +11,7 @@ from typing import Callable, List, Optional, Tuple, Type, Union
 import mido
 from mido.ports import BaseInput as MidiInputPort
 
-from matchmaker.features.midi import PitchIOIProcessor
+from matchmaker.features.midi import PitchChordProcessor
 from matchmaker.features.processor import Processor
 from matchmaker.io.mediator import CeusMediator
 from matchmaker.io.queue import RECVQueue
@@ -81,7 +81,7 @@ class MidiStream(Stream):
         virtual_port: bool = False,
     ):
         if processor is None:
-            processor = PitchIOIProcessor()
+            processor = PitchChordProcessor()
 
         Stream.__init__(
             self,
@@ -238,7 +238,6 @@ class MidiStream(Stream):
                 data=msg,
                 c_time=c_time,
             )
-        # Flush remaining chord from OnsetPianoRollProcessor
         if hasattr(self.processor, "flush_remaining"):
             last = self.processor.flush_remaining()
             if last is not None:

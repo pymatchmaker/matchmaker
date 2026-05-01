@@ -254,7 +254,7 @@ class OuterProductHMM(OnlineAlignment):
             self.reference_features, return_unique_onsets=True
         )
         self.n_states = len(chords)
-        self.state_space = unique_onsets
+        self.score_positions = unique_onsets
         self.transitions = (
             transitions if transitions is not None else DEFAULT_TRANSITIONS
         )
@@ -285,48 +285,47 @@ class OuterProductHMM(OnlineAlignment):
             chords, pitch_error_probs, other_prob
         )
 
-        self.current_state = 0
+        self.current_index = 0
         self.input_index = 0
-        self.perf_time = 0.0
-        self._warping_path = []
+        self._prev_perf_time = None
+        self._alignment_path = []
         self._current_chord = np.zeros(88, dtype=int)
         self.patience = patience
         self.state_probabilities = np.zeros(self.n_states)
         self.state_probabilities[0] = 1.0
         self.is_first_observation = True
 
-    @property
-    def warping_path(self) -> NDArray:
-        return np.array(self._warping_path).T
-
     def is_still_following(self) -> bool:
-        if self.current_state is not None:
-            return self.current_state <= self.n_states - 1
-
-        return False
+        # Viterbi can lock onto the final state mid-piece, but we still
+        # want to consume remaining events. Termination is handled by the
+        # patience counter in run() and by STREAM_END.
+        return True
 
     def __call__(
-        self, input: tuple[np.ndarray, float], *args, **kwargs
-    ) -> Optional[int]:
-        pitch_obs, ioi = input
-        self.perf_time += ioi
-
+        self, observation: tuple[np.ndarray, float], *args, **kwargs
+    ) -> Optional[float]:
+        # Chord-continuation case: merge pitches into the pending chord and
+        # signal `None` to run() so the patience counter stays put. We don't
+        # call super() because no state advance / path append should happen.
+        pitch_obs, perf_time = observation
+        ioi = (
+            perf_time - self._prev_perf_time
+            if self._prev_perf_time is not None
+            else 0.0
+        )
+        self._prev_perf_time = perf_time
         if ioi < IOI_THRESHOLD:
             self._current_chord = np.maximum(self._current_chord, pitch_obs)
-            # Return None to signal "chord continuation" (no state advance);
-            # run() uses this to skip the patience counter.
             return None
-        else:
-            self._current_chord = pitch_obs
-            self.state_probabilities = self.viterbi_step(
-                self.state_probabilities, self._current_chord
-            )
-            self.current_state = np.argmax(self.state_probabilities)
-            score_beat = float(self.state_space[self.current_state])
-            self._warping_path.append((score_beat, self.perf_time))
-            self.input_index += 1
+        return super().__call__(observation)
 
-            return self.current_state
+    def step(self, features) -> None:
+        self._current_chord = features
+        self.state_probabilities = self.viterbi_step(
+            self.state_probabilities, self._current_chord
+        )
+        self.current_index = int(np.argmax(self.state_probabilities))
+        self.input_index += 1
 
     # Observation likelihood
     def compute_obs_likelihood(
@@ -425,18 +424,17 @@ class OuterProductHMM(OnlineAlignment):
             pbar.start()
 
         while self.is_still_following():
-            prev_state = self.current_state
+            prev_state = self.current_index
 
             queue_input = self.queue.get()
             if queue_input is STREAM_END:
                 break
             if queue_input is not None:
-                current_state = self(queue_input)
-                if current_state is None:
+                beat = self(queue_input)
+                if beat is None:
                     # Chord continuation: no state advance, skip patience.
                     continue
-                empty_counter = 0
-                if current_state == prev_state:
+                if self.current_index == prev_state:
                     if same_state_counter < self.patience:
                         same_state_counter += 1
                     else:
@@ -445,9 +443,9 @@ class OuterProductHMM(OnlineAlignment):
                     same_state_counter = 0
 
                 if verbose:
-                    pbar.update(int(current_state))
-                yield float(self.state_space[current_state])
+                    pbar.update(int(self.current_index))
+                yield beat
 
         if verbose:
             pbar.finish()
-        return self.warping_path
+        return self.alignment_path

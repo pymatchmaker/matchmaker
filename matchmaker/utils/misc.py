@@ -454,20 +454,20 @@ def _beats_to_frames(
 
 
 def plot_alignment(
-    warping_path: np.ndarray,
+    alignment_path: np.ndarray,
     perf_annots: np.ndarray,
     perf_annots_predicted: np.ndarray,
     save_dir: Path,
     name: str,
     score_y: Optional[np.ndarray] = None,
     frame_rate: float = 1.0,
-    state_space: Optional[np.ndarray] = None,
+    score_positions: Optional[np.ndarray] = None,
     ref_features: Optional[np.ndarray] = None,
     input_features: Optional[np.ndarray] = None,
     distance_func=None,
     ref_frame_to_beat: Optional[np.ndarray] = None,
 ):
-    """Plot warping path, GT annotations, and predicted points."""
+    """Plot alignment path, GT annotations, and predicted points."""
     save_dir.mkdir(parents=True, exist_ok=True)
     gt = np.asarray(perf_annots, dtype=float)
     pred = np.asarray(perf_annots_predicted, dtype=float)
@@ -511,16 +511,16 @@ def plot_alignment(
 
     # x-axis: performance time in frames
     x_gt = gt * float(frame_rate)
-    wp_x = warping_path[1] * float(frame_rate)
+    wp_x = alignment_path[1] * float(frame_rate)
 
     # y-axis: score position (beats)
-    wp_in_beats = np.issubdtype(warping_path[0].dtype, np.floating)
-    if state_space is not None and not wp_in_beats:
-        wp_y = state_space[warping_path[0]]
+    wp_in_beats = np.issubdtype(alignment_path[0].dtype, np.floating)
+    if score_positions is not None and not wp_in_beats:
+        wp_y = score_positions[alignment_path[0]]
     elif show_dist and wp_in_beats and ref_frame_to_beat is not None:
-        wp_y = _beats_to_frames(warping_path[0], ref_frame_to_beat)
+        wp_y = _beats_to_frames(alignment_path[0], ref_frame_to_beat)
     else:
-        wp_y = warping_path[0]
+        wp_y = alignment_path[0]
 
     # GT score positions (y-axis for annotation dots)
     if score_y is not None:
@@ -546,7 +546,7 @@ def plot_alignment(
         color="white" if show_dist else "lime",
         alpha=0.7 if show_dist else 0.5,
         markersize=15,
-        label="warping path",
+        label="alignment path",
         zorder=2,
     )
     ax.scatter(
@@ -601,7 +601,7 @@ def plot_alignment(
 
 
 def save_debug_results(
-    warping_path: np.ndarray,
+    alignment_path: np.ndarray,
     score_annots: np.ndarray,
     perf_annots: np.ndarray,
     perf_annots_predicted: np.ndarray,
@@ -609,18 +609,18 @@ def save_debug_results(
     frame_rate: float,
     save_dir: Path,
     run_name: str = "results",
-    state_space: Optional[np.ndarray] = None,
+    score_positions: Optional[np.ndarray] = None,
     ref_features: Optional[np.ndarray] = None,
     input_features: Optional[np.ndarray] = None,
     distance_func=None,
     ref_frame_to_beat: Optional[np.ndarray] = None,
 ):
-    """Save debug outputs: warping path TSV, results JSON, and alignment plot."""
+    """Save debug outputs: alignment path TSV, results JSON, and alignment plot."""
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Warping path TSV + results JSON + GT annotations
-    save_nparray_to_csv(warping_path.T, (save_dir / f"wp_{run_name}.tsv").as_posix())
+    # 1. Alignment path TSV + results JSON + GT annotations
+    save_nparray_to_csv(alignment_path.T, (save_dir / f"wp_{run_name}.tsv").as_posix())
     gt_pairs = np.column_stack([score_annots, perf_annots])
     save_nparray_to_csv(gt_pairs, (save_dir / f"gt_{run_name}.tsv").as_posix())
     import json
@@ -637,14 +637,14 @@ def save_debug_results(
         else None
     )
     plot_alignment(
-        warping_path,
+        alignment_path,
         perf_annots,
         perf_annots_predicted,
         save_dir,
         run_name,
         score_y=score_y,
         frame_rate=frame_rate,
-        state_space=state_space,
+        score_positions=score_positions,
         ref_features=ref_features,
         input_features=input_features,
         distance_func=distance_func,

@@ -226,6 +226,68 @@ For options regarding the `method`, please refer to the [Alignment Methods](#ali
 For options regarding the `processor`, please refer to the [Features](#features) section.
 
 
+## Package Overview
+
+Matchmaker has the following pipeline:
+
+```
+   input source              Stream              Processor              OnlineAlignment
+   (audio/MIDI                                   (chroma,               (e.g.,
+    file or live)      ─►   AudioStream    ─►    pitch_chord,    ─►    PitchHMM,        ─►   alignment_path
+                            MidiStream           ...)                   OLTWArzt, ...)        (2, T) array
+```
+
+### Component signatures
+
+- **`Stream`** (`AudioStream`, `MidiStream`) reads from a file or live
+  device, hands each frame to its Processor, and pushes the result to a
+  `RECVQueue`, followed by a `STREAM_END` sentinel when the source is
+  exhausted.
+
+- **`Processor`** (e.g., `ChromagramProcessor`, `PitchChordProcessor`) takes
+  a `(data, frame_time)` tuple and returns either a `(features, perf_time)`
+  tuple or `None` while buffering. `data` is `np.ndarray` for audio or
+  `List[(mido.Message, m_time)]` for MIDI; `perf_time` is the timestamp the
+  feature corresponds to (most processors pass `frame_time` through;
+  chord-buffering MIDI processors emit the chord onset).
+
+- **`OnlineAlignment`** (the score follower base class; e.g.,
+  `OnlineTimeWarpingArzt`, `PitchIOIHMM`) consumes `(features, perf_time)`
+  observations from the queue (or directly via `__call__`), updates its
+  score position per step, and yields the current beat. On stream end it
+  returns the final `alignment_path` — a `(2, T)` `np.ndarray` of
+  `(score_beat, perf_time)` pairs.
+
+`STREAM_END` is a module-level sentinel (not a tuple); `OnlineAlignment.run()`
+checks for it and exits the read loop.
+
+### Score representation
+
+The example score `matchmaker/assets/simple_mozart_k265_var1.musicxml` is
+used in tests and the contribution guide. The first two measures:
+
+![](./matchmaker/assets/simple_mozart_first_two_measures.png)
+
+Beat positions follow the `onset_beat` field of partitura's `note_array()`,
+whose unit is the score's denominator (the quarter note for this 2/4 piece).
+Notes start at beats `0.00, 0.25, 0.50, 0.75, 1.00, ...`.
+
+```python
+import numpy as np
+import partitura as pt
+
+score = pt.load_score("matchmaker/assets/simple_mozart_k265_var1.musicxml")
+note_array = score[0].note_array()
+score_positions = np.unique(note_array["onset_beat"])
+# array([0.  , 0.25, 0.5 , 0.75, 1.  , ..., 13.25, 13.5 ])  shape (54,)
+```
+
+If a score follower reaches the third unique onset:
+```python
+follower.current_index    # 2
+follower.current_position # 0.5  (= score_positions[2])
+```
+
 ## Alignment Methods
 
 ### Audio (`input_type="audio"`)
@@ -269,11 +331,12 @@ Default processor: `"chroma"`
 
 ### MIDI (`input_type="midi"`)
 
-Default processor: `"pitch_ioi"`
+Default processor: `"pitch_chord"`
 
 | Processor | Description |
 |---|---|
-| `"pitch_ioi"` | Pitch and inter-onset interval features |
+| `"pitch_chord"` | Pitch features grouped per chord onset |
+| `"pitch"` | Pitch features per note (no chord grouping) |
 | `"pianoroll"` | Piano-roll features |
 | `"pitchclass"` | Pitch class features |
 
@@ -287,13 +350,19 @@ Initialization parameters for the `Matchmaker` class:
 | `performance_file` | str or None | `None` | Path to a recorded performance file for simulation mode. If `None`, live device input is used. |
 | `input_type` | str | `"audio"` | Input modality. Options: `"audio"`, `"midi"`. |
 | `method` | str or None | `None` | Alignment method. Defaults to `"arzt"` for audio, `"pthmm"` for MIDI. See [Alignment Methods](#alignment-methods). |
-| `processor` | str or None | `None` | Feature processor. Defaults to `"chroma"` for audio, `"pitch_ioi"` for MIDI. See [Features](#features). |
+| `processor` | str or None | `None` | Feature processor. Defaults to `"chroma"` for audio, `"pitch_chord"` for MIDI. See [Features](#features). |
 | `kwargs` | dict or None | `None` | Method-specific parameters (e.g., `window_size`, `sample_rate`, `frame_rate`). If `None`, built-in defaults for the chosen method are used. |
 | `stream` | Stream or None | `None` | Custom `Stream` instance for external input sources (e.g., WebSocket). If `None`, the stream is built automatically from `input_type`. |
 | `device_name_or_index` | str or int or None | `None` | Audio/MIDI device name or index for live input. Requires `pymatchmaker[devices]`. |
 | `tempo` | float or None | `None` | Initial tempo in BPM for score rendering. If `None`, inferred from the score. |
 | `wait` | bool | `False` | If `True`, block until the score follower finishes before returning from `run()`. |
 | `unfold_score` | bool | `True` | If `True`, unfold repeat signs in the score before alignment. |
+
+## Contributing
+
+If you want to add a new score follower, please refer to [HOW_TO_CONTRIBUTE.md](HOW_TO_CONTRIBUTE.md)
+for the `OnlineAlignment` interface, boilerplate, and audio/MIDI tips.
+The same guide is also available in the [online docs](https://pymatchmaker.readthedocs.io/en/latest/contribute.html).
 
 ## Citing Matchmaker
 

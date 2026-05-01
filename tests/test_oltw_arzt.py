@@ -64,6 +64,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             random_state=RNG,
             dtype=np.float32,
         )
+        score_positions = np.arange(X.shape[0], dtype=np.float32)
 
         self.assertTrue(X.dtype == np.float32)
         self.assertTrue(Y.dtype == np.float32)
@@ -73,6 +74,8 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             MatchmakerInvalidParameterTypeError,
             OnlineTimeWarpingArzt,
             reference_features=X,
+            score_positions=score_positions,
+            ref_frame_to_beat=score_positions,
             window_size=2,
             step_size=1,
             # Invalid type (not str, tuple or callable)
@@ -85,6 +88,8 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
         for distance_func in CYTHONIZED_METRICS_WO_ARGUMENTS:
             oltw = OnlineTimeWarpingArzt(
                 reference_features=X,
+                score_positions=score_positions,
+                ref_frame_to_beat=score_positions,
                 window_size=2,
                 step_size=1,
                 distance_func=distance_func,
@@ -93,17 +98,19 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             )
 
             for i, obs in enumerate(Y):
-                current_position = oltw(obs)
+                current_position = oltw((obs, float(i)))
                 # check that the alignments are correct
                 self.assertTrue(np.all(path[i] == (current_position, i)))
-                # Check that outputs are integers
-                self.assertTrue(isinstance(current_position, int))
+                # __call__ now returns the float beat position
+                self.assertTrue(isinstance(current_position, float))
 
         # Test that error is raised if incorrect name
         self.assertRaises(
             MatchmakerInvalidOptionError,
             OnlineTimeWarpingArzt,
             reference_features=X,
+            score_positions=score_positions,
+            ref_frame_to_beat=score_positions,
             window_size=2,
             step_size=1,
             distance_func="wrong_distance_func",
@@ -116,6 +123,8 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
                 for p in RNG.uniform(low=1, high=10, size=10):
                     oltw = OnlineTimeWarpingArzt(
                         reference_features=X,
+                        score_positions=score_positions,
+                        ref_frame_to_beat=score_positions,
                         window_size=2,
                         step_size=1,
                         distance_func=(distance_func, dict(p=p)),
@@ -124,17 +133,19 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
                     )
 
                     for i, obs in enumerate(Y):
-                        current_position = oltw(obs)
+                        current_position = oltw((obs, float(i)))
                         # check that the alignments are correct
                         self.assertTrue(np.all(path[i] == (current_position, i)))
-                        # Check that outputs are integers
-                        self.assertTrue(isinstance(current_position, int))
+                        # __call__ now returns the float beat position
+                        self.assertTrue(isinstance(current_position, float))
 
         # Test that error is raised if incorrect name
         self.assertRaises(
             MatchmakerInvalidOptionError,
             OnlineTimeWarpingArzt,
             reference_features=X,
+            score_positions=score_positions,
+            ref_frame_to_beat=score_positions,
             window_size=2,
             step_size=1,
             distance_func=("wrong_distance_func", {"param": "value"}),
@@ -145,6 +156,8 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
         for spdist in SCIPY_DISTANCES:
             oltw = OnlineTimeWarpingArzt(
                 reference_features=X,
+                score_positions=score_positions,
+                ref_frame_to_beat=score_positions,
                 window_size=2,
                 step_size=1,
                 distance_func=getattr(sp_distance, spdist),
@@ -153,9 +166,9 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             )
 
             for i, obs in enumerate(Y):
-                current_position = oltw(obs)
+                current_position = oltw((obs, float(i)))
                 # with some of the scipy metrics, we cannot
                 # ensure that the results will always
                 # be correct, so we only
                 # check if the output types are correct
-                self.assertTrue(isinstance(current_position, int))
+                self.assertTrue(isinstance(current_position, float))

@@ -15,8 +15,8 @@ from partitura.performance import PerformedPart
 from matchmaker import EXAMPLE_MATCH, EXAMPLE_PERFORMANCE, EXAMPLE_SCORE
 from matchmaker.features.midi import (
     PianoRollProcessor,
+    PitchChordProcessor,
     PitchClassPianoRollProcessor,
-    PitchIOIProcessor,
     PitchProcessor,
     compute_features_from_symbolic,
 )
@@ -77,38 +77,45 @@ class TestPitchProcessor(unittest.TestCase):
             )
 
             non_none_outputs = 0
+            # MidiStream attaches perf_time, so each item is (features, perf_time)
             if processor.piano_range and processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-                        self.assertTrue(len(out) == 1)
-                        self.assertTrue(out == non_none_outputs + 60 - 21)
+                        pitch_obs, _ = out
+                        self.assertTrue(len(pitch_obs) == 1)
+                        self.assertTrue(pitch_obs == non_none_outputs + 60 - 21)
                         non_none_outputs += 1
 
             elif not processor.piano_range and processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-                        self.assertTrue(len(out) == 1)
-                        self.assertTrue(out == non_none_outputs + 60)
+                        pitch_obs, _ = out
+                        self.assertTrue(len(pitch_obs) == 1)
+                        self.assertTrue(pitch_obs == non_none_outputs + 60)
                         non_none_outputs += 1
 
             elif processor.piano_range and not processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-                        self.assertTrue(len(out) == 88)
-                        self.assertTrue(np.argmax(out) == non_none_outputs + 60 - 21)
+                        pitch_obs, _ = out
+                        self.assertTrue(len(pitch_obs) == 88)
+                        self.assertTrue(
+                            np.argmax(pitch_obs) == non_none_outputs + 60 - 21
+                        )
                         non_none_outputs += 1
 
             elif not processor.piano_range and not processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-                        self.assertTrue(len(out) == 128)
-                        self.assertTrue(np.argmax(out) == non_none_outputs + 60)
+                        pitch_obs, _ = out
+                        self.assertTrue(len(pitch_obs) == 128)
+                        self.assertTrue(np.argmax(pitch_obs) == non_none_outputs + 60)
                         non_none_outputs += 1
 
             self.assertTrue(non_none_outputs == len(note_array))
 
 
-class TestPitchIOIProcessor(unittest.TestCase):
+class TestPitchChordProcessor(unittest.TestCase):
     @patch("sys.stdout", new_callable=StringIO)
     def test_processor(self, mock_io):
         note_array = np.empty(
@@ -126,20 +133,20 @@ class TestPitchIOIProcessor(unittest.TestCase):
 
         perf = PerformedPart.from_note_array(note_array)
 
-        feature_processor = PitchIOIProcessor(
+        feature_processor = PitchChordProcessor(
             piano_range=False,
             return_pitch_list=False,
         )
-        feature_processor_pr = PitchIOIProcessor(
+        feature_processor_pr = PitchChordProcessor(
             piano_range=True,
             return_pitch_list=False,
         )
-        feature_processor_pl = PitchIOIProcessor(
+        feature_processor_pl = PitchChordProcessor(
             piano_range=False,
             return_pitch_list=True,
         )
 
-        feature_processor_pl_pr = PitchIOIProcessor(
+        feature_processor_pl_pr = PitchChordProcessor(
             piano_range=True,
             return_pitch_list=True,
         )
@@ -165,100 +172,64 @@ class TestPitchIOIProcessor(unittest.TestCase):
             if processor.piano_range and processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-                        pitch_obs, ioi_obs = out
+                        pitch_obs, time_obs = out
                         self.assertTrue(len(pitch_obs) == 1)
                         self.assertTrue(pitch_obs == non_none_outputs + 60 - 21)
 
-                        if non_none_outputs == 0:
-                            self.assertTrue(
-                                np.isclose(
-                                    ioi_obs,
-                                    0,
-                                    atol=polling_period,
-                                )
+                        self.assertTrue(
+                            np.isclose(
+                                time_obs,
+                                non_none_outputs,
+                                atol=polling_period,
                             )
-                        else:
-                            self.assertTrue(
-                                np.isclose(
-                                    ioi_obs,
-                                    1,
-                                    atol=polling_period,
-                                )
-                            )
+                        )
                         non_none_outputs += 1
 
             elif not processor.piano_range and processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-                        pitch_obs, ioi_obs = out
+                        pitch_obs, time_obs = out
                         self.assertTrue(len(pitch_obs) == 1)
                         self.assertTrue(pitch_obs == non_none_outputs + 60)
-                        if non_none_outputs == 0:
-                            self.assertTrue(
-                                np.isclose(
-                                    ioi_obs,
-                                    0,
-                                    atol=polling_period,
-                                )
+                        self.assertTrue(
+                            np.isclose(
+                                time_obs,
+                                non_none_outputs,
+                                atol=polling_period,
                             )
-                        else:
-                            self.assertTrue(
-                                np.isclose(
-                                    ioi_obs,
-                                    1,
-                                    atol=polling_period,
-                                )
-                            )
+                        )
                         non_none_outputs += 1
 
             elif processor.piano_range and not processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-                        pitch_obs, ioi_obs = out
+                        pitch_obs, time_obs = out
                         self.assertTrue(len(pitch_obs) == 88)
                         self.assertTrue(
                             np.argmax(pitch_obs) == non_none_outputs + 60 - 21
                         )
-                        if non_none_outputs == 0:
-                            self.assertTrue(
-                                np.isclose(
-                                    ioi_obs,
-                                    0,
-                                    atol=polling_period,
-                                )
+                        self.assertTrue(
+                            np.isclose(
+                                time_obs,
+                                non_none_outputs,
+                                atol=polling_period,
                             )
-                        else:
-                            self.assertTrue(
-                                np.isclose(
-                                    ioi_obs,
-                                    1,
-                                    atol=polling_period,
-                                )
-                            )
+                        )
                         non_none_outputs += 1
 
             elif not processor.piano_range and not processor.return_pitch_list:
                 for out in output:
                     if out is not None:
-                        pitch_obs, ioi_obs = out
+                        pitch_obs, time_obs = out
                         self.assertTrue(len(pitch_obs) == 128)
                         self.assertTrue(np.argmax(pitch_obs) == non_none_outputs + 60)
-                        if non_none_outputs == 0:
-                            self.assertTrue(
-                                np.isclose(
-                                    ioi_obs,
-                                    0,
-                                    atol=polling_period,
-                                )
+                        self.assertTrue(
+                            np.isclose(
+                                time_obs,
+                                non_none_outputs,
+                                atol=polling_period,
                             )
-                        else:
-                            self.assertTrue(
-                                np.isclose(
-                                    ioi_obs,
-                                    1,
-                                    atol=polling_period,
-                                )
-                            )
+                        )
                         non_none_outputs += 1
 
             self.assertTrue(non_none_outputs == len(note_array))
@@ -308,29 +279,33 @@ class TestPianoRollProcessor(unittest.TestCase):
                 polling_period=polling_period,
             )
 
+            # MidiStream attaches perf_time, so each item is (pianoroll, perf_time)
             if processor.piano_range and processor.use_velocity:
                 for out in output:
-                    self.assertTrue(isinstance(out, np.ndarray))
-                    self.assertTrue(len(out) == 88)
-                    self.assertTrue(np.sum(out) == 64 or np.sum(out) == 0)
-                    if out.sum() > 0:
-                        self.assertTrue(np.argmax(out) in note_array["pitch"] - 21)
+                    pr, _ = out
+                    self.assertTrue(isinstance(pr, np.ndarray))
+                    self.assertTrue(len(pr) == 88)
+                    self.assertTrue(np.sum(pr) == 64 or np.sum(pr) == 0)
+                    if pr.sum() > 0:
+                        self.assertTrue(np.argmax(pr) in note_array["pitch"] - 21)
 
             elif processor.piano_range and not processor.use_velocity:
                 for out in output:
-                    self.assertTrue(isinstance(out, np.ndarray))
-                    self.assertTrue(len(out) == 88)
-                    self.assertTrue(np.sum(out) == 1 or np.sum(out) == 0)
-                    if out.sum() > 0:
-                        self.assertTrue(np.argmax(out) in note_array["pitch"] - 21)
+                    pr, _ = out
+                    self.assertTrue(isinstance(pr, np.ndarray))
+                    self.assertTrue(len(pr) == 88)
+                    self.assertTrue(np.sum(pr) == 1 or np.sum(pr) == 0)
+                    if pr.sum() > 0:
+                        self.assertTrue(np.argmax(pr) in note_array["pitch"] - 21)
 
             else:
                 for out in output:
-                    self.assertTrue(isinstance(out, np.ndarray))
-                    self.assertTrue(len(out) == 128)
-                    self.assertTrue(np.sum(out) == 1 or np.sum(out) == 0)
-                    if out.sum() > 0:
-                        self.assertTrue(np.argmax(out) in note_array["pitch"])
+                    pr, _ = out
+                    self.assertTrue(isinstance(pr, np.ndarray))
+                    self.assertTrue(len(pr) == 128)
+                    self.assertTrue(np.sum(pr) == 1 or np.sum(pr) == 0)
+                    if pr.sum() > 0:
+                        self.assertTrue(np.argmax(pr) in note_array["pitch"])
 
 
 class TestPitchClassPianoRollProcessor(unittest.TestCase):
@@ -369,21 +344,24 @@ class TestPitchClassPianoRollProcessor(unittest.TestCase):
                 polling_period=polling_period,
             )
 
+            # MidiStream attaches perf_time, so each item is (pitch_class, perf_time)
             if processor.use_velocity:
                 for out in output:
-                    self.assertTrue(isinstance(out, np.ndarray))
-                    self.assertTrue(len(out) == 12)
-                    self.assertTrue(np.sum(out) == 64 or np.sum(out) == 0)
-                    if out.sum() > 0:
-                        self.assertTrue(np.argmax(out) in note_array["pitch"] % 12)
+                    pc, _ = out
+                    self.assertTrue(isinstance(pc, np.ndarray))
+                    self.assertTrue(len(pc) == 12)
+                    self.assertTrue(np.sum(pc) == 64 or np.sum(pc) == 0)
+                    if pc.sum() > 0:
+                        self.assertTrue(np.argmax(pc) in note_array["pitch"] % 12)
 
             else:
                 for out in output:
-                    self.assertTrue(isinstance(out, np.ndarray))
-                    self.assertTrue(len(out) == 12)
-                    self.assertTrue(np.sum(out) == 1 or np.sum(out) == 0)
-                    if out.sum() > 0:
-                        self.assertTrue(np.argmax(out) in note_array["pitch"] % 12)
+                    pc, _ = out
+                    self.assertTrue(isinstance(pc, np.ndarray))
+                    self.assertTrue(len(pc) == 12)
+                    self.assertTrue(np.sum(pc) == 1 or np.sum(pc) == 0)
+                    if pc.sum() > 0:
+                        self.assertTrue(np.argmax(pc) in note_array["pitch"] % 12)
 
             self.assertTrue(len(processor.pitch_class_slices) > 0)
             processor.reset()
@@ -407,14 +385,14 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
             output_length = None
             features_list = [
                 "pitch",
-                "pitch_ioi",
+                "pitch_chord",
                 "pianoroll",
                 "pitch_class_pianoroll",
             ]
 
             feature_kwargs = [
                 dict(piano_range=True),  # PitchProcessor
-                dict(piano_range=True),  # PitchIOIProcessor
+                dict(piano_range=True),  # PitchChordProcessor
                 dict(piano_range=True),  # PianoRollProcessor
                 dict(use_velocity=False),  # PitchClassPianoRollProcessor
             ]
@@ -447,7 +425,7 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
             output_length = None
             features_list = [
                 "pitch",
-                "pitch_ioi",
+                "pitch_chord",
                 "pianoroll",
                 "pitch_class_pianoroll",
             ]

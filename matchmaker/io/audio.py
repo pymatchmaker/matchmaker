@@ -128,6 +128,7 @@ class AudioStream(Stream):
             "min_latency": float("inf"),
         }
         self.input_index = 0
+        self._emit_count = 0
         self._preloaded_audio = None
 
         if self.mock:
@@ -165,10 +166,11 @@ class AudioStream(Stream):
     ) -> Tuple[np.ndarray, int]:
         self.input_index += 1
         self.last_data_received = time.time()
-        self.prev_time = time_info["input_buffer_adc_time"]
-        # initial y
+        adc_time = time_info["input_buffer_adc_time"]
+        self.prev_time = adc_time
         target_audio = np.frombuffer(data, dtype=np.float32)
-        self._process_feature(target_audio, time_info["input_buffer_adc_time"])
+        # perf_time is computed inside _process_feature based on emit_count
+        self._process_feature(target_audio, adc_time)
         if not self.stream_start.is_set():
             self.stream_start.set()
 
@@ -197,10 +199,12 @@ class AudioStream(Stream):
             # add last chunk at the beginning of the block
             target_audio = np.concatenate((self.last_chunk, target_audio))
 
-        features = self.processor(target_audio)
+        perf_time = self._emit_count * self.hop_length / float(self.sample_rate)
+        output = self.processor((target_audio, perf_time))
 
         if self.last_chunk is not None:
-            self.queue.put((features, f_time))
+            self._emit_count += 1
+            self.queue.put(output)
 
         # update latency stats
         latency = time.time() - self.last_data_received

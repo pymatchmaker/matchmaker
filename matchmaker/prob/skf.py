@@ -13,12 +13,10 @@ with identical (chord_index, age) are merged via moment matching.
 """
 
 import time
-from queue import Empty
 from typing import List, Optional, Tuple
 
 import numpy as np
 import partitura
-import progressbar
 from partitura.score import Note as PtNote
 from partitura.score import Part as PtPart
 from partitura.score import TimeSignature as PtTimeSignature
@@ -28,7 +26,6 @@ from scipy.special import ndtr  # faster than scipy.stats.norm.cdf
 from matchmaker.base import OnlineAlignment
 from matchmaker.io.audio import QUEUE_TIMEOUT
 from matchmaker.io.queue import RECVQueue
-from matchmaker.io.stream import STREAM_END
 from matchmaker.utils.misc import set_latency_stats
 
 # ---------------------------------------------------------------------------
@@ -329,7 +326,7 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
             reference_features
         )
         self.K = len(self.chords)
-        self.state_space = self.onset_beats
+        self.score_positions = self.onset_beats
 
         # Build spectral templates (Raphael 2006: synthesized audio)
         self.templates = build_spectral_templates(
@@ -358,33 +355,17 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
 
         # Tracking state
         self.input_index = 0
-        self._warping_path: List[Tuple[float, int]] = []
-        self.current_state_index = 0
+        self.current_index = 0
+        self.queue_timeout = QUEUE_TIMEOUT
         self.latency_stats = {
-            "total_latency": 0.0,
+            "total_latency": 0,
             "total_frames": 0,
-            "max_latency": 0.0,
+            "max_latency": 0,
             "min_latency": float("inf"),
         }
-        self.last_queue_update = 0.0
 
         # For compatibility with matchmaker eval
-        self.input_features = None
         self.patience = 0
-
-    @property
-    def warping_path(self) -> Optional[np.ndarray]:
-        if not self._warping_path:
-            return None
-        return np.array(self._warping_path).T
-
-    @property
-    def current_position(self) -> float:
-        if self._warping_path:
-            return self._warping_path[-1][0]
-        if self.current_state_index < len(self.state_space):
-            return float(self.state_space[self.current_state_index])
-        return float(self.state_space[-1])
 
     def _sigma_eps(self, t_k: float) -> float:
         """Onset noise std: proportional to tempo."""
@@ -524,7 +505,7 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
         spectrum = np.abs(np.fft.rfft(frame, n=self.n_fft))
         return spectrum
 
-    def __call__(self, observation) -> int:
+    def __call__(self, observation) -> float:
         """Process one audio frame.
 
         Parameters
@@ -534,11 +515,13 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
 
         Returns
         -------
-        int
-            Current chord index (best hypothesis).
+        float
+            Current beat position (chord onset + within-chord interpolation).
         """
-        # AudioStream sends (features, f_time) tuples
+        t0 = time.time()
+        # AudioStream sends (features, perf_time_sec) tuples
         if isinstance(observation, tuple):
+            self.current_perf_time = float(observation[1])
             observation = observation[0]
         y = self._extract_features(observation)
 
@@ -594,7 +577,7 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
         else:
             # Fallback: reset to current best state
             self.hypotheses = {
-                (self.current_state_index, 1): (
+                (self.current_index, 1): (
                     1.0,
                     self.init_tempo,
                     self.init_tempo_var,
@@ -611,7 +594,7 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
             chord_weighted_mu[k] += prob * mu_t
 
         best_k = int(np.argmax(chord_probs))
-        self.current_state_index = best_k
+        self.current_index = best_k
 
         # Interpolate position within chord using expected age and tempo
         base_beat = float(self.onset_beats[best_k])
@@ -634,51 +617,11 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
         else:
             position = base_beat
 
-        self._warping_path.append((position, self.input_index))
+        self.current_position = position
+        self._alignment_path.append((position, self.current_perf_time))
         self.input_index += 1
+        self.latency_stats = set_latency_stats(
+            time.time() - t0, self.latency_stats, self.input_index
+        )
 
-        return self.current_state_index
-
-    def is_still_following(self) -> bool:
-        return self.current_state_index < self.K - 1
-
-    def run(self, verbose: bool = True):
-        """Run score following, consuming frames from the queue.
-
-        Yields
-        ------
-        float
-            Current beat position.
-        """
-        empty_counter = 0
-        if verbose:
-            pbar = progressbar.ProgressBar(
-                maxval=self.K,
-                redirect_stdout=True,
-                redirect_stderr=True,
-            )
-            pbar.start()
-
-        while self.is_still_following():
-            try:
-                queue_input = self.queue.get(timeout=QUEUE_TIMEOUT)
-            except Empty:
-                break
-            if queue_input is STREAM_END:
-                break
-            self.last_queue_update = time.time()
-            if queue_input is not None:
-                self(queue_input)
-                empty_counter = 0
-
-                if verbose:
-                    pbar.update(self.current_state_index)
-                latency = time.time() - self.last_queue_update
-                self.latency_stats = set_latency_stats(
-                    latency, self.latency_stats, self.input_index
-                )
-                yield self.current_position
-
-        if verbose:
-            pbar.finish()
-        return self.warping_path
+        return self.current_position

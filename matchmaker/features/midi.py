@@ -54,10 +54,7 @@ class PitchProcessor(Processor):
         self,
         frame: InputMIDIFrame,
     ) -> Optional[Tuple[NDArrayFloat, float]]:
-        if isinstance(frame, tuple):
-            data, f_time = frame
-        else:
-            data = frame
+        data, f_time = frame
         # pitch_obs = []
         pitch_obs = np.zeros(
             128,
@@ -80,11 +77,8 @@ class PitchProcessor(Processor):
                 pitch_obs = pitch_obs[21:109]
 
             if self.return_pitch_list:
-                return np.array(
-                    pitch_obs_list,
-                    dtype=np.float32,
-                )
-            return pitch_obs
+                return np.array(pitch_obs_list, dtype=np.float32), f_time
+            return pitch_obs, f_time
         else:
             return None
 
@@ -92,7 +86,7 @@ class PitchProcessor(Processor):
         pass
 
 
-class PitchIOIProcessor(Processor):
+class PitchChordProcessor(Processor):
     """
     A class to process pitch and IOI information from MIDI files
 
@@ -121,7 +115,6 @@ class PitchIOIProcessor(Processor):
         chord_threshold: float = CHORD_THRESHOLD,
     ) -> None:
         super().__init__()
-        self.prev_time = None
         self.piano_range = piano_range
         self.return_pitch_list = return_pitch_list
         self.piano_shift = 21 if piano_range else 0
@@ -131,22 +124,18 @@ class PitchIOIProcessor(Processor):
         self._pending_time: Optional[float] = None
 
     def _flush(self) -> Tuple[NDArrayFloat, float]:
-        if self.prev_time is None:
-            ioi_obs = 0.0
-        else:
-            ioi_obs = self._pending_time - self.prev_time
-        self.prev_time = self._pending_time
+        chord_onset = self._pending_time
 
         if self.return_pitch_list:
             result = (
                 np.array(self._pending_list, dtype=np.float32),
-                ioi_obs,
+                chord_onset,
             )
         else:
             pitch = self._pending_pitch
             if self.piano_range:
                 pitch = pitch[21:109]
-            result = (pitch.copy(), ioi_obs)
+            result = (pitch.copy(), chord_onset)
 
         self._pending_pitch = np.zeros(128, dtype=np.float32)
         self._pending_list = []
@@ -157,10 +146,7 @@ class PitchIOIProcessor(Processor):
         self,
         frame: InputMIDIFrame,
     ) -> Optional[Tuple[NDArrayFloat, float]]:
-        if isinstance(frame, tuple):
-            data, f_time = frame
-        else:
-            data = frame
+        data, _ = frame
 
         result = None
         for msg, m_time in data:
@@ -188,7 +174,6 @@ class PitchIOIProcessor(Processor):
         return None
 
     def reset(self) -> None:
-        self.prev_time = None
         self._pending_pitch = np.zeros(128, dtype=np.float32)
         self._pending_list = []
         self._pending_time = None
@@ -226,13 +211,10 @@ class PianoRollProcessor(Processor):
     def __call__(
         self,
         frame: InputMIDIFrame,
-    ) -> np.ndarray:
+    ) -> Tuple[np.ndarray, float]:
         # initialize piano roll
         piano_roll_slice: np.ndarray = np.zeros(128, dtype=self.dtype)
-        if isinstance(frame, tuple):
-            data, f_time = frame
-        else:
-            data = frame
+        data, f_time = frame
         for msg, m_time in data:
             if msg.type in ("note_on", "note_off"):
                 if msg.type == "note_on" and msg.velocity > 0:
@@ -253,7 +235,7 @@ class PianoRollProcessor(Processor):
             piano_roll_slice = piano_roll_slice[21:109]
         self.piano_roll_slices.append(piano_roll_slice)
 
-        return piano_roll_slice
+        return piano_roll_slice, f_time
 
     def reset(self) -> None:
         self.piano_roll_slices = []
@@ -304,11 +286,7 @@ class OnsetPianoRollProcessor(Processor):
         return (vec, t)
 
     def __call__(self, frame: InputMIDIFrame) -> Optional[Tuple[np.ndarray, float]]:
-        if isinstance(frame, tuple):
-            data, f_time = frame
-        else:
-            data = frame
-            f_time = 0.0
+        data, _ = frame
 
         result = None
         for msg, m_time in data:
@@ -368,13 +346,10 @@ class PitchClassPianoRollProcessor(Processor):
     def __call__(
         self,
         frame: InputMIDIFrame,
-    ) -> np.ndarray:
+    ) -> Tuple[np.ndarray, float]:
         # initialize pitch class
         pitch_class_slice: np.ndarray = np.zeros(12, dtype=self.dtype)
-        if isinstance(frame, tuple):
-            data, f_time = frame
-        else:
-            data = frame
+        data, f_time = frame
         for msg, m_time in data:
             if msg.type in ("note_on", "note_off"):
                 if msg.type == "note_on" and msg.velocity > 0:
@@ -393,7 +368,7 @@ class PitchClassPianoRollProcessor(Processor):
 
         self.pitch_class_slices.append(pitch_class_slice)
 
-        return pitch_class_slice
+        return pitch_class_slice, f_time
 
     def reset(self) -> None:
         self.pitch_class_slices = []
@@ -409,7 +384,7 @@ def compute_features_from_symbolic(
 ):
     processor_mapping = {
         "pitch": PitchProcessor,
-        "pitch_ioi": PitchIOIProcessor,
+        "pitch_chord": PitchChordProcessor,
         "pianoroll": PianoRollProcessor,
         "pitch_class_pianoroll": PitchClassPianoRollProcessor,
     }

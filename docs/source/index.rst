@@ -17,6 +17,7 @@ Welcome to Matchmaker's Documentation!
    install
    usage
    configurations
+   contribute
    citation
 
 .. toctree::

@@ -13,7 +13,6 @@ from partitura.utils.music import midi_pitch_to_frequency, note_name_to_midi_pit
 
 from matchmaker import EXAMPLE_PIECES
 from matchmaker.features.audio import (
-    ChromagramIOIProcessor,
     ChromagramProcessor,
     LogSpectralEnergyProcessor,
     MelSpectrogramProcessor,
@@ -63,7 +62,7 @@ class TestAudioProcessors(unittest.TestCase):
             sample_audio = create_sample_audio_waveform(freq)
             frame_time = 0
             processor = ChromagramProcessor()
-            chroma_output = processor((sample_audio, frame_time))
+            chroma_output, _ = processor((sample_audio, frame_time))
             # check that the chroma output is an array
             self.assertIsInstance(chroma_output, np.ndarray)
             # check that the chroma output has the right number of chroma
@@ -72,42 +71,6 @@ class TestAudioProcessors(unittest.TestCase):
             self.assertEqual(chroma_output.sum(0).argmax(), i)
             # Expected shape for one second of audio
             self.assertEqual(chroma_output.shape[0], 30 - 1)
-
-    def test_chromagram_ioi_processor(self):
-        processor = ChromagramIOIProcessor()
-
-        notes = [
-            "C4",
-            "C#4",
-            "D4",
-            "D#4",
-            "E4",
-            "F4",
-            "F#4",
-            "G4",
-            "G#4",
-            "A4",
-            "A#4",
-            "B4",
-        ]
-
-        for i, note in enumerate(notes):
-            midi_pitch = note_name_to_midi_pitch(note)
-            freq = midi_pitch_to_frequency(midi_pitch)
-            sample_audio = create_sample_audio_waveform(freq)
-            frame_time = i * 0.5
-            chroma_output, ioi_obs = processor((sample_audio, frame_time))
-            # check that the chroma output is an array
-            self.assertIsInstance(chroma_output, np.ndarray)
-            # check that the chroma output has the right number of chroma
-            self.assertEqual(chroma_output.shape[1], N_CHROMA)
-            # test that the output of the chroma corresponds to the right note
-            self.assertEqual(chroma_output.sum(0).argmax(), i)
-            # Expected shape for one second of audio
-            self.assertEqual(chroma_output.shape[0], 30 - 1)
-            # check ioi obs
-            expected_ioi_obs = 0.5 if i > 0 else 0.0
-            self.assertTrue(ioi_obs == expected_ioi_obs)
 
     def test_mfcc_processor(self):
         processor = MFCCProcessor()
@@ -131,7 +94,7 @@ class TestAudioProcessors(unittest.TestCase):
             midi_pitch = note_name_to_midi_pitch(note)
             freq = midi_pitch_to_frequency(midi_pitch)
             sample_audio = create_sample_audio_waveform(freq)
-            mfcc_output = processor(sample_audio)
+            mfcc_output, _ = processor((sample_audio, 0.0))
             self.assertIsInstance(mfcc_output, np.ndarray)
             # check that we have the expected number of MFCCs
             self.assertEqual(mfcc_output.shape[1], N_MFCC)
@@ -154,7 +117,7 @@ class TestAudioProcessors(unittest.TestCase):
 
         for i, freq in enumerate(mel_frequencies):
             sample_audio = create_sample_audio_waveform(freq)
-            mel_output = processor(sample_audio)
+            mel_output, _ = processor((sample_audio, 0.0))
             self.assertIsInstance(mel_output, np.ndarray)
             # check expected number of mels
             self.assertEqual(mel_output.shape[1], N_MELS)
@@ -166,7 +129,7 @@ class TestAudioProcessors(unittest.TestCase):
     def test_log_spectral_energy_processor(self):
         processor = LogSpectralEnergyProcessor()
         sample_audio = create_sample_audio_waveform(440)
-        log_spectral_output = processor(sample_audio)
+        log_spectral_output, _ = processor((sample_audio, 0.0))
         self.assertIsInstance(log_spectral_output, np.ndarray)
         self.assertGreater(log_spectral_output.shape[1], 0)
         self.assertEqual(log_spectral_output.shape[0], 30 - 1)

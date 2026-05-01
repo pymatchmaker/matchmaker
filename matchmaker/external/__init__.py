@@ -11,7 +11,7 @@ Supported method keys:
   - "OPTM"     : parangonar.OnlinePureTransformerMatcher
 """
 
-from typing import Generator, Optional
+from typing import Generator
 
 import numpy as np
 import parangonar as pa
@@ -19,8 +19,8 @@ import partitura as pt
 
 from matchmaker.base import OnlineAlignment
 
-_BATCH_MATCHERS = {"SL_OLTW", "SLT_OLTW"}
-_INCREMENTAL_MATCHERS = {"OTM", "OPTM"}
+_OLTW_MATCHERS = {"SL_OLTW", "SLT_OLTW"}
+_TRANSFORMER_MATCHERS = {"OTM", "OPTM"}
 
 
 def _ensure_unique_ids(note_array: np.ndarray, prefix: str) -> np.ndarray:
@@ -61,19 +61,19 @@ class OnlineParangonarAlignment(OnlineAlignment):
         method: str,
         queue=None,
     ):
-        super().__init__(reference_features=reference_features)
-        if method not in _BATCH_MATCHERS | _INCREMENTAL_MATCHERS:
+        if method not in _OLTW_MATCHERS | _TRANSFORMER_MATCHERS:
             raise ValueError(f"Unknown parangonar method: {method}")
+        score_note_array = _ensure_unique_ids(reference_features, prefix="s")
+        score_positions = np.unique(score_note_array["onset_beat"]).astype(np.float32)
+        super().__init__(
+            reference_features=reference_features,
+            score_positions=score_positions,
+            queue=queue,
+        )
         self.method = method
         self.performance_file = performance_file
-        self.queue = queue
-
-        self.score_note_array = _ensure_unique_ids(reference_features, prefix="s")
+        self.score_note_array = score_note_array
         self.matcher = self._build_matcher(method, self.score_note_array)
-
-        self.warping_path: Optional[np.ndarray] = None
-        self.input_features = None
-        self.state_space = np.unique(self.score_note_array["onset_beat"])
 
     @staticmethod
     def _build_matcher(method: str, sna: np.ndarray):
@@ -87,44 +87,44 @@ class OnlineParangonarAlignment(OnlineAlignment):
             return pa.OnlinePureTransformerMatcher(sna)
         raise ValueError(method)
 
-    def __call__(self, performance_note):
-        return float(performance_note["onset_sec"])
+    def step(self, performance_note) -> None:
+        self.matcher.online(performance_note)
+        s_onset = float(self.matcher._prev_score_onset)
+        idx = int(np.searchsorted(self.score_positions, s_onset))
+        self.current_index = max(0, min(idx, len(self.score_positions) - 1))
 
     def _load_performance_note_array(self) -> np.ndarray:
         perf = pt.load_performance_midi(self.performance_file)
         pna = perf.note_array()
         return _ensure_unique_ids(pna, prefix="p")
 
-    def run(self, verbose: bool = True) -> Generator[float, None, None]:
+    def run(self, verbose: bool = True) -> Generator[float, None, np.ndarray]:
         pna = self._load_performance_note_array()
-        unique_onsets = np.unique(self.score_note_array["onset_beat"])
 
-        if self.method in _BATCH_MATCHERS:
+        # OLTW-based matchers
+        if self.method in _OLTW_MATCHERS:
             tracking_path = self.matcher(pna)
             score_idx = np.asarray(tracking_path[0], dtype=int)
             perf_idx = np.asarray(tracking_path[1], dtype=int)
-            score_beats = unique_onsets[score_idx]
+            score_beats = self.score_positions[score_idx]
             perf_secs = pna["onset_sec"][perf_idx]
-            for beat in score_beats:
-                yield float(beat)
-            self.warping_path = np.vstack(
-                [score_beats.astype(float), perf_secs.astype(float)]
-            )
-            return
+            for beat, perf_t in zip(score_beats, perf_secs):
+                self.current_index = int(
+                    np.searchsorted(self.score_positions, float(beat))
+                )
+                self.current_index = max(
+                    0, min(self.current_index, len(self.score_positions) - 1)
+                )
+                self.current_position = float(beat)
+                self.current_perf_time = float(perf_t)
+                self._alignment_path.append(
+                    (self.current_position, self.current_perf_time)
+                )
+                yield self.current_position
+            return self.alignment_path
 
+        # Transformer-based matchers
         self.matcher.prepare_performance(float(pna[0]["onset_sec"]))
-        score_beats_list = []
-        perf_secs_list = []
         for note in pna:
-            self.matcher.online(note)
-            s_onset = float(self.matcher._prev_score_onset)
-            p_onset = float(note["onset_sec"])
-            score_beats_list.append(s_onset)
-            perf_secs_list.append(p_onset)
-            yield s_onset
-        self.warping_path = np.vstack(
-            [
-                np.asarray(score_beats_list, dtype=float),
-                np.asarray(perf_secs_list, dtype=float),
-            ]
-        )
+            yield self((note, float(note["onset_sec"])))
+        return self.alignment_path

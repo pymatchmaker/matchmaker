@@ -17,10 +17,9 @@ Classes:
 
 import time
 from enum import IntEnum
-from typing import Dict, Generator, Optional
+from typing import Any, Dict, Generator, Optional, Tuple
 
 import numpy as np
-import progressbar
 import scipy.spatial.distance
 from numpy.typing import NDArray
 
@@ -28,7 +27,6 @@ from matchmaker.base import OnlineAlignment
 from matchmaker.features.audio import FRAME_RATE
 from matchmaker.io.audio import QUEUE_TIMEOUT
 from matchmaker.io.queue import RECVQueue
-from matchmaker.io.stream import STREAM_END
 from matchmaker.utils.misc import set_latency_stats
 
 
@@ -51,8 +49,7 @@ WINDOW_SIZE = 10  # seconds for frame, events for event
 class OnlineTimeWarpingDixon(OnlineAlignment):
     """Base class for Dixon-style OLTW.
 
-    Subclasses must implement ``step()``, ``reset()``, ``is_still_following()``,
-    and the ``current_beat`` / ``warping_path`` properties.
+    Subclasses must implement ``step()``, ``reset()``, ``is_still_following()``.
 
     Parameters
     ----------
@@ -64,7 +61,7 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         Max consecutive same-direction advances.
     distance_func : str
         Distance metric.
-    state_space : np.ndarray or None
+    score_positions : np.ndarray or None
         Score positions (beats).
     """
 
@@ -73,77 +70,24 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
     def __init__(
         self,
         reference_features,
+        score_positions,
         queue=None,
         max_run_count=MAX_RUN_COUNT,
         distance_func=DEFAULT_DISTANCE_FUNC,
-        state_space=None,
         **kwargs,
     ):
-        super().__init__(reference_features=reference_features)
-        self.queue = queue
+        super().__init__(
+            reference_features=reference_features,
+            score_positions=score_positions,
+            queue=queue,
+        )
         self.N_ref = self.reference_features.shape[0]
         self.max_run_count = max_run_count
         self.distance_func = (
             distance_func if isinstance(distance_func, str) else "euclidean"
         )
-        self.state_space = state_space
-        self._ref_frame_to_beat = kwargs.get("ref_frame_to_beat", None)
-        self.state_to_ref_time_map = kwargs.get("state_to_ref_time_map", None)
-        self.ref_to_state_time_map = kwargs.get("ref_to_state_time_map", None)
-        self.current_position = 0
+        self.current_index = 0
         self.input_index = 0
-        self.last_queue_update = time.time()
-        self.latency_stats: Dict[str, float] = {
-            "total_latency": 0,
-            "total_frames": 0,
-            "max_latency": 0,
-            "min_latency": float("inf"),
-        }
-
-    def __call__(self, input_features: NDArray[np.float32]) -> int:
-        self.step(input_features)
-        return self.current_position
-
-    def run(self, verbose=True) -> Generator[float, None, NDArray]:
-        """Run alignment from queue."""
-        self.reset()
-
-        if verbose:
-            n = len(self.state_space) if self.state_space is not None else self.N_ref
-            pbar = progressbar.ProgressBar(
-                max_value=n,
-                redirect_stdout=True,
-                redirect_stderr=True,
-            )
-            pbar.start()
-
-        while self.is_still_following():
-            item = self.queue.get(timeout=QUEUE_TIMEOUT)
-            if item is STREAM_END:
-                break
-            if item is None:
-                continue
-            input_feature = item[0] if isinstance(item, tuple) else item
-            self.last_queue_update = time.time()
-            self.step(input_feature)
-
-            if verbose:
-                pbar.update(
-                    int(np.searchsorted(self.state_space, self.current_beat))
-                    if self.state_space is not None
-                    else min(self.current_position, self.N_ref - 1)
-                )
-
-            latency = time.time() - self.last_queue_update
-            self.latency_stats = set_latency_stats(
-                latency, self.latency_stats, self.input_index
-            )
-            yield self.current_beat
-
-        if verbose:
-            pbar.finish()
-
-        return self.warping_path
 
 
 # ---------------------------------------------------------------------------
@@ -160,34 +104,37 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
     def __init__(
         self,
         reference_features,
+        score_positions,
         queue=None,
         window_size=WINDOW_SIZE,
         distance_func=OnlineTimeWarpingDixon.DEFAULT_DISTANCE_FUNC,
         max_run_count=MAX_RUN_COUNT,
         frame_per_seg=FRAME_PER_SEG,
         frame_rate=FRAME_RATE,
-        state_to_ref_time_map=None,
-        ref_to_state_time_map=None,
-        state_space=None,
+        ref_frame_to_beat: NDArray = None,
         **kwargs,
     ):
+        if ref_frame_to_beat is None:
+            raise ValueError(
+                "Frame-level Dixon requires `ref_frame_to_beat` (per-frame beat mapping)."
+            )
         super().__init__(
             reference_features=reference_features,
+            score_positions=score_positions,
             queue=queue,
             max_run_count=max_run_count,
             distance_func=distance_func,
-            state_space=state_space,
-            state_to_ref_time_map=state_to_ref_time_map,
-            ref_to_state_time_map=ref_to_state_time_map,
             **kwargs,
         )
         self.frame_rate = frame_rate
+        self._ref_frame_to_beat = ref_frame_to_beat
         self.w = int(window_size * self.frame_rate)
         self.frame_per_seg = frame_per_seg
+        self.queue_timeout = QUEUE_TIMEOUT
         self.reset()
 
     def reset(self):
-        self.input_features = np.empty((0, self.reference_features.shape[1]))
+        self.input_features = []
         self.acc_dist_matrix = np.full((self.w, self.w), np.inf, dtype=np.float32)
         self.wp = np.array([[0, 0]]).T
         self.ref_pointer = 0
@@ -196,10 +143,10 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
         self.run_count_input = 0
         self.best_ref = 0
         self.best_input = 0
-        self.current_position = 0
+        self.current_index = 0
         self.input_index = 0
-        self.last_queue_update = time.time()
-        self.latency_stats = {
+        self.current_perf_time: float = 0.0
+        self.latency_stats: Dict[str, float] = {
             "total_latency": 0,
             "total_frames": 0,
             "max_latency": 0,
@@ -207,19 +154,42 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
         }
         self._initialized = False
 
-    @property
-    def current_beat(self) -> float:
-        if self._ref_frame_to_beat is not None:
-            idx = min(self.best_ref, len(self._ref_frame_to_beat) - 1)
-            return float(self._ref_frame_to_beat[idx])
-        return float(self.best_ref)
+    def _frame_to_beat(self, frame: int) -> float:
+        """Per-frame beat value (frame-precision)."""
+        return float(
+            self._ref_frame_to_beat[min(frame, len(self._ref_frame_to_beat) - 1)]
+        )
+
+    def _frame_to_score_idx(self, frame: int) -> int:
+        """Project a reference-frame index to the score_positions index."""
+        beat = self._frame_to_beat(frame)
+        idx = int(np.searchsorted(self.score_positions, beat, side="right") - 1)
+        return max(0, min(idx, len(self.score_positions) - 1))
+
+    def get_current_position(self) -> float:
+        # Frame-precision beat via _ref_frame_to_beat lookup.
+        return self._frame_to_beat(self.best_ref)
 
     @property
-    def warping_path(self) -> NDArray[np.float32]:
+    def alignment_path(self) -> NDArray:
         return self.wp
 
     def is_still_following(self):
         return self.ref_pointer <= (self.N_ref - self.frame_per_seg)
+
+    # Frame Dixon's step() can append to wp multiple times via save_history()
+    # during catch-up loops, so the base __call__'s one-append-per-call contract
+    # doesn't fit
+    def __call__(self, observation: Tuple[Any, float]) -> float:
+        features, perf_time = observation
+        self.current_perf_time = perf_time
+        t0 = time.time()
+        self.step(features)
+        self.current_position = self.get_current_position()
+        self.latency_stats = set_latency_stats(
+            time.time() - t0, self.latency_stats, self.input_index
+        )
+        return self.current_position
 
     # ---- internal methods ----
 
@@ -267,7 +237,7 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
             )
 
     def _accept_input(self, input_features):
-        self.input_features = np.vstack([self.input_features, input_features])
+        self.input_features.append(input_features)
         self.input_pointer += self.frame_per_seg
 
     def _compute_input_column(self):
@@ -327,7 +297,10 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
         return Direction.REF
 
     def save_history(self):
-        new_point = np.array([[self.current_beat], [self.best_input]])
+        # best_input is the input-buffer index of the best match; convert to seconds
+        perf_time = self.best_input / float(self.frame_rate)
+        beat = self.get_current_position()
+        new_point = np.array([[beat], [perf_time]])
         self.wp = np.concatenate((self.wp, new_point), axis=1)
 
     def step(self, input_features):
@@ -347,8 +320,8 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
             self._advance_ref()
             self.run_count_ref += 1
             self.run_count_input = 0
+            self.current_index = self._frame_to_score_idx(self.best_ref)
             self.save_history()
-            self.current_position = self.best_ref
 
         if not self.is_still_following():
             return
@@ -366,9 +339,13 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
             self.run_count_ref = 1
             self.run_count_input = 0
 
+        self.current_index = self._frame_to_score_idx(self.best_ref)
         self.save_history()
-        self.current_position = self.best_ref
         self.input_index += 1
+
+    def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
+        self.reset()
+        return (yield from super().run(verbose=verbose))
 
 
 # ---------------------------------------------------------------------------
@@ -392,19 +369,19 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
     def __init__(
         self,
         reference_features: NDArray[np.float32],
+        score_positions: NDArray[np.float32],
         queue: Optional[RECVQueue] = None,
         c: int = 30,
         max_run_count: int = MAX_RUN_COUNT,
         distance_func: str = "euclidean",
-        state_space=None,
         **kwargs,
     ) -> None:
         super().__init__(
             reference_features=reference_features,
+            score_positions=score_positions,
             queue=queue,
             max_run_count=max_run_count,
             distance_func=distance_func,
-            state_space=state_space,
             **kwargs,
         )
         self.ref = self.reference_features.astype(np.float32)
@@ -419,9 +396,9 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
         self.j = -1
         self.run_count_input = 0
         self.run_count_ref = 0
-        self.current_position = 0
+        self.current_index = 0
         self.input_index = 0
-        self._warping_path = []
+        self._alignment_path = []
         self.last_queue_update = time.time()
         self.latency_stats = {
             "total_latency": 0,
@@ -429,22 +406,6 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
             "max_latency": 0,
             "min_latency": float("inf"),
         }
-
-    @property
-    def current_beat(self) -> float:
-        if self.state_space is not None:
-            idx = min(self.current_position, len(self.state_space) - 1)
-            return float(self.state_space[idx])
-        return float(self.current_position)
-
-    @property
-    def warping_path(self) -> NDArray:
-        return (
-            np.array(self._warping_path).T if self._warping_path else np.empty((2, 0))
-        )
-
-    def is_still_following(self) -> bool:
-        return self.current_position < self.N_ref - 1
 
     # ---- cost matrix (sparse) ----
 
@@ -509,7 +470,7 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
         for k in range(max(0, self.t - self.c + 1), self.t + 1):
             self._evaluate(self.j, k)
 
-    def step(self, input_feat: NDArray[np.float32], perf_time: float = None) -> None:
+    def step(self, input_feat: NDArray[np.float32]) -> None:
         self._inputs.append(np.asarray(input_feat, dtype=np.float32))
         self.t += 1
         self._compute_input_column()
@@ -535,46 +496,12 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
                     break
 
         best_ref, _ = self._argmin_path_cost()
-        self.current_position = min(best_ref, self.N_ref - 1)
-        t = perf_time if perf_time is not None else self.input_index
-        self._warping_path.append((self.current_beat, t))
+        self.current_index = min(best_ref, self.N_ref - 1)
         self.input_index += 1
 
-    def run(self, verbose=True) -> Generator[float, None, NDArray]:
-        """Run from queue. Extracts timestamp from (feature, time) tuples."""
+    def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
         self.reset()
-        if verbose:
-            pbar = progressbar.ProgressBar(
-                max_value=self.N_ref,
-                redirect_stdout=True,
-                redirect_stderr=True,
-            )
-            pbar.start()
-
-        while self.is_still_following():
-            item = self.queue.get(timeout=QUEUE_TIMEOUT)
-            if item is STREAM_END:
-                break
-            if item is None:
-                continue
-            if isinstance(item, tuple):
-                features, perf_time = item[0], float(item[1])
-            else:
-                features, perf_time = item, None
-            self.last_queue_update = time.time()
-            self.step(features, perf_time=perf_time)
-
-            if verbose:
-                pbar.update(min(self.current_position, self.N_ref - 1))
-            latency = time.time() - self.last_queue_update
-            self.latency_stats = set_latency_stats(
-                latency, self.latency_stats, self.input_index
-            )
-            yield self.current_beat
-
-        if verbose:
-            pbar.finish()
-        return self.warping_path
+        return (yield from super().run(verbose=verbose))
 
 
 if __name__ == "__main__":

@@ -7,7 +7,6 @@ from typing import Optional, Union
 import numpy as np
 import partitura
 from partitura.io.exportmidi import get_ppq
-from partitura.musicanalysis.performance_codec import get_time_maps_from_alignment
 from partitura.score import Part, merge_parts
 
 from matchmaker.dp import (
@@ -32,8 +31,8 @@ from matchmaker.features.midi import (
     CHORD_THRESHOLD,
     OnsetPianoRollProcessor,
     PianoRollProcessor,
+    PitchChordProcessor,
     PitchClassPianoRollProcessor,
-    PitchIOIProcessor,
     PitchProcessor,
     onset_pianoroll,
 )
@@ -69,7 +68,7 @@ AVAILABLE_METHODS = {
     + sorted(PARANGONAR_METHODS),
 }
 DEFAULT_METHOD = {"audio": "arzt", "midi": "pthmm"}
-DEFAULT_PROCESSOR = {"audio": "chroma", "midi": "pitch_ioi"}
+DEFAULT_PROCESSOR = {"audio": "chroma", "midi": "pitch_chord"}
 DEFAULT_KWARGS = {
     "audio": {
         "arzt": {"window_size": 10, "start_window_size": 0.1, "step_size": 3},
@@ -101,16 +100,16 @@ DEFAULT_KWARGS = {
             "window_size": 0.3,
         },
         "hmm": {
-            "processor": "pitch_ioi",
+            "processor": "pitch_chord",
             "tempo_model": KalmanTempoModel,
             "piano_range": True,
         },
-        "pthmm": {"processor": "pitch_ioi", "piano_range": True},
-        "outerhmm": {"processor": "pitch_ioi", "piano_range": True},
-        "SLT_OLTW": {"processor": "pitch_ioi", "piano_range": True},
-        "SL_OLTW": {"processor": "pitch_ioi", "piano_range": True},
-        "OTM": {"processor": "pitch_ioi", "piano_range": True},
-        "OPTM": {"processor": "pitch_ioi", "piano_range": True},
+        "pthmm": {"processor": "pitch_chord", "piano_range": True},
+        "outerhmm": {"processor": "pitch_chord", "piano_range": True},
+        "SLT_OLTW": {"processor": "pitch_chord", "piano_range": True},
+        "SL_OLTW": {"processor": "pitch_chord", "piano_range": True},
+        "OTM": {"processor": "pitch_chord", "piano_range": True},
+        "OPTM": {"processor": "pitch_chord", "piano_range": True},
     },
 }
 
@@ -160,12 +159,16 @@ class Matchmaker(object):
 
         **midi keys**
 
-        - ``processor`` (str): Feature type. Default: ``"pitch_ioi"``.
-          Choices: ``"pitch_ioi"``, ``"pianoroll"``.
+        - ``processor`` (str): Feature type. Default: ``"pitch_chord"``.
+          Choices: ``"pitch_chord"``, ``"pitch"``, ``"pianoroll"``,
+          ``"pitchclass"``.
         - ``piano_range`` (bool): Restrict pitch to 88-key piano range
           (MIDI 21-108). Default: True.
         - ``polling_period`` (float or None): Window size in seconds for
           frame-based MIDI accumulation. ``None`` = event-based (default).
+          When set, prefer ``"pitch"`` or ``"pianoroll"`` over
+          ``"pitch_chord"``: chord buffering is event-time semantics and
+          does not compose cleanly with fixed-window frames.
 
     """
 
@@ -316,12 +319,17 @@ class Matchmaker(object):
                 piano_range=self.config.get("piano_range", True),
             )
 
-        chord_threshold = 0.0 if self.polling_period is not None else CHORD_THRESHOLD
+        # Processor choice by mode:
+        #  - polling_period=None (single-message, default): PitchChordProcessor
+        #    groups simultaneous notes into chord observations.
+        #  - polling_period set (windowed): use PitchProcessor or PianoRollProcessor.
+        #    PitchChordProcessor's chord buffering does not interact well with
+        #    fixed-window frames and may drop observations.
         MIDI_PROCESSORS = {
-            "pitch_ioi": lambda: PitchIOIProcessor(
+            "pitch_chord": lambda: PitchChordProcessor(
                 piano_range=self.config["piano_range"],
                 return_pitch_list=(method == "hmm"),
-                chord_threshold=chord_threshold,
+                chord_threshold=CHORD_THRESHOLD,
             ),
             "pitch": lambda: PitchProcessor(
                 piano_range=self.config["piano_range"],
@@ -376,17 +384,9 @@ class Matchmaker(object):
     def _build_audio_follower(self, method):
         ref = self.reference_features
         queue = self.stream.queue
-        state_space = np.unique(self.score_part.note_array()["onset_beat"])
+        score_positions = np.unique(self.score_part.note_array()["onset_beat"])
 
         if method in OLTW_METHODS:
-            self.ppart = partitura.utils.music.performance_from_part(
-                self.score_part, bpm=self.tempo
-            )
-            self.ppart.sustain_pedal_threshold = 127
-            try:
-                stm, rtm = self.get_time_maps()
-            except Exception:
-                stm, rtm = None, None
             cls = (
                 OnlineTimeWarpingArztFrame
                 if method == "arzt"
@@ -394,11 +394,9 @@ class Matchmaker(object):
             )
             return cls(
                 reference_features=ref,
+                score_positions=score_positions,
                 queue=queue,
-                state_space=state_space,
                 frame_rate=self.frame_rate,
-                state_to_ref_time_map=stm,
-                ref_to_state_time_map=rtm,
                 ref_frame_to_beat=self._build_ref_frame_to_beat(),
                 **self.config,
             )
@@ -427,7 +425,7 @@ class Matchmaker(object):
 
         if method in OLTW_METHODS:
             # Convert note_array to onset pianoroll for event-level OLTW
-            onset_ref, state_space = onset_pianoroll(
+            onset_ref, score_positions = onset_pianoroll(
                 ref,
                 onset_key="onset_beat",
                 piano_range=self.config.get("piano_range", True),
@@ -447,8 +445,8 @@ class Matchmaker(object):
             )
             return cls(
                 reference_features=onset_ref,
+                score_positions=score_positions,
                 queue=queue,
-                state_space=state_space,
                 **config,
             )
         elif method == "hmm":
@@ -482,15 +480,11 @@ class Matchmaker(object):
         raise ValueError(f"No MIDI follower for method '{method}'")
 
     def _wp_perf_to_seconds(self, wp_perf):
-        """Convert warping path performance axis to absolute seconds."""
-        if self.input_type == "audio":
-            return wp_perf / self.frame_rate
-        elif self.method in OLTW_METHODS | PARANGONAR_METHODS:
-            return wp_perf  # already absolute timestamps
-        else:
-            # HMM: IOI-accumulated from 0; shift by first note onset
-            _perf = partitura.load_performance_midi(self.performance_file)
-            return wp_perf + float(_perf.note_array()["onset_sec"].min())
+        """Convert alignment path performance axis to absolute seconds.
+
+        All trackers now store absolute perf time in alignment_path[1].
+        """
+        return wp_perf
 
     def preprocess_score(self):
         """Extract reference features from the score."""
@@ -505,39 +499,17 @@ class Matchmaker(object):
             score_audio = generate_score_audio(
                 self.score_part, self.tempo, self.sample_rate
             ).astype(np.float32)
-            features = self.processor(score_audio)
+            features, _ = self.processor((score_audio, 0.0))
             self.processor.reset()
             return features
 
         return self.score_part.note_array()
 
-    def get_time_maps(self):
-        sna = self.score_part.note_array()
-        pna = self.ppart.note_array()
-        note_ids = sna["id"]
-        # If note IDs are missing, use index-based IDs
-        if len(set(note_ids)) <= 1:
-            synth_ids = [f"n{i}" for i in range(len(sna))]
-            sna = sna.copy()
-            sna["id"] = synth_ids
-            pna = pna.copy()
-            pna["id"] = synth_ids[: len(pna)]
-            note_ids = synth_ids
-        alignment = [
-            {"label": "match", "score_id": nid, "performance_id": nid}
-            for nid in note_ids
-        ]
-        return get_time_maps_from_alignment(pna, sna, alignment)
-
     def _convert_frame_to_beat(self, current_frame: int) -> float:
         """Convert frame number to beat position in the score."""
         tick = get_ppq(self.score_part)
         timeline_time = (current_frame / self.frame_rate) * tick * (self.tempo / 60)
-        beat_position = np.round(
-            self.score_part.beat_map(timeline_time),
-            decimals=2,
-        )
-        return beat_position
+        return float(self.score_part.beat_map(timeline_time))
 
     def _build_ref_frame_to_beat(self) -> np.ndarray:
         """Precompute beat position for each reference feature frame."""
@@ -668,7 +640,7 @@ class Matchmaker(object):
         else:
             perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
 
-        wp = self.score_follower.warping_path
+        wp = self.score_follower.alignment_path
         wp_score = wp[0].astype(float)
         wp_perf_sec = self._wp_perf_to_seconds(wp[1].astype(float))
 
@@ -706,7 +678,7 @@ class Matchmaker(object):
             wp_sec = np.array([wp_score, wp_perf_sec])
             sf = self.score_follower
             save_debug_results(
-                warping_path=wp_sec,
+                alignment_path=wp_sec,
                 score_annots=score_annots_beats,
                 perf_annots=perf_annots,
                 perf_annots_predicted=transfer_positions(
@@ -719,23 +691,13 @@ class Matchmaker(object):
                 frame_rate=self.frame_rate,
                 save_dir=save_dir,
                 run_name=run_name or "results",
-                state_space=sf.state_space if hasattr(sf, "state_space") else None,
-                ref_features=(
-                    sf.reference_features
-                    if plot_dist_matrix and hasattr(sf, "reference_features")
-                    else None
-                ),
+                score_positions=sf.score_positions,
+                ref_features=sf.reference_features if plot_dist_matrix else None,
                 input_features=(
-                    sf.input_features
-                    if plot_dist_matrix and hasattr(sf, "input_features")
-                    else None
+                    getattr(sf, "input_features", None) if plot_dist_matrix else None
                 ),
-                distance_func=(
-                    sf.distance_func if hasattr(sf, "distance_func") else None
-                ),
-                ref_frame_to_beat=(
-                    sf._ref_frame_to_beat if hasattr(sf, "_ref_frame_to_beat") else None
-                ),
+                distance_func=getattr(sf, "distance_func", None),
+                ref_frame_to_beat=getattr(sf, "_ref_frame_to_beat", None),
             )
 
         return eval_results
@@ -752,7 +714,7 @@ class Matchmaker(object):
         Returns
         -------
         np.ndarray
-            Warping path (2, T)
+            Alignment path (2, T): row 0 score beat, row 1 perf time (sec).
         """
         with self.stream:
             self.stream.stream_start.wait()
@@ -762,4 +724,4 @@ class Matchmaker(object):
         self.alignment_duration = time.time() - t0
 
         self._has_run = True
-        return self.score_follower.warping_path
+        return self.score_follower.alignment_path

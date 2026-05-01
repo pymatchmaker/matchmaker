@@ -14,12 +14,12 @@ def transfer_positions(
     aggregation_func=None,
 ):
     """
-    Transfer positions between score and performance using the warping path.
+    Transfer positions between score and performance using the alignment path.
 
     Parameters
     ----------
     wp : np.array with shape (2, T)
-        Warping path. wp[0] = score beats, wp[1] = performance frame indices.
+        Alignment path. wp[0] = score beats, wp[1] = performance time (seconds).
     ref_anns : array-like
         Query positions (seconds for domain="score",
         beats for domain="performance").
@@ -155,9 +155,9 @@ def evaluate_alignment(
     Parameters
     ----------
     wp_score : np.ndarray
-        Warping path score axis (beats).
+        Alignment path score axis (beats).
     wp_perf_sec : np.ndarray
-        Warping path performance axis (seconds).
+        Alignment path performance axis (seconds).
     gt_score_beats : np.ndarray
         Ground truth score positions (beats).
     gt_perf_sec : np.ndarray
