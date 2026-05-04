@@ -82,25 +82,25 @@ class TestPitchProcessor(unittest.TestCase):
                 for out in output:
                     if out is not None:
                         pitch_obs, _ = out
-                        self.assertTrue(len(pitch_obs) == 1)
-                        self.assertTrue(pitch_obs == non_none_outputs + 60 - 21)
+                        self.assertEqual(len(pitch_obs), 1)
+                        self.assertEqual(pitch_obs, non_none_outputs + 60 - 21)
                         non_none_outputs += 1
 
             elif not processor.piano_range and processor.return_pitch_list:
                 for out in output:
                     if out is not None:
                         pitch_obs, _ = out
-                        self.assertTrue(len(pitch_obs) == 1)
-                        self.assertTrue(pitch_obs == non_none_outputs + 60)
+                        self.assertEqual(len(pitch_obs), 1)
+                        self.assertEqual(pitch_obs, non_none_outputs + 60)
                         non_none_outputs += 1
 
             elif processor.piano_range and not processor.return_pitch_list:
                 for out in output:
                     if out is not None:
                         pitch_obs, _ = out
-                        self.assertTrue(len(pitch_obs) == 88)
-                        self.assertTrue(
-                            np.argmax(pitch_obs) == non_none_outputs + 60 - 21
+                        self.assertEqual(len(pitch_obs), 88)
+                        self.assertEqual(
+                            np.argmax(pitch_obs), non_none_outputs + 60 - 21
                         )
                         non_none_outputs += 1
 
@@ -108,11 +108,11 @@ class TestPitchProcessor(unittest.TestCase):
                 for out in output:
                     if out is not None:
                         pitch_obs, _ = out
-                        self.assertTrue(len(pitch_obs) == 128)
-                        self.assertTrue(np.argmax(pitch_obs) == non_none_outputs + 60)
+                        self.assertEqual(len(pitch_obs), 128)
+                        self.assertEqual(np.argmax(pitch_obs), non_none_outputs + 60)
                         non_none_outputs += 1
 
-            self.assertTrue(non_none_outputs == len(note_array))
+            self.assertEqual(non_none_outputs, len(note_array))
 
 
 class TestPitchChordProcessor(unittest.TestCase):
@@ -173,8 +173,8 @@ class TestPitchChordProcessor(unittest.TestCase):
                 for out in output:
                     if out is not None:
                         pitch_obs, time_obs = out
-                        self.assertTrue(len(pitch_obs) == 1)
-                        self.assertTrue(pitch_obs == non_none_outputs + 60 - 21)
+                        self.assertEqual(len(pitch_obs), 1)
+                        self.assertEqual(pitch_obs, non_none_outputs + 60 - 21)
 
                         self.assertTrue(
                             np.isclose(
@@ -189,8 +189,8 @@ class TestPitchChordProcessor(unittest.TestCase):
                 for out in output:
                     if out is not None:
                         pitch_obs, time_obs = out
-                        self.assertTrue(len(pitch_obs) == 1)
-                        self.assertTrue(pitch_obs == non_none_outputs + 60)
+                        self.assertEqual(len(pitch_obs), 1)
+                        self.assertEqual(pitch_obs, non_none_outputs + 60)
                         self.assertTrue(
                             np.isclose(
                                 time_obs,
@@ -204,9 +204,9 @@ class TestPitchChordProcessor(unittest.TestCase):
                 for out in output:
                     if out is not None:
                         pitch_obs, time_obs = out
-                        self.assertTrue(len(pitch_obs) == 88)
-                        self.assertTrue(
-                            np.argmax(pitch_obs) == non_none_outputs + 60 - 21
+                        self.assertEqual(len(pitch_obs), 88)
+                        self.assertEqual(
+                            np.argmax(pitch_obs), non_none_outputs + 60 - 21
                         )
                         self.assertTrue(
                             np.isclose(
@@ -221,8 +221,8 @@ class TestPitchChordProcessor(unittest.TestCase):
                 for out in output:
                     if out is not None:
                         pitch_obs, time_obs = out
-                        self.assertTrue(len(pitch_obs) == 128)
-                        self.assertTrue(np.argmax(pitch_obs) == non_none_outputs + 60)
+                        self.assertEqual(len(pitch_obs), 128)
+                        self.assertEqual(np.argmax(pitch_obs), non_none_outputs + 60)
                         self.assertTrue(
                             np.isclose(
                                 time_obs,
@@ -232,7 +232,7 @@ class TestPitchChordProcessor(unittest.TestCase):
                         )
                         non_none_outputs += 1
 
-            self.assertTrue(non_none_outputs == len(note_array))
+            self.assertEqual(non_none_outputs, len(note_array))
 
 
 class TestPianoRollProcessor(unittest.TestCase):
@@ -284,7 +284,7 @@ class TestPianoRollProcessor(unittest.TestCase):
                 for out in output:
                     pr, _ = out
                     self.assertTrue(isinstance(pr, np.ndarray))
-                    self.assertTrue(len(pr) == 88)
+                    self.assertEqual(len(pr), 88)
                     self.assertTrue(np.sum(pr) == 64 or np.sum(pr) == 0)
                     if pr.sum() > 0:
                         self.assertTrue(np.argmax(pr) in note_array["pitch"] - 21)
@@ -293,7 +293,7 @@ class TestPianoRollProcessor(unittest.TestCase):
                 for out in output:
                     pr, _ = out
                     self.assertTrue(isinstance(pr, np.ndarray))
-                    self.assertTrue(len(pr) == 88)
+                    self.assertEqual(len(pr), 88)
                     self.assertTrue(np.sum(pr) == 1 or np.sum(pr) == 0)
                     if pr.sum() > 0:
                         self.assertTrue(np.argmax(pr) in note_array["pitch"] - 21)
@@ -302,7 +302,7 @@ class TestPianoRollProcessor(unittest.TestCase):
                 for out in output:
                     pr, _ = out
                     self.assertTrue(isinstance(pr, np.ndarray))
-                    self.assertTrue(len(pr) == 128)
+                    self.assertEqual(len(pr), 128)
                     self.assertTrue(np.sum(pr) == 1 or np.sum(pr) == 0)
                     if pr.sum() > 0:
                         self.assertTrue(np.argmax(pr) in note_array["pitch"])
@@ -349,7 +349,7 @@ class TestPitchClassPianoRollProcessor(unittest.TestCase):
                 for out in output:
                     pc, _ = out
                     self.assertTrue(isinstance(pc, np.ndarray))
-                    self.assertTrue(len(pc) == 12)
+                    self.assertEqual(len(pc), 12)
                     self.assertTrue(np.sum(pc) == 64 or np.sum(pc) == 0)
                     if pc.sum() > 0:
                         self.assertTrue(np.argmax(pc) in note_array["pitch"] % 12)
@@ -358,14 +358,14 @@ class TestPitchClassPianoRollProcessor(unittest.TestCase):
                 for out in output:
                     pc, _ = out
                     self.assertTrue(isinstance(pc, np.ndarray))
-                    self.assertTrue(len(pc) == 12)
+                    self.assertEqual(len(pc), 12)
                     self.assertTrue(np.sum(pc) == 1 or np.sum(pc) == 0)
                     if pc.sum() > 0:
                         self.assertTrue(np.argmax(pc) in note_array["pitch"] % 12)
 
             self.assertTrue(len(processor.pitch_class_slices) > 0)
             processor.reset()
-            self.assertTrue(len(processor.pitch_class_slices) == 0)
+            self.assertEqual(len(processor.pitch_class_slices), 0)
 
 
 class TestComputeFeaturesFromSymbolic(unittest.TestCase):
@@ -407,7 +407,7 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
                 if output_length is None:
                     output_length = len(features)
 
-                self.assertTrue(output_length == len(features))
+                self.assertEqual(output_length, len(features))
 
     def test_nonframed_features(self):
         score = pt.load_musicxml(EXAMPLE_SCORE)
@@ -441,4 +441,4 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
                 if output_length is None:
                     output_length = len(features)
 
-                self.assertTrue(output_length == len(features))
+                self.assertEqual(output_length, len(features))
