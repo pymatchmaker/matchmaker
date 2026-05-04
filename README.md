@@ -266,7 +266,9 @@ checks for it and exits the read loop.
 The example score `matchmaker/assets/simple_mozart_k265_var1.musicxml` is
 used in tests and the contribution guide. The first two measures:
 
-![](./matchmaker/assets/simple_mozart_first_two_measures.png)
+<p align="center">
+  <img src="./matchmaker/assets/simple_mozart_first_two_measures.png" width="60%">
+</p>
 
 Beat positions follow the `onset_beat` field of partitura's `note_array()`,
 whose unit is the score's denominator (the quarter note for this 2/4 piece).
