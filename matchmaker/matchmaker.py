@@ -8,6 +8,7 @@ import numpy as np
 import partitura
 from partitura.io.exportmidi import get_ppq
 from partitura.score import Part, merge_parts
+from partitura.utils.music import performance_notearray_from_score_notearray
 
 from matchmaker.dp import (
     OnlineTimeWarpingArztEvent,
@@ -38,6 +39,7 @@ from matchmaker.features.midi import (
 )
 from matchmaker.prob import AudioOuterProductHMM, OuterProductHMM, PitchHMM, PitchIOIHMM
 from matchmaker.prob.skf import SwitchingKalmanFilterFollower
+from matchmaker.prob.particle_filter import ParticleFilter
 from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
@@ -53,6 +55,8 @@ from matchmaker.utils.misc import (
     save_debug_results,
 )
 from matchmaker.utils.tempo_models import KalmanTempoModel
+from matchmaker.utils.symbolic import framed_midi_messages_from_performance
+from matchmaker.io.midi import POLLING_PERIOD
 
 PathLike = Union[str, bytes, os.PathLike]
 sys.setrecursionlimit(10_000)
@@ -62,9 +66,9 @@ MIDI_FRAME_RATE = 1  # dummy value for MIDI input
 OLTW_METHODS = {"arzt", "dixon"}
 PARANGONAR_METHODS = {"SLT_OLTW", "SL_OLTW", "OTM", "OPTM"}
 AVAILABLE_METHODS = {
-    "audio": sorted(OLTW_METHODS) + ["outerhmm", "skf"],
+    "audio": sorted(OLTW_METHODS) + ["outerhmm", "skf", "pf"],
     "midi": sorted(OLTW_METHODS)
-    + ["hmm", "pthmm", "outerhmm"]
+    + ["hmm", "pthmm", "outerhmm", "pf"]
     + sorted(PARANGONAR_METHODS),
 }
 DEFAULT_METHOD = {"audio": "arzt", "midi": "pthmm"}
@@ -85,6 +89,15 @@ DEFAULT_KWARGS = {
             "hop_length": 128,
             "n_fft": 512,
         },
+        "pf": {
+            "processor": "chroma",
+            "sample_rate": int(SAMPLE_RATE/4),
+            "hop_length": int(SAMPLE_RATE/100),
+            "n_fft": int(int(SAMPLE_RATE/4)/21.533203125), # converts to closest power of 2 for a 46ms window (as proposed by Duan et al.) for default sample rates.
+            "frame_rate": 100,
+            "num_particles": 1000,
+            "auto_adjust_tempo": True,
+        }
     },
     "midi": {
         "arzt": {
@@ -103,6 +116,13 @@ DEFAULT_KWARGS = {
             "processor": "pitch_chord",
             "tempo_model": KalmanTempoModel,
             "piano_range": True,
+        },
+        "pf": {
+            "processor": "pitchclass",
+            "piano_range": True,
+            "num_particles": 1000,
+            "polling_period": POLLING_PERIOD,
+            "auto_adjust_tempo": True,
         },
         "pthmm": {"processor": "pitch_chord", "piano_range": True},
         "outerhmm": {"processor": "pitch_chord", "piano_range": True},
@@ -218,7 +238,7 @@ class Matchmaker(object):
             if kwargs is not None
             else DEFAULT_KWARGS[self.input_type].get(self.method, {})
         )
-        self.auto_adjust_tempo = auto_adjust_tempo
+        self.auto_adjust_tempo = self.config.pop("auto_adjust_tempo", auto_adjust_tempo)
 
         if input_type == "midi":
             self.polling_period = self.config.pop("polling_period", None)
@@ -264,7 +284,7 @@ class Matchmaker(object):
                 self.score_part = merge_parts(score.parts)
         except Exception as e:
             raise ValueError(f"Invalid score file: {e}")
-
+        
         # Set tempo: user-provided > adjust_tempo (always 120) > score marking > default (120 BPM)
         if tempo is not None:
             self.tempo = float(tempo)
@@ -296,6 +316,8 @@ class Matchmaker(object):
     def _build_processor(self, method, processor_type):
         if self.input_type == "audio":
             audio_kw = dict(sample_rate=self.sample_rate, hop_length=self.hop_length)
+            if method == "pf":
+                audio_kw["n_fft"] = self.config.get("n_fft", 1024)
             AUDIO_PROCESSORS = {
                 "chroma": lambda: ChromagramProcessor(**audio_kw),
                 "mfcc": lambda: MFCCProcessor(**audio_kw),
@@ -417,6 +439,16 @@ class Matchmaker(object):
                 n_fft=self.config.get("n_fft", 512),
                 hop_length=self.hop_length,
             )
+        elif method == "pf":
+            return ParticleFilter(
+                reference_features=ref,
+                score_positions=score_positions,
+                score_boundaries=self._get_score_onsets_and_offsets_in_beats(self.score_part,score_positions),
+                notated_tempo=self.tempo,
+                hop_size=self.hop_length/self.sample_rate,
+                queue=queue,
+                num_particles=self.config.get("num_particles", 1000),
+            )
         raise ValueError(f"No audio follower for method '{method}'")
 
     def _build_symbolic_follower(self, method):
@@ -469,6 +501,16 @@ class Matchmaker(object):
                 queue=queue,
                 **self.config,
             )
+        elif method == "pf":
+            return ParticleFilter(
+                reference_features=ref,
+                score_positions=np.unique(self.score_part.note_array()["onset_beat"]),
+                score_boundaries=self._get_score_onsets_and_offsets_in_beats(self.score_part, np.unique(self.score_part.note_array()["onset_beat"])),
+                notated_tempo=self.tempo,
+                hop_size=POLLING_PERIOD,
+                queue=queue,
+                num_particles=self.config.get("num_particles", 1000),
+            )
         elif method in PARANGONAR_METHODS:
             sna = self.score_part.note_array(include_grace_notes=True)
             return OnlineParangonarAlignment(
@@ -495,12 +537,31 @@ class Matchmaker(object):
                 self.score_part, self.performance_file, self.tempo
             )
 
-        if self.input_type == "audio" and self.method in OLTW_METHODS:
+        if self.input_type == "audio" and self.method in sorted(OLTW_METHODS) + ["pf"]:
             score_audio = generate_score_audio(
                 self.score_part, self.tempo, self.sample_rate
             ).astype(np.float32)
             features, _ = self.processor((score_audio, 0.0))
             self.processor.reset()
+            return features
+        
+        if self.input_type == "midi" and self.method == "pf":
+            performed_notearray = performance_notearray_from_score_notearray(
+                self.score_part.note_array(),
+                bpm=self.tempo,
+            )
+
+            frames_array, frame_times = framed_midi_messages_from_performance(
+                performed_notearray,
+                polling_period=self.polling_period,
+            )
+            score_pitchclass_pianoroll_processor = PitchClassPianoRollProcessor()
+            features = []
+            for frame, frame_time in zip(frames_array, frame_times):
+                feat, _ = score_pitchclass_pianoroll_processor((frame, frame_time))
+                features.append(feat)
+
+            features = np.array(features)
             return features
 
         return self.score_part.note_array()
@@ -517,6 +578,44 @@ class Matchmaker(object):
         return np.array(
             [self._convert_frame_to_beat(i) for i in range(n_ref)],
         )
+    
+    def _get_score_onsets_and_offsets_in_beats(self, score_part: Part, score_positions: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Get the beat positions of note onsets and offsets in the score.
+
+        Parameters
+        ----------
+        score_part : Part
+            Partitura Part object representing the score
+
+        Returns
+        -------
+        np.ndarray
+            Array of beat positions corresponding to note onsets and offsets
+        """
+        note_array = score_part.note_array()
+        # add a column for offsets, which is onset_beat + duration_beat
+        note_array = np.lib.recfunctions.append_fields(
+            note_array,
+            "offset_beat",
+            note_array["onset_beat"] + note_array["duration_beat"],
+            usemask=False,
+        )
+        score_boundaries = np.unique(
+            np.concatenate((note_array["onset_beat"], note_array["offset_beat"]))
+        )
+
+        # for every entry in score_boundaries, find the highest beat in state_space that is smaller than or equal to it, 
+        # and replace the entry with that beat (to ensure boundaries are aligned with score frames)
+        score_boundaries = np.array(
+            [
+                score_positions[
+                    np.searchsorted(score_positions, boundary, side="right") - 1
+                ]
+                for boundary in score_boundaries
+            ]
+        )
+        return score_boundaries
 
     def build_score_annotations(
         self,
@@ -724,4 +823,4 @@ class Matchmaker(object):
         self.alignment_duration = time.time() - t0
 
         self._has_run = True
-        return self.score_follower.alignment_path
+        return self.score_follower._alignment_path

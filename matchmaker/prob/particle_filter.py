@@ -1,52 +1,53 @@
 import time
-from typing import Dict, Generator, List, Optional
+from typing import Any, Dict, Generator, List, Optional, Tuple
 
 import numpy as np
 import progressbar
 from numpy.typing import NDArray
 from partitura.utils.generic import interp1d
+from partitura.io.exportmidi import get_ppq
 
 from matchmaker.base import OnlineAlignment
-from matchmaker.utils.misc import RECVQueue, set_latency_stats
+from matchmaker.utils.misc import set_latency_stats
+from matchmaker.io.queue import RECVQueue
+from matchmaker.io.audio import QUEUE_TIMEOUT
+from matchmaker.features.audio import (FRAME_RATE, SAMPLE_RATE)
 
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]
 SEED = 1984
 RNG = np.random.RandomState(SEED)
 
-QUEUE_TIMEOUT = 10
+HOP_SIZE = 1.0/FRAME_RATE
 
-
-class ParticleFilterAudio(OnlineAlignment):
+class ParticleFilter(OnlineAlignment):
     def __init__(
         self,
         reference_features,  # shape: (num_score_frames, 12)
-        state_space,  # beat position of each score frame
-        score_boundaries,  # beat positions of note onsets/offsets
-        notated_tempo,  # BPM from score
-        hop_size,  # hop size in seconds
+        score_positions,  # shape: (num_score_frames,)
+        score_boundaries, # shape: (num_score_boundaries,)
+        notated_tempo: float = 120.0,  # BPM from score
+        hop_size: float = HOP_SIZE,  # hop size in seconds
         queue: Optional[RECVQueue] = None,
         num_particles=1000,
     ):
         self.reference_features = reference_features
-        self.state_space = state_space
-        self.score_boundaries = np.array(score_boundaries)
         self.notated_tempo = notated_tempo
         self.hop_size = hop_size
         self.num_particles = num_particles
+
+        self.score_positions = score_positions
+        self.score_boundaries = score_boundaries
+        
         self.current_state_in_frame_index = 0
-        self.current_state = 0
+        self.current_position = 0
         self.previous_state = None
         self.queue = queue
-        self.N_ref = len(state_space)
-        self.beat_to_frame_map = interp1d(
-            x=self.state_space,
-            y=np.arange(len(state_space)),
-            dtype=int,
-        )
+        self.queue_timeout: Optional[float] = QUEUE_TIMEOUT
+        self.N_ref = len(score_positions)
         self.input_index = 0
 
-        self.input_features: List[NDArray[np.float32]] = None
+        self.input_features: List = []
         self.rng = RNG
 
         self.beat_std = 0.25
@@ -74,7 +75,7 @@ class ParticleFilterAudio(OnlineAlignment):
 
         self.weights = np.ones(num_particles) / num_particles
 
-        self._warping_path = [(self.current_state, self.input_index)]
+        self._alignment_path = [(self.current_position, self.input_index)]
 
         self.last_queue_update = time.time()
         self.latency_stats: Dict[str, float] = {
@@ -86,12 +87,11 @@ class ParticleFilterAudio(OnlineAlignment):
 
     @property
     def warping_path(self) -> np.ndarray:
-        return np.array(self._warping_path).T
+        return np.array(self._alignment_path).T
 
     def is_still_following(self) -> bool:
-        if self.current_state is not None:
-            return self.current_state < self.state_space[-1]
-
+        if self.current_position is not None:
+            return self.current_position < self.score_positions[-1]
         return False
 
     def predict(self):
@@ -100,7 +100,7 @@ class ParticleFilterAudio(OnlineAlignment):
         self.x += (self.v / 60.0) * self.hop_size  # Convert BPM to beats per second
 
         # Keep within bounds
-        self.x = np.clip(self.x, self.state_space[0], self.state_space[-1])
+        self.x = np.clip(self.x, self.score_positions[0], self.score_positions[-1])
 
     def compute_likelihood(self, feature):
         likelihoods = np.zeros(self.num_particles)
@@ -114,18 +114,18 @@ class ParticleFilterAudio(OnlineAlignment):
 
     def _get_score_feature(self, beat_position):
         # Find interval
-        idx = np.searchsorted(self.state_space, beat_position)
+        idx = np.searchsorted(self.score_positions, beat_position)
 
         if idx <= 0:
             return self.reference_features[0]
-        if idx >= len(self.state_space):
+        if idx >= len(self.score_positions):
             return self.reference_features[-1]
 
         left = idx - 1
         right = idx
 
-        beat_left = self.state_space[left]
-        beat_right = self.state_space[right]
+        beat_left = self.score_positions[left]
+        beat_right = self.score_positions[right]
 
         frac = (beat_position - beat_left) / (beat_right - beat_left + 1e-12)
 
@@ -144,16 +144,16 @@ class ParticleFilterAudio(OnlineAlignment):
             return np.pi / 2
 
         cos_angle = np.dot(ca, cm) / (norm_a * norm_m)
-        cos_angle = np.clip(cos_angle, 0, 1)
+        cos_angle = np.clip(cos_angle, -1, 1)
         return np.arccos(cos_angle)
 
     def check_crossing(self):
-        if self.previous_state is not None and self.current_state is not None:
+        if self.previous_state is not None and self.current_position is not None:
             # check if there is a score boundary between previous and current state
-            if self.previous_state < self.current_state:
+            if self.previous_state < self.current_position:
                 crossed_boundaries = self.score_boundaries[
                     (self.score_boundaries > self.previous_state)
-                    & (self.score_boundaries <= self.current_state)
+                    & (self.score_boundaries <= self.current_position)
                 ]
                 if len(crossed_boundaries) > 0:
                     # for each crossed boundary, check if it falls in between self.prev_x and self.x for each particle, and store the indexes of the particles that crossed the boundary
@@ -166,6 +166,7 @@ class ParticleFilterAudio(OnlineAlignment):
 
                     unique_indices_crossed = np.unique(np.concatenate(indices_crossed))
                     if len(unique_indices_crossed) > 0:
+                        # For particles that crossed the boundary, reset their tempo to a random value around the mean tempo
                         self.v[unique_indices_crossed] = self.rng.normal(
                             self.tempo_mean, self.sigma_v, len(unique_indices_crossed)
                         )
@@ -188,13 +189,13 @@ class ParticleFilterAudio(OnlineAlignment):
         # Reset weights only after resampling
         self.weights.fill(1.0 / self.num_particles)
 
-    def step(self, feature, f_time):
+    def step(self, feature):
         self.predict()
 
-        current_state = round(np.mean(self.x), 2)
+        current_position = round(np.mean(self.x), 2)
 
-        self.previous_state = self.current_state
-        self.current_state = current_state
+        self.previous_state = self.current_position
+        self.current_position = current_position
         self.check_crossing()
 
         likelihoods = self.compute_likelihood(feature)
@@ -206,63 +207,22 @@ class ParticleFilterAudio(OnlineAlignment):
         self.resample()
 
         self.tempo_mean = np.mean(self.v)
+        self.sigma_v = 0.25 * self.tempo_mean
 
-        return self.current_state
+        return self.current_position
+    
+    def __call__(self, observation: Tuple[Any, float]) -> float:
+        t0 = time.time()
+        self.input_features.append(observation[0])
+        beat = super().__call__(observation)
+        self.latency_stats = set_latency_stats(
+            time.time() - t0, self.latency_stats, self.input_index
+        )
+        self.input_index += 1
+        return beat
 
-    def __call__(self, feature, f_time):
-        return self.step(feature, f_time)
-
-    def run(self, verbose: bool = True) -> Generator[int, None, NDArray[np.float32]]:
-        """Run the online alignment process.
-
-        Parameters
-        ----------
-        verbose : bool, optional
-            Whether to show progress bar, by default True
-
-        Yields
-        ------
-        int
-            Current position in the reference sequence
-
-        Returns
-        -------
-        NDArray[np.float32]
-            The warping path as a 2D array where each column contains
-            (reference_position, input_position)
-        """
-        if verbose:
-            pbar = progressbar.ProgressBar(
-                max_value=float(self.state_space[-1]), redirect_stdout=True
-            )
-
-        while self.is_still_following():
-            features, f_time = self.queue.get(timeout=QUEUE_TIMEOUT)
-            self.last_queue_update = time.time()
-            self.input_features = (
-                np.concatenate((self.input_features, features))
-                if self.input_features is not None
-                else features
-            )
-
-            self.current_state = self(features, f_time)
-            self.current_state_in_frame_index = int(
-                self.beat_to_frame_map(self.current_state)
-            )
-            self._warping_path.append((self.current_state, self.input_index))
-            if verbose:
-                pbar.update(self.current_state)
-
-            latency = time.time() - self.last_queue_update
-            self.latency_stats = set_latency_stats(
-                latency, self.latency_stats, self.input_index
-            )
-
-            yield self.current_state
-
-            self.input_index += 1
-
-        if verbose:
-            pbar.finish()
-
-        return self.warping_path
+    def get_current_position(self) -> float:
+        return self.current_position
+    
+    def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
+        return (yield from super().run(verbose=verbose))

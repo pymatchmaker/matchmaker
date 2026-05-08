@@ -34,11 +34,12 @@ class ChromagramProcessor(Processor):
         hop_length: int = HOP_LENGTH,
         n_chroma: int = N_CHROMA,
         norm: Optional[Union[float, str]] = NORM,
+        n_fft: int = None,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
-        self.n_fft = 2 * self.hop_length
+        self.n_fft = n_fft if n_fft is not None else 2 * self.hop_length
         self.n_chroma = n_chroma
         self.norm = norm
 
