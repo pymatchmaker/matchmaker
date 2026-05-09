@@ -473,9 +473,9 @@ class Matchmaker(object):
             sna = self.score_part.note_array(include_grace_notes=True)
             return OnlineParangonarAlignment(
                 reference_features=sna,
-                performance_file=self.performance_file,
                 method=method,
                 queue=queue,
+                **self.config,
             )
         raise ValueError(f"No MIDI follower for method '{method}'")
 
