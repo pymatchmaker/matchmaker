@@ -43,10 +43,6 @@ class OnlineParangonarAlignment(OnlineAlignment):
     reference_features : np.ndarray
         Score note array (structured, with `onset_beat`, `pitch`, `id`,
         `is_grace`).
-    performance_file : str
-        Path to the performance MIDI file. The adapter reads it directly
-        rather than consuming the MidiStream queue, because parangonar
-        matchers operate on full note rows.
     method : str
         One of {"SL_OLTW", "SLT_OLTW", "OTM", "OPTM"}.
     queue : RECVQueue or None
@@ -60,6 +56,7 @@ class OnlineParangonarAlignment(OnlineAlignment):
         performance_file: str,
         method: str,
         queue=None,
+        **kwargs
     ):
         if method not in _OLTW_MATCHERS | _TRANSFORMER_MATCHERS:
             raise ValueError(f"Unknown parangonar method: {method}")
@@ -73,58 +70,23 @@ class OnlineParangonarAlignment(OnlineAlignment):
         self.method = method
         self.performance_file = performance_file
         self.score_note_array = score_note_array
-        self.matcher = self._build_matcher(method, self.score_note_array)
+        self.matcher = self._build_matcher(method, self.score_note_array, **kwargs)
+        self._private_score_position = self.score_positions[0]
 
     @staticmethod
-    def _build_matcher(method: str, sna: np.ndarray):
+    def _build_matcher(method: str, sna: np.ndarray, **kwargs):
         if method == "SLT_OLTW":
-            return pa.TOLTWMatcher(sna)
+            return pa.TOLTWMatcher(sna, tracker_type=method, **kwargs) 
         if method == "SL_OLTW":
-            return pa.OLTWMatcher(sna)
+            return pa.OLTWMatcher(sna,tracker_type=method, **kwargs)
         if method == "OTM":
-            return pa.OnlineTransformerMatcher(sna)
+            return pa.OnlineTransformerMatcher(sna, **kwargs)
         if method == "OPTM":
-            return pa.OnlinePureTransformerMatcher(sna)
+            return pa.OnlinePureTransformerMatcher(sna, **kwargs)
         raise ValueError(method)
 
     def step(self, performance_note) -> None:
-        self.matcher.online(performance_note)
-        s_onset = float(self.matcher._prev_score_onset)
-        idx = int(np.searchsorted(self.score_positions, s_onset))
-        self.current_index = max(0, min(idx, len(self.score_positions) - 1))
+        self._private_score_position = float(self.matcher(performance_note))
 
-    def _load_performance_note_array(self) -> np.ndarray:
-        perf = pt.load_performance_midi(self.performance_file)
-        pna = perf.note_array()
-        return _ensure_unique_ids(pna, prefix="p")
-
-    def run(self, verbose: bool = True) -> Generator[float, None, np.ndarray]:
-        pna = self._load_performance_note_array()
-
-        # OLTW-based matchers
-        if self.method in _OLTW_MATCHERS:
-            tracking_path = self.matcher(pna)
-            score_idx = np.asarray(tracking_path[0], dtype=int)
-            perf_idx = np.asarray(tracking_path[1], dtype=int)
-            score_beats = self.score_positions[score_idx]
-            perf_secs = pna["onset_sec"][perf_idx]
-            for beat, perf_t in zip(score_beats, perf_secs):
-                self.current_index = int(
-                    np.searchsorted(self.score_positions, float(beat))
-                )
-                self.current_index = max(
-                    0, min(self.current_index, len(self.score_positions) - 1)
-                )
-                self.current_position = float(beat)
-                self.current_perf_time = float(perf_t)
-                self._alignment_path.append(
-                    (self.current_position, self.current_perf_time)
-                )
-                yield self.current_position
-            return self.alignment_path
-
-        # Transformer-based matchers
-        self.matcher.prepare_performance(float(pna[0]["onset_sec"]))
-        for note in pna:
-            yield self((note, float(note["onset_sec"])))
-        return self.alignment_path
+    def get_current_position(self):
+	    return self._private_score_position
