@@ -371,7 +371,7 @@ def adjust_tempo_for_performance_file(
     source_length = score_midi.length
     if is_midi_file(performance_file):
         perf = partitura.load_performance_midi(performance_file)
-        pna = perf.performedparts[0].note_array()
+        pna = perf.note_array()
         last_onset = pna["onset_sec"].max()
         last_duration = pna["duration_sec"][-1]
         target_length = last_onset + last_duration

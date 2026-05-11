@@ -96,7 +96,6 @@ DEFAULT_KWARGS = {
             "n_fft": int(int(SAMPLE_RATE/4)/21.533203125), # converts to closest power of 2 for a 46ms window (as proposed by Duan et al.) for default sample rates.
             "frame_rate": 100,
             "num_particles": 1000,
-            "auto_adjust_tempo": True,
         }
     },
     "midi": {
@@ -122,7 +121,6 @@ DEFAULT_KWARGS = {
             "piano_range": True,
             "num_particles": 1000,
             "polling_period": POLLING_PERIOD,
-            "auto_adjust_tempo": True,
         },
         "pthmm": {"processor": "pitch_chord", "piano_range": True},
         "outerhmm": {"processor": "pitch_chord", "piano_range": True},
@@ -238,7 +236,7 @@ class Matchmaker(object):
             if kwargs is not None
             else DEFAULT_KWARGS[self.input_type].get(self.method, {})
         )
-        self.auto_adjust_tempo = self.config.pop("auto_adjust_tempo", auto_adjust_tempo)
+        self.auto_adjust_tempo = auto_adjust_tempo
 
         if input_type == "midi":
             self.polling_period = self.config.pop("polling_period", None)
