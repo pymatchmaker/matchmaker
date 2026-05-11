@@ -370,7 +370,11 @@ def adjust_tempo_for_performance_file(
     score_midi = partitura.save_score_midi(score, out=None)
     source_length = score_midi.length
     if is_midi_file(performance_file):
-        target_length = mido.MidiFile(performance_file).length
+        perf = partitura.load_performance_midi(performance_file)
+        pna = perf.note_array()
+        last_onset = pna["onset_sec"].max()
+        last_duration = pna["duration_sec"][-1]
+        target_length = last_onset + last_duration
     else:
         target_length = librosa.get_duration(path=str(performance_file))
     ratio = target_length / source_length
