@@ -11,7 +11,7 @@ import partitura as pt
 from hiddenmarkov import CategoricalObservationModel, ConstantTransitionModel
 
 from matchmaker import EXAMPLE_MATCH, EXAMPLE_PIECES
-from matchmaker.features.midi import PitchChordProcessor, PitchProcessor
+from matchmaker.features.midi import PitchProcessor
 from matchmaker.prob.hmm import (
     BaseHMM,
     BernoulliGaussianPitchIOIObservationModel,
@@ -57,7 +57,7 @@ class TestBaseHMM(unittest.TestCase):
         )
 
         for ob, ex in zip(observations, expected_sequence):
-            hmm((ob, 0.0))  # observation contract: (features, perf_time)
+            hmm(ob, 0.0)  # __call__(features, perf_time)
             self.assertEqual(hmm.score_positions[hmm.current_index], ex)
 
         self.assertIsInstance(hmm.alignment_path, np.ndarray)
@@ -119,7 +119,7 @@ class TestPitchHMM(unittest.TestCase):
             if obs is not None:
                 # MidiStream attaches perf_time, so obs is already
                 # (pitch_array, perf_time)
-                cp = hmm(obs)
+                cp = hmm(*obs)
                 # __call__ returns the float beat (current_position)
                 self.assertTrue(cp in unique_sonsets)
 
@@ -180,13 +180,13 @@ class TestPitchIOIHMM(unittest.TestCase):
 
         observations = process_midi_offline(
             perf_info=perf,
-            processor=PitchChordProcessor(piano_range=True),
+            processor=PitchProcessor(piano_range=True),
         )
 
         for obs in observations:
             if obs is not None:
                 # processor returns (pitch_array, chord_onset_time)
-                cp = hmm(obs)
+                cp = hmm(*obs)
                 # __call__ returns the float beat (current_position)
                 self.assertTrue(cp in unique_sonsets)
 

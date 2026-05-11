@@ -146,50 +146,88 @@ mm = Matchmaker(
 ```
 
 
-### Using a Custom Stream
+### Streaming from a non-device source (`BytesAudioStream` / `BytesMidiStream`)
 
-You can inject your own stream from any external source without needing `pyaudio` or `python-rtmidi`:
+For input that does not come from a local audio / MIDI device (a WebSocket
+handler forwarding browser data, a subprocess, an IPC pipe, etc.), use the
+built-in `BytesAudioStream` and `BytesMidiStream` classes. Both pull raw
+`bytes` chunks from a `queue.Queue` you control and feed them through the
+same processor pipeline as the device-backed streams. No `pyaudio` or
+`python-rtmidi` install is required.
+
+**Audio.** The producer pushes raw `float32` PCM bytes (one `hop_length`
+chunk per item), followed by `None` to end the stream:
 
 ```python
 import queue
-import time
 from matchmaker import Matchmaker
-from matchmaker.io.stream import Stream, STREAM_END
+from matchmaker.io.audio import BytesAudioStream
 from matchmaker.features.audio import ChromagramProcessor
 
-class MyStream(Stream):
-    def __init__(self, processor):
-        super().__init__(processor=processor)
-        self.queue = queue.Queue()
+data_queue = queue.Queue()
 
-    def run(self):
-        self.start_listening()
-        self.stream_start.set()
-        for chunk in ...:  # iterate over your data source
-            features = self.processor(chunk)
-            self.queue.put((features, time.time() - self.init_time))
-        self.queue.put(STREAM_END)
+# In a producer thread (e.g. WebSocket handler):
+#     data_queue.put(pcm_chunk_bytes)   # float32 PCM, hop_length samples
+#     ...
+#     data_queue.put(None)              # end of stream
 
-    def __enter__(self):
-        self.start()
-        return self
-
-    def __exit__(self, *args):
-        self.stop()
-
-    def stop(self):
-        self.stop_listening()
-
+stream = BytesAudioStream(
+    processor=ChromagramProcessor(sample_rate=22050, hop_length=441),
+    sample_rate=22050,
+    hop_length=441,
+    data_queue=data_queue,
+)
 mm = Matchmaker(
     score_file="path/to/score.musicxml",
     input_type="audio",
-    stream=MyStream(processor=ChromagramProcessor()),
+    stream=stream,
 )
 for current_position in mm.run():
     print(current_position)
 ```
 
-For a real-world example, see [`WebSocketAudioStream`](https://github.com/pymatchmaker/matchmaker-demo/blob/main/backend/app/websocket_audio_stream.py) in [matchmaker-demo](https://github.com/pymatchmaker/matchmaker-demo), which feeds raw PCM audio from a Web Audio API into the alignment pipeline.
+**MIDI.** The producer pushes raw MIDI bytes (e.g. 3 bytes per `note_on` /
+`note_off`, exactly what the Web MIDI API gives you):
+
+```python
+import queue
+from matchmaker import Matchmaker
+from matchmaker.io.midi import BytesMidiStream
+from matchmaker.features.midi import PitchProcessor
+
+data_queue = queue.Queue()
+
+# In a producer thread:
+#     data_queue.put(midi_bytes)   # e.g. bytes([0x90, 60, 100])
+#     ...
+#     data_queue.put(None)
+
+stream = BytesMidiStream(processor=PitchProcessor(), data_queue=data_queue)
+mm = Matchmaker(
+    score_file="path/to/score.musicxml",
+    input_type="midi",
+    stream=stream,
+)
+for current_position in mm.run():
+    print(current_position)
+```
+
+The browser side just forwards what Web MIDI API hands it:
+
+```javascript
+const midiAccess = await navigator.requestMIDIAccess();
+midiAccess.inputs.forEach((input) => {
+  input.onmidimessage = (event) => {
+    // event.data is a Uint8Array (typically 3 bytes for note_on / note_off)
+    ws.send(event.data);   // forward as a binary WebSocket frame
+  };
+});
+```
+
+The Python WebSocket handler reads the binary frame and calls
+`data_queue.put(message_bytes)`. No JSON / dict / base64 conversion is
+needed at any layer.
+
 
 ### Running Examples
 

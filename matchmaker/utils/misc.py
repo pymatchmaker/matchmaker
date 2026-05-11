@@ -351,40 +351,6 @@ def get_tempo_at_beat(
     return current_tempo
 
 
-def adjust_tempo_for_performance_file(
-    score: ScoreLike, performance_file: Path, default_tempo: int = 120
-):
-    """
-    Adjust the tempo of the score part to match the performance file.
-    We round the tempo to the nearest 10 bpm to avoid too much optimization.
-
-    Parameters
-    ----------
-    score : partitura.score.ScoreLike
-        The score to adjust the tempo of.
-    performance_file : Path
-        The performance file to adjust the tempo to.
-    default_tempo : int
-        The default tempo of the score.
-    """
-    score_midi = partitura.save_score_midi(score, out=None)
-    source_length = score_midi.length
-    if is_midi_file(performance_file):
-        perf = partitura.load_performance_midi(performance_file)
-        pna = perf.note_array()
-        last_onset = pna["onset_sec"].max()
-        last_duration = pna["duration_sec"][-1]
-        target_length = last_onset + last_duration
-    else:
-        target_length = librosa.get_duration(path=str(performance_file))
-    ratio = target_length / source_length
-    rounded_tempo = int(round(default_tempo / ratio / 10) * 10)  # round to nearest 10
-    print(
-        f"default tempo: {default_tempo} (score length: {source_length}) -> adjusted_tempo: {rounded_tempo} (perf length: {target_length})"
-    )
-    return rounded_tempo
-
-
 def get_current_note_bpm(score: ScoreLike, onset_beat: float, tempo: float) -> float:
     """Get the adjusted BPM for a given note onset beat position based on time signature."""
     current_time = score.inv_beat_map(onset_beat)
@@ -618,8 +584,9 @@ def save_debug_results(
     input_features: Optional[np.ndarray] = None,
     distance_func=None,
     ref_frame_to_beat: Optional[np.ndarray] = None,
+    make_plot: bool = True,
 ):
-    """Save debug outputs: alignment path TSV, results JSON, and alignment plot."""
+    """Save debug outputs: alignment path TSV, results JSON, and (optional) plot."""
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
@@ -631,6 +598,9 @@ def save_debug_results(
 
     with open(save_dir / f"{run_name}.json", "w") as f:
         json.dump(eval_results, f, indent=4)
+
+    if not make_plot:
+        return
 
     # 2. Alignment plot
     # score_y = beat positions for each annotation (y-axis of the plot)

@@ -180,11 +180,10 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
     # Frame Dixon's step() can append to wp multiple times via save_history()
     # during catch-up loops, so the base __call__'s one-append-per-call contract
     # doesn't fit
-    def __call__(self, observation: Tuple[Any, float]) -> float:
-        features, perf_time = observation
+    def __call__(self, observation: Any, perf_time: float) -> float:
         self.current_perf_time = perf_time
         t0 = time.time()
-        self.step(features)
+        self.step(observation)
         self.current_position = self.get_current_position()
         self.latency_stats = set_latency_stats(
             time.time() - t0, self.latency_stats, self.input_index

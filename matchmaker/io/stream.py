@@ -24,8 +24,8 @@ class Stream(Thread):
 
     Parameters
     ----------
-    processor : Union[Callable, Processor]
-        A `Processor` instance or a callable for extracting
+    processor : Processor
+        A `Processor` instance for extracting
         features from the inputs.
     mock : bool
         A boolean indicating whether to run the stream offline
@@ -34,12 +34,12 @@ class Stream(Thread):
 
     mock: bool
     init_time: Optional[float]
-    processor: Union[Callable, Processor]
+    processor: Processor
     listen: bool
 
     def __init__(
         self,
-        processor: Union[Callable, Processor],
+        processor: Processor,
         mock: bool = False,
     ) -> None:
         Thread.__init__(self)

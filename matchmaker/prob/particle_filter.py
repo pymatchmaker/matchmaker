@@ -4,28 +4,29 @@ from typing import Any, Dict, Generator, List, Optional, Tuple
 import numpy as np
 import progressbar
 from numpy.typing import NDArray
-from partitura.utils.generic import interp1d
 from partitura.io.exportmidi import get_ppq
+from partitura.utils.generic import interp1d
 
 from matchmaker.base import OnlineAlignment
-from matchmaker.utils.misc import set_latency_stats
-from matchmaker.io.queue import RECVQueue
+from matchmaker.features.audio import FRAME_RATE, SAMPLE_RATE
 from matchmaker.io.audio import QUEUE_TIMEOUT
-from matchmaker.features.audio import (FRAME_RATE, SAMPLE_RATE)
+from matchmaker.io.queue import RECVQueue
+from matchmaker.utils.misc import set_latency_stats
 
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]
 SEED = 1984
 RNG = np.random.RandomState(SEED)
 
-HOP_SIZE = 1.0/FRAME_RATE
+HOP_SIZE = 1.0 / FRAME_RATE
+
 
 class ParticleFilter(OnlineAlignment):
     def __init__(
         self,
         reference_features,  # shape: (num_score_frames, 12)
         score_positions,  # shape: (num_score_frames,)
-        score_boundaries, # shape: (num_score_boundaries,)
+        score_boundaries,  # shape: (num_score_boundaries,)
         notated_tempo: float = 120.0,  # BPM from score
         hop_size: float = HOP_SIZE,  # hop size in seconds
         queue: Optional[RECVQueue] = None,
@@ -38,7 +39,7 @@ class ParticleFilter(OnlineAlignment):
 
         self.score_positions = score_positions
         self.score_boundaries = score_boundaries
-        
+
         self.current_state_in_frame_index = 0
         self.current_position = 0
         self.previous_state = None
@@ -210,11 +211,11 @@ class ParticleFilter(OnlineAlignment):
         self.sigma_v = 0.25 * self.tempo_mean
 
         return self.current_position
-    
-    def __call__(self, observation: Tuple[Any, float]) -> float:
+
+    def __call__(self, observation: Any, perf_time: float) -> float:
         t0 = time.time()
-        self.input_features.append(observation[0])
-        beat = super().__call__(observation)
+        self.input_features.append(observation)
+        beat = super().__call__(observation, perf_time)
         self.latency_stats = set_latency_stats(
             time.time() - t0, self.latency_stats, self.input_index
         )
@@ -223,6 +224,6 @@ class ParticleFilter(OnlineAlignment):
 
     def get_current_position(self) -> float:
         return self.current_position
-    
+
     def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
         return (yield from super().run(verbose=verbose))

@@ -289,14 +289,15 @@ class AudioOuterProductHMM(OnlineAlignment):
         # mid-piece; rely on STREAM_END to terminate.
         return True
 
-    def __call__(self, input, *args, **kwargs) -> float:
+    def __call__(self, input, perf_time: float, *args, **kwargs) -> float:
         """Frame-based audio HMM update.
 
         Parameters
         ----------
-        input : np.ndarray or tuple
+        input : np.ndarray
             Current frame observation y_t (CQT magnitude 88-bin vector).
-            If tuple, uses (features, perf_time_sec).
+        perf_time : float
+            Performance time (seconds) of this frame.
 
         Returns
         -------
@@ -304,11 +305,8 @@ class AudioOuterProductHMM(OnlineAlignment):
             Current beat position from score_positions[current_index].
         """
         t0 = time.time()
-        if isinstance(input, tuple):
-            observation = np.asarray(input[0], dtype=float)
-            self.current_perf_time = float(input[1])
-        else:
-            observation = np.asarray(input, dtype=float)
+        observation = np.asarray(input, dtype=float)
+        self.current_perf_time = float(perf_time)
 
         if observation.ndim == 2:
             observation = observation[-1]

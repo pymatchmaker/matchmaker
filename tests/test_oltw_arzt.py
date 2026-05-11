@@ -98,7 +98,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             )
 
             for i, obs in enumerate(Y):
-                current_position = oltw((obs, float(i)))
+                current_position = oltw(obs, float(i))
                 # check that the alignments are correct
                 self.assertTrue(np.all(path[i] == (current_position, i)))
                 # __call__ now returns the float beat position
@@ -133,7 +133,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
                     )
 
                     for i, obs in enumerate(Y):
-                        current_position = oltw((obs, float(i)))
+                        current_position = oltw(obs, float(i))
                         # check that the alignments are correct
                         self.assertTrue(np.all(path[i] == (current_position, i)))
                         # __call__ now returns the float beat position
@@ -166,7 +166,7 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
             )
 
             for i, obs in enumerate(Y):
-                current_position = oltw((obs, float(i)))
+                current_position = oltw(obs, float(i))
                 # with some of the scipy metrics, we cannot
                 # ensure that the results will always
                 # be correct, so we only
