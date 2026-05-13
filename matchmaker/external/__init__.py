@@ -126,5 +126,5 @@ class OnlineParangonarAlignment(OnlineAlignment):
         # Transformer-based matchers
         self.matcher.prepare_performance(float(pna[0]["onset_sec"]))
         for note in pna:
-            yield self((note, float(note["onset_sec"])))
+            yield self(note, float(note["onset_sec"]))
         return self.alignment_path
