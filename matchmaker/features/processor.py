@@ -12,6 +12,27 @@ from typing import Any, Callable
 class Processor(object):
     """
     Abstract class for a processor.
+
+    Sits between a Stream and the queue feeding the score follower.
+
+    Input
+    -----
+    A ``(data, frame_time)`` tuple where:
+      - ``data`` is ``np.ndarray`` for audio buffers, or
+        ``List[Tuple[mido.Message, m_time]]`` for MIDI messages.
+      - ``frame_time`` (float) is the stream's nominal time for the frame.
+
+    Output
+    ------
+    Either a ``(features, perf_time)`` tuple, or ``None`` while buffering
+    (e.g. a chord-buffering processor still waiting for the next note).
+    Most processors pass ``frame_time`` through as ``perf_time``;
+    chord-buffering MIDI processors override it with the chord onset
+    time (the first note's ``m_time`` of the buffered chord).
+
+    The Stream forwards the returned tuple to the queue unchanged, so
+    downstream code (`OnlineAlignment.__call__`) always sees
+    ``(features, perf_time)``.
     """
 
     def __call__(
@@ -22,15 +43,13 @@ class Processor(object):
         """
         Parameters
         ----------
-        data : Any
-            Input data to the processor
-        **kwargs: Dict[str, Any]
-            Optional keyword arguments
+        data : Tuple[Any, float]
+            ``(data, frame_time)`` tuple from the Stream.
 
         Returns
         -------
-        output: Any
-            The output of the processor
+        output : Tuple[np.ndarray, float] or None
+            ``(features, perf_time)`` or ``None`` while buffering.
         """
 
         raise NotImplementedError

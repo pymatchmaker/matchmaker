@@ -9,7 +9,7 @@ from typing import Dict, Optional, Tuple, Union
 import librosa
 import numpy as np
 
-from matchmaker.utils.processor import Processor
+from matchmaker.features.processor import Processor
 
 SAMPLE_RATE = 44100
 FRAME_RATE = 30
@@ -34,63 +34,20 @@ class ChromagramProcessor(Processor):
         hop_length: int = HOP_LENGTH,
         n_chroma: int = N_CHROMA,
         norm: Optional[Union[float, str]] = NORM,
+        n_fft: int = None,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
-        self.n_fft = 2 * self.hop_length
+        self.n_fft = n_fft if n_fft is not None else 2 * self.hop_length
         self.n_chroma = n_chroma
         self.norm = norm
 
     def __call__(
         self,
         data: InputAudioFrame,
-    ) -> Tuple[Optional[np.ndarray], Dict]:
-        if isinstance(data, tuple):
-            y, f_time = data
-        else:
-            y = data
-        chroma = librosa.feature.chroma_stft(
-            y=y,
-            sr=self.sample_rate,
-            hop_length=self.hop_length,
-            n_fft=self.n_fft,
-            n_chroma=self.n_chroma,
-            norm=self.norm,
-            center=False,
-            dtype=np.float32,
-        )
-        return chroma.T
-
-
-class ChromagramIOIProcessor(Processor):
-    def __init__(
-        self,
-        sample_rate: int = SAMPLE_RATE,
-        hop_length: int = HOP_LENGTH,
-        n_chroma: int = N_CHROMA,
-        norm: Optional[Union[float, str]] = NORM,
-    ):
-        super().__init__()
-        self.sample_rate = sample_rate
-        self.hop_length = hop_length
-        self.n_fft = 2 * self.hop_length
-        self.n_chroma = n_chroma
-        self.norm = norm
-        self.prev_time = None
-
-    def __call__(
-        self,
-        data: InputAudioFrame,
-    ) -> Tuple[Optional[np.ndarray], Dict]:
+    ) -> Optional[np.ndarray]:
         y, f_time = data
-
-        if self.prev_time is None:
-            ioi_obs = 0
-        else:
-            ioi_obs = f_time - self.prev_time
-
-        self.prev_time = f_time
         chroma = librosa.feature.chroma_stft(
             y=y,
             sr=self.sample_rate,
@@ -101,7 +58,7 @@ class ChromagramIOIProcessor(Processor):
             center=False,
             dtype=np.float32,
         )
-        return chroma.T, ioi_obs
+        return chroma.T, f_time
 
 
 class MFCCProcessor(Processor):
@@ -121,8 +78,9 @@ class MFCCProcessor(Processor):
 
     def __call__(
         self,
-        y: InputAudioSeries,
-    ) -> Tuple[Optional[np.ndarray], Dict]:
+        data: InputAudioFrame,
+    ) -> Optional[np.ndarray]:
+        y, f_time = data
         mfcc = librosa.feature.mfcc(
             y=y,
             sr=self.sample_rate,
@@ -133,7 +91,7 @@ class MFCCProcessor(Processor):
             norm=self.norm,
             dtype=np.float32,
         )
-        return mfcc.T
+        return mfcc.T, f_time
 
 
 class CQTProcessor(Processor):
@@ -150,8 +108,9 @@ class CQTProcessor(Processor):
 
     def __call__(
         self,
-        y: InputAudioSeries,
-    ) -> Tuple[Optional[np.ndarray], Dict]:
+        data: InputAudioFrame,
+    ) -> Optional[np.ndarray]:
+        y, f_time = data
         cqt = librosa.cqt(
             y=y,
             sr=self.sample_rate,
@@ -161,7 +120,7 @@ class CQTProcessor(Processor):
             fmin=librosa.note_to_hz("A0"),
             n_bins=88,
         )
-        return np.abs(cqt).T[1:-1]
+        return np.abs(cqt).T[1:-1], f_time
 
 
 class CQTSpectralFluxProcessor(Processor):
@@ -192,8 +151,9 @@ class CQTSpectralFluxProcessor(Processor):
 
     def __call__(
         self,
-        y: InputAudioSeries,
-    ) -> Tuple[Optional[np.ndarray], Dict]:
+        data: InputAudioFrame,
+    ) -> Optional[np.ndarray]:
+        y, f_time = data
         cqt = librosa.cqt(
             y=y,
             sr=self.sample_rate,
@@ -218,7 +178,7 @@ class CQTSpectralFluxProcessor(Processor):
         else:
             features = cqt_features
 
-        return features[1:-1]
+        return features[1:-1], f_time
 
 
 class MelSpectrogramProcessor(Processor):
@@ -238,8 +198,9 @@ class MelSpectrogramProcessor(Processor):
 
     def __call__(
         self,
-        y: InputAudioSeries,
-    ) -> Tuple[Optional[np.ndarray], Dict]:
+        data: InputAudioFrame,
+    ) -> Optional[np.ndarray]:
+        y, f_time = data
         mel_spectrogram = librosa.feature.melspectrogram(
             y=y,
             sr=self.sample_rate,
@@ -251,7 +212,7 @@ class MelSpectrogramProcessor(Processor):
             dtype=np.float32,
         )
 
-        return mel_spectrogram.T
+        return mel_spectrogram.T, f_time
 
 
 class LogSpectralEnergyProcessor(Processor):
@@ -326,8 +287,9 @@ class LogSpectralEnergyProcessor(Processor):
 
     def __call__(
         self,
-        y: InputAudioSeries,
+        data: InputAudioFrame,
     ):
+        y, f_time = data
         stft_result = librosa.stft(
             y=y,
             n_fft=self.n_fft,
@@ -359,7 +321,37 @@ class LogSpectralEnergyProcessor(Processor):
             norms = np.maximum(norms, 1e-10)
             result = result / norms
 
-        return result
+        return result, f_time
+
+
+class RawSpectrumProcessor(Processor):
+    """Magnitude FFT spectrum, as used in Jiang & Raphael (ISMIR 2020).
+
+    Returns (n_frames, n_fft//2 + 1) magnitude spectrum.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = 8000,
+        hop_length: int = 128,
+        n_fft: int = 512,
+    ):
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.hop_length = hop_length
+        self.n_fft = n_fft
+
+    def __call__(self, data: InputAudioFrame):
+        y, f_time = data
+        stft = librosa.stft(
+            y=y,
+            n_fft=self.n_fft,
+            win_length=self.n_fft,
+            hop_length=self.hop_length,
+            center=False,
+            dtype=np.float32,
+        )
+        return np.abs(stft).T, f_time  # (n_frames, n_bins)
 
 
 def compute_features_from_audio(
@@ -391,6 +383,6 @@ def compute_features_from_audio(
         score_y = ref_info
 
     score_y = np.pad(score_y, (hop_length, 0), "constant")
-    features = feature_processor(score_y)
+    features, _ = feature_processor((score_y, 0.0))
 
     return features

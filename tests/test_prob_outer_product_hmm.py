@@ -2,17 +2,17 @@ import unittest
 
 import matplotlib.pyplot as plt
 import numpy as np
-
 import partitura as pt
+from partitura.utils.music import generate_random_performance_note_array
+
 from matchmaker import EXAMPLE_MATCH
-from matchmaker.features.midi import PitchIOIProcessor
+from matchmaker.features.midi import PitchProcessor
 from matchmaker.prob.outer_product_hmm import (
     OuterProductHMM,
     compute_OuterProductHMM_pitch_probabilities,
     compute_transition_matrix,
     get_chords_from_score,
 )
-from partitura.utils.music import generate_random_performance_note_array
 from tests.utils import process_midi_offline
 
 
@@ -83,16 +83,16 @@ class TestOuterProductHMM(unittest.TestCase):
 
         observations = process_midi_offline(
             perf_info=self.perf,
-            processor=PitchIOIProcessor(piano_range=True),
+            processor=PitchProcessor(piano_range=True),
         )
 
         self.outerhmm = OuterProductHMM(reference_features=self.score)
 
         for obs in observations:
             if obs is not None:
-                current_state = self.outerhmm(obs)
-                self.assertTrue(
-                    self.outerhmm.state_space[current_state] in self.unique_sonsets
-                )
+                beat = self.outerhmm(*obs)
+                if beat is None:
+                    continue  # chord continuation: no state advance
+                self.assertTrue(beat in self.unique_sonsets)
 
-        self.assertTrue(isinstance(self.outerhmm.warping_path, np.ndarray))
+        self.assertTrue(isinstance(self.outerhmm.alignment_path, np.ndarray))

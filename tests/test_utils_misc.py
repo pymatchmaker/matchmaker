@@ -4,13 +4,13 @@ import unittest
 
 import numpy as np
 
-from matchmaker.utils.misc import (
+from matchmaker.io.queue import RECVQueue
+from matchmaker.utils.errors import (
     MatchmakerInvalidOptionError,
     MatchmakerInvalidParameterTypeError,
     MatchmakerMissingParameterError,
-    RECVQueue,
-    ensure_rng,
 )
+from matchmaker.utils.misc import ensure_rng
 
 
 class TestMatchmakerExceptions(unittest.TestCase):

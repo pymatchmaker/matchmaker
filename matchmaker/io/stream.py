@@ -16,7 +16,7 @@ STREAM_START = threading.Event  # call STREAM_START() to create per-instance eve
 STREAM_END = object()  # put into queue to signal end-of-stream
 
 if TYPE_CHECKING:  # pragma: no cover
-    from matchmaker.utils.processor import Processor
+    from matchmaker.features.processor import Processor
 
 
 class Stream(Thread):
@@ -24,8 +24,8 @@ class Stream(Thread):
 
     Parameters
     ----------
-    processor : Union[Callable, Processor]
-        A `Processor` instance or a callable for extracting
+    processor : Processor
+        A `Processor` instance for extracting
         features from the inputs.
     mock : bool
         A boolean indicating whether to run the stream offline
@@ -34,13 +34,13 @@ class Stream(Thread):
 
     mock: bool
     init_time: Optional[float]
-    processor: Union[Callable, Processor]
+    processor: Processor
     listen: bool
 
     def __init__(
         self,
-        processor: Union[Callable, Processor],
-        mock: bool,
+        processor: Processor,
+        mock: bool = False,
     ) -> None:
         Thread.__init__(self)
         self.processor = processor

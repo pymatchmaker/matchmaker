@@ -9,8 +9,7 @@ import numbers
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from queue import Empty, Queue
-from typing import Any, Dict, Iterable, List, Optional, Union
+from typing import Dict, Optional, Union
 
 import librosa
 import mido
@@ -146,53 +145,6 @@ def extract_tempo_marking_from_musicxml(
     return None
 
 
-class MatchmakerInvalidParameterTypeError(Exception):
-    """
-    Error for flagging an invalid parameter type.
-    """
-
-    def __init__(
-        self,
-        parameter_name: str,
-        required_parameter_type: Union[type, Iterable[type]],
-        actual_parameter_type: type,
-        *args,
-    ) -> None:
-        if isinstance(required_parameter_type, Iterable):
-            rqpt = ", ".join([f"{pt}" for pt in required_parameter_type])
-        else:
-            rqpt = required_parameter_type
-        message = f"`{parameter_name}` was expected to be {rqpt}, but is {actual_parameter_type}"
-
-        super().__init__(message, *args)
-
-
-class MatchmakerInvalidOptionError(Exception):
-    """
-    Error for invalid option.
-    """
-
-    def __init__(self, parameter_name, valid_options, value, *args) -> None:
-        rqop = ", ".join([f"{op}" for op in valid_options])
-        message = f"`{parameter_name}` was expected to be in {rqop}, but is {value}"
-
-        super().__init__(message, *args)
-
-
-class MatchmakerMissingParameterError(Exception):
-    """
-    Error for flagging a missing parameter
-    """
-
-    def __init__(self, parameter_name: Union[str, List[str]], *args) -> None:
-        if isinstance(parameter_name, Iterable) and not isinstance(parameter_name, str):
-            message = ", ".join([f"`{pn}`" for pn in parameter_name])
-            message = f"{message} were not given"
-        else:
-            message = f"`{parameter_name}` was not given."
-        super().__init__(message, *args)
-
-
 def ensure_rng(
     seed: Union[numbers.Integral, np.random.RandomState],
 ) -> np.random.RandomState:
@@ -222,33 +174,6 @@ def ensure_rng(
             "`seed` should be an integer or an instance of "
             f"`np.random.RandomState` but is {type(seed)}"
         )
-
-
-class RECVQueue(Queue):
-    """
-    Queue with a recv method (like Pipe)
-
-    This class uses python's Queue.get with a timeout makes it interruptable via KeyboardInterrupt
-    and even for the future where that is possibly out-dated, the interrupt can happen after each timeout
-    so periodically query the queue with a timeout of 1s each attempt, finding a middleground
-    between busy-waiting and uninterruptable blocked waiting
-    """
-
-    def __init__(self) -> None:
-        Queue.__init__(self)
-
-    def recv(self) -> Any:
-        """
-        Return and remove an item from the queue.
-        """
-        while True:
-            try:
-                return self.get(timeout=1)
-            except Empty:  # pragma: no cover
-                pass
-
-    def poll(self) -> bool:
-        return self.empty()
 
 
 def get_window_indices(indices: np.ndarray, context: int) -> np.ndarray:
@@ -426,36 +351,6 @@ def get_tempo_at_beat(
     return current_tempo
 
 
-def adjust_tempo_for_performance_file(
-    score: ScoreLike, performance_file: Path, default_tempo: int = 120
-):
-    """
-    Adjust the tempo of the score part to match the performance file.
-    We round the tempo to the nearest 10 bpm to avoid too much optimization.
-
-    Parameters
-    ----------
-    score : partitura.score.ScoreLike
-        The score to adjust the tempo of.
-    performance_file : Path
-        The performance file to adjust the tempo to.
-    default_tempo : int
-        The default tempo of the score.
-    """
-    score_midi = partitura.save_score_midi(score, out=None)
-    source_length = score_midi.length
-    if is_midi_file(performance_file):
-        target_length = mido.MidiFile(performance_file).length
-    else:
-        target_length = librosa.get_duration(path=str(performance_file))
-    ratio = target_length / source_length
-    rounded_tempo = int(round(default_tempo / ratio / 10) * 10)  # round to nearest 10
-    print(
-        f"default tempo: {default_tempo} (score length: {source_length}) -> adjusted_tempo: {rounded_tempo} (perf length: {target_length})"
-    )
-    return rounded_tempo
-
-
 def get_current_note_bpm(score: ScoreLike, onset_beat: float, tempo: float) -> float:
     """Get the adjusted BPM for a given note onset beat position based on time signature."""
     current_time = score.inv_beat_map(onset_beat)
@@ -529,20 +424,20 @@ def _beats_to_frames(
 
 
 def plot_alignment(
-    warping_path: np.ndarray,
+    alignment_path: np.ndarray,
     perf_annots: np.ndarray,
     perf_annots_predicted: np.ndarray,
     save_dir: Path,
     name: str,
     score_y: Optional[np.ndarray] = None,
     frame_rate: float = 1.0,
-    state_space: Optional[np.ndarray] = None,
+    score_positions: Optional[np.ndarray] = None,
     ref_features: Optional[np.ndarray] = None,
     input_features: Optional[np.ndarray] = None,
     distance_func=None,
     ref_frame_to_beat: Optional[np.ndarray] = None,
 ):
-    """Plot warping path, GT annotations, and predicted points."""
+    """Plot alignment path, GT annotations, and predicted points."""
     save_dir.mkdir(parents=True, exist_ok=True)
     gt = np.asarray(perf_annots, dtype=float)
     pred = np.asarray(perf_annots_predicted, dtype=float)
@@ -571,12 +466,14 @@ def plot_alignment(
                     ],
                     dtype=np.float32,
                 )
+            n_input = input_features.shape[0]
+            n_ref = ref_features.shape[0]
             ax.imshow(
                 dist,
                 aspect="auto",
                 origin="lower",
                 interpolation="nearest",
-                extent=(0, input_features.shape[0] - 1, 0, ref_features.shape[0] - 1),
+                extent=(0, n_input - 1, 0, n_ref - 1),
             )
             show_dist = True
         except Exception:
@@ -584,16 +481,16 @@ def plot_alignment(
 
     # x-axis: performance time in frames
     x_gt = gt * float(frame_rate)
-    wp_x = warping_path[1]
+    wp_x = alignment_path[1] * float(frame_rate)
 
     # y-axis: score position (beats)
-    wp_in_beats = np.issubdtype(warping_path[0].dtype, np.floating)
-    if state_space is not None and not wp_in_beats:
-        wp_y = state_space[warping_path[0]]
+    wp_in_beats = np.issubdtype(alignment_path[0].dtype, np.floating)
+    if score_positions is not None and not wp_in_beats:
+        wp_y = score_positions[alignment_path[0]]
     elif show_dist and wp_in_beats and ref_frame_to_beat is not None:
-        wp_y = _beats_to_frames(warping_path[0], ref_frame_to_beat)
+        wp_y = _beats_to_frames(alignment_path[0], ref_frame_to_beat)
     else:
-        wp_y = warping_path[0]
+        wp_y = alignment_path[0]
 
     # GT score positions (y-axis for annotation dots)
     if score_y is not None:
@@ -619,7 +516,7 @@ def plot_alignment(
         color="white" if show_dist else "lime",
         alpha=0.7 if show_dist else 0.5,
         markersize=15,
-        label="warping path",
+        label="alignment path",
         zorder=2,
     )
     ax.scatter(
@@ -674,7 +571,7 @@ def plot_alignment(
 
 
 def save_debug_results(
-    warping_path: np.ndarray,
+    alignment_path: np.ndarray,
     score_annots: np.ndarray,
     perf_annots: np.ndarray,
     perf_annots_predicted: np.ndarray,
@@ -682,24 +579,28 @@ def save_debug_results(
     frame_rate: float,
     save_dir: Path,
     run_name: str = "results",
-    state_space: Optional[np.ndarray] = None,
+    score_positions: Optional[np.ndarray] = None,
     ref_features: Optional[np.ndarray] = None,
     input_features: Optional[np.ndarray] = None,
     distance_func=None,
     ref_frame_to_beat: Optional[np.ndarray] = None,
+    make_plot: bool = True,
 ):
-    """Save debug outputs: warping path TSV, results JSON, and alignment plot."""
+    """Save debug outputs: alignment path TSV, results JSON, and (optional) plot."""
     save_dir = Path(save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Warping path TSV + results JSON + GT annotations
-    save_nparray_to_csv(warping_path.T, (save_dir / f"wp_{run_name}.tsv").as_posix())
+    # 1. Alignment path TSV + results JSON + GT annotations
+    save_nparray_to_csv(alignment_path.T, (save_dir / f"wp_{run_name}.tsv").as_posix())
     gt_pairs = np.column_stack([score_annots, perf_annots])
     save_nparray_to_csv(gt_pairs, (save_dir / f"gt_{run_name}.tsv").as_posix())
     import json
 
     with open(save_dir / f"{run_name}.json", "w") as f:
         json.dump(eval_results, f, indent=4)
+
+    if not make_plot:
+        return
 
     # 2. Alignment plot
     # score_y = beat positions for each annotation (y-axis of the plot)
@@ -710,14 +611,14 @@ def save_debug_results(
         else None
     )
     plot_alignment(
-        warping_path,
+        alignment_path,
         perf_annots,
         perf_annots_predicted,
         save_dir,
         run_name,
         score_y=score_y,
         frame_rate=frame_rate,
-        state_space=state_space,
+        score_positions=score_positions,
         ref_features=ref_features,
         input_features=input_features,
         distance_func=distance_func,

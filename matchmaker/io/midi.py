@@ -4,18 +4,19 @@
 Input MIDI stream
 """
 
+import queue as _queue
 import time
 from types import TracebackType
-from typing import Callable, List, Optional, Tuple, Type, Union
+from typing import List, Optional, Tuple, Type, Union
 
 import mido
 from mido.ports import BaseInput as MidiInputPort
 
-from matchmaker.features.midi import PitchIOIProcessor
+from matchmaker.features.midi import PitchProcessor
+from matchmaker.features.processor import Processor
 from matchmaker.io.mediator import CeusMediator
-from matchmaker.utils.misc import RECVQueue
-from matchmaker.utils.processor import Processor
-from matchmaker.utils.stream import Stream
+from matchmaker.io.queue import RECVQueue
+from matchmaker.io.stream import STREAM_END, Stream
 from matchmaker.utils.symbolic import (
     Buffer,
     framed_midi_messages_from_performance,
@@ -60,7 +61,7 @@ class MidiStream(Stream):
     init_time: float
     listen: bool
     queue: RECVQueue
-    processor: Callable
+    processor: Processor
     return_midi_messages: bool
     first_message: bool
     mediator: CeusMediator
@@ -70,7 +71,7 @@ class MidiStream(Stream):
 
     def __init__(
         self,
-        processor: Optional[Union[Callable, Processor]] = None,
+        processor: Optional[Processor] = None,
         file_path: Optional[str] = None,
         polling_period: Optional[float] = POLLING_PERIOD,
         port: Optional[Union[MidiInputPort, str]] = None,
@@ -81,7 +82,7 @@ class MidiStream(Stream):
         virtual_port: bool = False,
     ):
         if processor is None:
-            processor = PitchIOIProcessor()
+            processor = PitchProcessor()
 
         Stream.__init__(
             self,
@@ -107,21 +108,19 @@ class MidiStream(Stream):
         self.midi_messages = []
 
         self.polling_period = polling_period
+
         if (polling_period is None) and (self.mock is False):
             self.is_windowed = False
             self.run = self.run_online_single
             self._process_frame = self._process_frame_message
-
         elif (polling_period is None) and (self.mock is True):
             self.is_windowed = False
             self.run = self.run_offline_single
             self._process_frame = self._process_frame_message
-
         elif (polling_period is not None) and (self.mock is False):
             self.is_windowed = True
             self.run = self.run_online_windowed
             self._process_frame = self._process_frame_window
-
         elif (polling_period is not None) and (self.mock is True):
             self.is_windowed = True
             self.run = self.run_offline_windowed
@@ -135,6 +134,10 @@ class MidiStream(Stream):
         **kwargs,
     ) -> None:
         output = self.processor(([(data, c_time)], c_time))
+
+        if output is None:
+            return
+
         if self.return_midi_messages:
             self.queue.put(((data, c_time), output))
         else:
@@ -151,11 +154,15 @@ class MidiStream(Stream):
         # the data is the Buffer instance
         output = self.processor((data.frame[:], data.time))
 
-        # if output is not None:
+        if output is None:
+            return
+
         if self.return_midi_messages:
             self.queue.put((data.frame, output))
         else:
             self.queue.put(output)
+        if not self.stream_start.is_set():
+            self.stream_start.set()
 
     def run_online_single(self):
         self.start_listening()
@@ -221,8 +228,8 @@ class MidiStream(Stream):
         midi_messages, message_times = midi_messages_from_performance(
             perf=self.file_path,
         )
-        self.init_time = message_times.min()
         self.start_listening()
+        self.init_time = message_times.min()
         for msg, c_time in zip(midi_messages, message_times):
             self.add_midi_message(
                 msg=msg,
@@ -232,6 +239,11 @@ class MidiStream(Stream):
                 data=msg,
                 c_time=c_time,
             )
+        if hasattr(self.processor, "flush_remaining"):
+            last = self.processor.flush_remaining()
+            if last is not None:
+                self.queue.put(last)
+        self.queue.put(STREAM_END)
         self.stop_listening()
 
     def run_offline_windowed(self):
@@ -249,6 +261,11 @@ class MidiStream(Stream):
             self._process_frame_window(
                 data=frame,
             )
+        if hasattr(self.processor, "flush_remaining"):
+            last = self.processor.flush_remaining()
+            if last is not None:
+                self.queue.put(last)
+        self.queue.put(STREAM_END)
 
     @property
     def current_time(self) -> Optional[float]:
@@ -313,3 +330,115 @@ class MidiStream(Stream):
 
     def add_midi_message(self, msg: mido.Message, time: float) -> None:
         self.midi_messages.append((msg, time))
+
+
+class BytesMidiStream(MidiStream):
+    """A ``MidiStream`` variant that reads raw MIDI bytes from an external queue.
+
+    Designed for non-device MIDI sources (WebSocket handler, IPC pipe,
+    subprocess, etc.). The producer pushes raw MIDI ``bytes`` chunks into
+    ``data_queue`` (typically 3 bytes per ``note_on`` / ``note_off`` as
+    returned by the Web MIDI API's ``MIDIMessageEvent.data``) and ``None``
+    as the end-of-stream sentinel. ``mido.Parser`` decodes those bytes
+    into ``mido.Message`` instances which then flow through the regular
+    ``MidiStream`` processor pipeline.
+
+    Single-message mode only (no windowing): each parsed message is
+    processed individually, mirroring how Web MIDI events arrive.
+
+    Parameters
+    ----------
+    processor : Processor, optional
+        Feature processor. Defaults to ``PitchProcessor``.
+    data_queue : queue.Queue
+        Source queue. Producer puts MIDI ``bytes`` / ``bytearray``, or
+        ``None`` (disconnect sentinel).
+    queue : RECVQueue, optional
+        Output queue for processed features. Created if omitted.
+    return_midi_messages : bool, default False
+        If True, emit ``((msg, c_time), features)`` instead of features.
+
+    Notes
+    -----
+    Pairs with ``BytesAudioStream`` for non-device input. The frontend is
+    expected to forward raw bytes; no protocol-level conversion (dict,
+    JSON, base64) is required.
+
+    Examples
+    --------
+    Producer side (e.g. a WebSocket handler forwarding Web MIDI bytes)::
+
+        data_queue.put(midi_message_event_data)  # raw bytes
+        ...
+        data_queue.put(None)                     # end of stream
+
+    Consumer side::
+
+        stream = BytesMidiStream(data_queue=data_queue)
+        mm = Matchmaker(score_file=score, input_type="midi", stream=stream)
+        for pos in mm.run():
+            ...
+    """
+
+    def __init__(
+        self,
+        processor: Optional[Processor] = None,
+        data_queue: Optional[_queue.Queue] = None,
+        queue: Optional[RECVQueue] = None,
+        return_midi_messages: bool = False,
+    ) -> None:
+        if processor is None:
+            processor = PitchProcessor()
+        # Bypass MidiStream's port discovery; init via Stream directly so
+        # no mido.open_input call is made.
+        Stream.__init__(self, processor=processor, mock=False)
+
+        if data_queue is None:
+            raise ValueError("BytesMidiStream requires a data_queue")
+        self.data_queue = data_queue
+        # Parser keeps state across chunks so that MIDI running status and
+        # messages split across chunk boundaries are decoded correctly.
+        self._parser = mido.Parser()
+
+        # Match the MidiStream attribute set so inherited methods
+        # (stop_listening, current_time, __enter__/__exit__, etc.) work.
+        self.file_path = None
+        self.midi_in = None
+        self.init_time = None
+        self.listen = False
+        self.queue = queue or RECVQueue()
+        self.first_msg = False
+        self.return_midi_messages = return_midi_messages
+        self.mediator = None
+        self.midi_messages = []
+        self.polling_period = None
+        self.is_windowed = False
+
+    def run(self) -> None:
+        """Pull MIDI byte chunks from ``data_queue``, parse, and process."""
+        self.start_listening()
+        while self.listen:
+            try:
+                data = self.data_queue.get()
+            except _queue.Empty:
+                self.queue.put(STREAM_END)
+                return
+            if data is None:
+                self.queue.put(STREAM_END)
+                return
+
+            self._parser.feed(data)
+            for msg in self._parser:
+                c_time = self.current_time
+                self.add_midi_message(msg=msg, time=c_time)
+                self._process_frame_message(data=msg, c_time=c_time)
+
+    def stop(self) -> None:
+        """Stop the stream and unblock any pending ``data_queue.get``."""
+        self.stop_listening()
+        # Wake the run loop if it is blocked on the queue.
+        try:
+            self.data_queue.put_nowait(None)
+        except _queue.Full:
+            pass
+        self.join()
