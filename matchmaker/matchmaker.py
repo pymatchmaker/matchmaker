@@ -29,7 +29,7 @@ from matchmaker.features.audio import (
     RawSpectrumProcessor,
 )
 from matchmaker.features.midi import (
-    OnsetOnlyPianoRollProcessor,
+    ChordOnsetProcessor,
     PianoRollProcessor,
     PitchClassPianoRollProcessor,
     PitchProcessor,
@@ -99,15 +99,17 @@ DEFAULT_KWARGS = {
     },
     "midi": {
         "arzt": {
-            "processor": "onset_only_pianoroll",
+            "processor": "chord_onset",
             "piano_range": True,
+            "polling_period": 0.001,
             "window_size": 2,
             "start_window_size": 2,
             "step_size": 5,
         },
         "dixon": {
-            "processor": "onset_only_pianoroll",
+            "processor": "chord_onset",
             "piano_range": True,
+            "polling_period": 0.001,
             "window_size": 0.3,
         },
         "hmm": {
@@ -121,7 +123,11 @@ DEFAULT_KWARGS = {
             "num_particles": 1000,
         },
         "pthmm": {"processor": "pitch", "piano_range": True},
-        "outerhmm": {"processor": "pitch", "piano_range": True},
+        "outerhmm": {
+            "processor": "chord_onset",
+            "piano_range": True,
+            "polling_period": 0.001,
+        },
         "SLT_OLTW": {"processor": "pitch", "piano_range": True},
         "SL_OLTW": {"processor": "pitch", "piano_range": True},
         "OTM": {"processor": "pitch", "piano_range": True},
@@ -178,7 +184,7 @@ class Matchmaker(object):
         **midi keys**
 
         - ``processor`` (str): Feature type. Default: ``"pitch"``.
-          Choices: ``"pitch"``, ``"pianoroll"``, ``"onset_only_pianoroll"``,
+          Choices: ``"pitch"``, ``"pianoroll"``, ``"chord_onset"``,
           ``"pitchclass"``.
         - ``piano_range`` (bool): Restrict pitch to 88-key piano range
           (MIDI 21-108). Default: True.
@@ -351,7 +357,7 @@ class Matchmaker(object):
             "pianoroll": lambda: PianoRollProcessor(
                 piano_range=self.config["piano_range"],
             ),
-            "onset_only_pianoroll": lambda: OnsetOnlyPianoRollProcessor(
+            "chord_onset": lambda: ChordOnsetProcessor(
                 piano_range=self.config.get("piano_range", True),
             ),
         }

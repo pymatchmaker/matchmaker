@@ -15,7 +15,7 @@ Aliases
     - ``messages`` : ``List[Tuple[mido.Message, float]]``. Each entry is
       a MIDI message paired with the per-message arrival time
       (``m_time``). Stateful processors that group across messages
-      (e.g. :class:`~matchmaker.features.midi.OnsetOnlyPianoRollProcessor`)
+      (e.g. :class:`~matchmaker.features.midi.ChordOnsetProcessor`)
       use these ``m_time`` values to decide chord boundaries.
     - ``frame_time`` : ``float``. The stream's nominal time for the
       frame. Stateless processors (e.g.

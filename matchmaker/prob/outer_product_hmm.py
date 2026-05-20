@@ -304,19 +304,6 @@ class OuterProductHMM(OnlineAlignment):
     def __call__(
         self, observation: np.ndarray, perf_time: float, *args, **kwargs
     ) -> Optional[float]:
-        # Chord-continuation case: merge pitches into the pending chord and
-        # signal `None` to run() so the patience counter stays put. We don't
-        # call super() because no state advance / path append should happen.
-        pitch_obs = observation
-        ioi = (
-            perf_time - self._prev_perf_time
-            if self._prev_perf_time is not None
-            else 0.0
-        )
-        self._prev_perf_time = perf_time
-        if ioi < IOI_THRESHOLD:
-            self._current_chord = np.maximum(self._current_chord, pitch_obs)
-            return None
         return super().__call__(observation, perf_time)
 
     def step(self, features) -> None:
