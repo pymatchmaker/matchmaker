@@ -26,6 +26,7 @@ from matchmaker.utils.symbolic import (
 
 # Default polling period (in seconds)
 POLLING_PERIOD = 0.01
+ONLINE_WINDOW_INTERVAL = 0.00001
 
 
 class MidiStream(Stream):
@@ -191,10 +192,8 @@ class MidiStream(Stream):
         frame = Buffer(self.polling_period)
         frame.start = self.current_time
 
-        # TODO: check the effect of smaller st
-        st = self.polling_period * 0.001
         while self.listen:
-            time.sleep(st)
+            time.sleep(ONLINE_WINDOW_INTERVAL)
             if self.listen:
                 # added if to check once again after sleep
                 c_time = self.current_time

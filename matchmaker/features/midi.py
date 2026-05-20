@@ -92,22 +92,25 @@ class PitchProcessor(Processor):
 
         # TODO: Replace the for loop with list comprehension
         pitch_obs_list = []
+        note_times = []
 
-        for msg, _ in data:
+        for msg, m_time in data:
             if (
                 getattr(msg, "type", "other") == "note_on"
                 and getattr(msg, "velocity", 0) > 0
             ):
                 pitch_obs[msg.note] = 1
                 pitch_obs_list.append(msg.note - self.piano_shift)
+                note_times.append(m_time)
 
         if pitch_obs.sum() > 0:
             if self.piano_range:
                 pitch_obs = pitch_obs[21:109]
 
+            obs_time = min(note_times)
             if self.return_pitch_list:
-                return np.array(pitch_obs_list, dtype=np.float32), f_time
-            return pitch_obs, f_time
+                return np.array(pitch_obs_list, dtype=np.float32), obs_time
+            return pitch_obs, obs_time
         else:
             return None
 
@@ -151,7 +154,7 @@ class PianoRollProcessor(Processor):
 
     Notes
     -----
-    Contrast with ``OnsetOnlyPianoRollProcessor``, which only encodes
+    Contrast with ``ChordOnsetProcessor``, which only encodes
     onsets (note_ons) without sustain. Use this processor when the
     downstream model needs a "what is currently sounding" snapshot
     (e.g. matching against frame-sampled audio features).
@@ -204,50 +207,14 @@ class PianoRollProcessor(Processor):
         self.active_notes = dict()
 
 
-class OnsetOnlyPianoRollProcessor(Processor):
-    """Binary pianoroll per chord onset (no sustain), with streaming chord grouping.
+class ChordOnsetProcessor(Processor):
+    """Emit one binary pitch vector per chord/onset.
 
-    Tracks only ``note_on`` events (ignores ``note_off``). Accumulates
-    note-ons into a pending chord and emits the chord vector when the
-    gap between consecutive ``note_on`` arrival times exceeds
-    ``chord_threshold``. Notes within the gap are merged into one
-    observation (chord stacking).
-
-    Stateful: pending notes are held across calls until the next note
-    arrives more than ``chord_threshold`` later. Use
-    ``flush_remaining()`` at end-of-stream to emit any last pending
-    chord that has no following onset.
-
-    Parameters
-    ----------
-    piano_range : bool, default True
-        If True, restrict to 88-key piano range (MIDI 21-108).
-        Otherwise 128 pitches.
-    chord_threshold : float, default ``CHORD_THRESHOLD`` (35 ms)
-        Maximum gap (seconds) between consecutive ``note_on`` times to
-        consider them part of the same chord. Larger gap triggers flush.
-    dtype : type, default np.float32
-        Numpy dtype of the output vector.
-
-    Returns
-    -------
-    None while accumulating (pending chord not yet flushed) or for
-    frames with no relevant ``note_on``. Otherwise a tuple
-    ``(pianoroll, t)`` where:
-        - ``pianoroll``: ``np.ndarray`` of shape ``(88,)`` when
-          ``piano_range=True`` else ``(128,)``. Binary (0/1) with 1 at
-          indices of every pitch in the flushed chord.
-          Example: chord (C4, E4, G4) flushed with default piano range
-          → vector with 1 at indices 39, 43, 46 (=pitch-21).
-        - ``t``: time (seconds) of the FIRST ``note_on`` in the flushed
-          chord — the chord onset time, not the frame emit time. Useful
-          for downstream IOI computation that wants the actual chord
-          onset.
-
-    Notes
-    -----
-    Designed for event-level MIDI OLTW (arzt/dixon), where the score
-    side is a binary onset pianoroll per unique score onset.
+    Note-ons within ``chord_threshold`` are merged into one chord. This
+    processor is intended to be paired with short windowed MIDI polling
+    (e.g. 1 ms): empty frames then act as a heartbeat and emit a pending
+    chord once the threshold has elapsed, without waiting for the next
+    note. The emitted timestamp is the first note-on time of the chord.
     """
 
     def __init__(
@@ -277,7 +244,7 @@ class OnsetOnlyPianoRollProcessor(Processor):
         return (vec, t)
 
     def __call__(self, frame: InputMIDIFrame) -> Optional[Tuple[np.ndarray, float]]:
-        data, _ = frame
+        data, f_time = frame
 
         result = None
         for msg, m_time in data:
@@ -293,6 +260,17 @@ class OnsetOnlyPianoRollProcessor(Processor):
                 self._pending_notes.append(msg.note)
                 if self._pending_time is None:
                     self._pending_time = m_time
+
+        # In windowed streams, empty frames still call the processor. Use
+        # their frame time as a heartbeat so a pending chord can be emitted
+        # without waiting for the next note_on.
+        if (
+            result is None
+            and self._pending_time is not None
+            and (f_time - self._pending_time) > self.chord_threshold
+            and self._pending_notes
+        ):
+            result = self._flush()
 
         return result
 
