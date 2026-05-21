@@ -342,8 +342,10 @@ class BytesMidiStream(MidiStream):
     into ``mido.Message`` instances which then flow through the regular
     ``MidiStream`` processor pipeline.
 
-    Single-message mode only (no windowing): each parsed message is
-    processed individually, mirroring how Web MIDI events arrive.
+    By default, each parsed message is processed individually, mirroring how
+    Web MIDI events arrive. If ``polling_period`` is provided, incoming
+    messages are accumulated into timed MIDI windows and empty windows act as
+    heartbeats for processors that need frame timing.
 
     Parameters
     ----------
@@ -354,6 +356,8 @@ class BytesMidiStream(MidiStream):
         ``None`` (disconnect sentinel).
     queue : RECVQueue, optional
         Output queue for processed features. Created if omitted.
+    polling_period : float, optional
+        Window duration in seconds. ``None`` keeps event-based processing.
     return_midi_messages : bool, default False
         If True, emit ``((msg, c_time), features)`` instead of features.
 
@@ -384,6 +388,7 @@ class BytesMidiStream(MidiStream):
         processor: Optional[Processor] = None,
         data_queue: Optional[_queue.Queue] = None,
         queue: Optional[RECVQueue] = None,
+        polling_period: Optional[float] = None,
         return_midi_messages: bool = False,
     ) -> None:
         if processor is None:
@@ -410,11 +415,15 @@ class BytesMidiStream(MidiStream):
         self.return_midi_messages = return_midi_messages
         self.mediator = None
         self.midi_messages = []
-        self.polling_period = None
-        self.is_windowed = False
+        self.polling_period = polling_period
+        self.is_windowed = polling_period is not None
 
     def run(self) -> None:
         """Pull MIDI byte chunks from ``data_queue``, parse, and process."""
+        if self.is_windowed:
+            self._run_windowed()
+            return
+
         self.start_listening()
         while self.listen:
             try:
@@ -431,6 +440,43 @@ class BytesMidiStream(MidiStream):
                 c_time = self.current_time
                 self.add_midi_message(msg=msg, time=c_time)
                 self._process_frame_message(data=msg, c_time=c_time)
+
+    def _run_windowed(self) -> None:
+        self.start_listening()
+        frame = Buffer(self.polling_period)
+        frame.start = self.current_time
+
+        while self.listen:
+            try:
+                data = self.data_queue.get(timeout=ONLINE_WINDOW_INTERVAL)
+            except _queue.Empty:
+                data = b""
+
+            c_time = self.current_time
+            if data is None:
+                self.stop_listening()
+                break
+            if data:
+                self._parser.feed(data)
+                for msg in self._parser:
+                    self.add_midi_message(msg=msg, time=c_time)
+                    if msg.type in ["note_on", "note_off"]:
+                        frame.append(msg, c_time)
+                        if not self.first_msg:
+                            self.first_msg = True
+
+            if c_time >= frame.end and self.first_msg:
+                self._process_frame_window(data=frame)
+                frame.reset(c_time)
+
+        self._finish_stream()
+
+    def _finish_stream(self) -> None:
+        if hasattr(self.processor, "flush_remaining"):
+            last = self.processor.flush_remaining()
+            if last is not None:
+                self.queue.put(last)
+        self.queue.put(STREAM_END)
 
     def stop(self) -> None:
         """Stop the stream and unblock any pending ``data_queue.get``."""
