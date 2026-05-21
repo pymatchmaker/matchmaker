@@ -308,6 +308,9 @@ class AudioOuterProductHMM(OnlineAlignment):
         observation = np.asarray(input, dtype=float)
         self.current_perf_time = float(perf_time)
 
+        if observation.size == 0:
+            return self.current_position
+
         if observation.ndim == 2:
             observation = observation[-1]
 
