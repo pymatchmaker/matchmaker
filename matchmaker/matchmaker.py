@@ -16,7 +16,6 @@ from matchmaker.dp import (
     OnlineTimeWarpingDixonEvent,
     OnlineTimeWarpingDixonFrame,
 )
-from matchmaker.external import OnlineParangonarAlignment
 from matchmaker.features.audio import (
     FRAME_RATE,
     SAMPLE_RATE,
@@ -516,6 +515,8 @@ class Matchmaker(object):
                 num_particles=self.config.get("num_particles", 1000),
             )
         elif method in PARANGONAR_METHODS:
+            from matchmaker.external import OnlineParangonarAlignment
+
             sna = self.score_part.note_array(include_grace_notes=True)
             return OnlineParangonarAlignment(
                 reference_features=sna,
