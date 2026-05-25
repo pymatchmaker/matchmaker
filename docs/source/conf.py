@@ -13,7 +13,7 @@ sys.path.insert(0, os.path.abspath(".."))
 project = "pymatchmaker"
 copyright = "2024, matchmaker development team"
 author = "matchmaker development team"
-release = "0.1.0"
+release = "0.3.0"
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration

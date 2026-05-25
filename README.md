@@ -1,5 +1,9 @@
 # Matchmaker
 
+[![GitHub release](https://img.shields.io/github/v/release/pymatchmaker/matchmaker)](https://github.com/pymatchmaker/matchmaker/releases)
+[![PyPI version](https://img.shields.io/pypi/v/pymatchmaker)](https://pypi.org/project/pymatchmaker/)
+[![Unit Tests](https://github.com/pymatchmaker/matchmaker/actions/workflows/unittest.yml/badge.svg)](https://github.com/pymatchmaker/matchmaker/actions/workflows/unittest.yml)
+
 Matchmaker is a Python library for real-time music alignment.
 
 Music alignment is a fundamental MIR task, and real-time music alignment is a necessary component of many interactive applications (e.g., automatic accompaniment systems, automatic page turning).
