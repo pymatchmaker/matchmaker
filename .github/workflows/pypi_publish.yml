@@ -2,7 +2,7 @@ name: Publish to PyPI
 
 on:
   release:
-    types: [published, prereleased]
+    types: [published]
 
 jobs:
   build_wheels:
@@ -26,7 +26,7 @@ jobs:
       - name: Build wheels
         run: python -m cibuildwheel
         env:
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
+          CIBW_BUILD: "cp310-* cp311-* cp312-*"
           CIBW_ARCHS: "x86_64"
           CIBW_ARCHS_MACOS: "x86_64 arm64"
           CIBW_BEFORE_BUILD: |
@@ -41,6 +41,7 @@ jobs:
           path: ./wheelhouse/*.whl
 
   publish:
+    if: github.event.release.prerelease == false
     needs: build_wheels
     runs-on: ubuntu-latest
     permissions:
