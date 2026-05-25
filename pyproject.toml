@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymatchmaker"
-version = "0.2.1"
+version = "0.3.0"
 description = "A package for real-time music alignment"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,7 +30,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "setuptools>=80.0,<81",
     "cython>=3.0.8",
     "numpy>=1.26.3,<2.0",
     "scipy>=1.11.4",
