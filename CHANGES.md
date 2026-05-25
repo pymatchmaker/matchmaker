@@ -13,12 +13,12 @@ This is a major feature release introducing new symbolic and audio score-followi
 - State probability normalization inside the Cython Viterbi step
 - Set as the default tracker for MIDI in the `Matchmaker` class
 
-#### Symbolic ARZT Tracker (PR #49)
+#### Symbolic OLTWArzt Tracker (PR #49)
 
-- New symbolic OLTW-ARZT tracker for event-based score following
+- New symbolic OLTWArzt tracker for event-based score following
 - Major refactor to a fully event-based interface
 
-#### Symbolic Dixon (OLTW-Dixon) Tracker (PR #50)
+#### Symbolic  OLTWDixon Tracker (PR #50)
 
 - New symbolic `OLTWDixon` tracker (event-based)
 - Updated implementation and integration into the unified wrapper
