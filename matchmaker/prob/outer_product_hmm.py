@@ -304,6 +304,13 @@ class OuterProductHMM(OnlineAlignment):
     def __call__(
         self, observation: np.ndarray, perf_time: float, *args, **kwargs
     ) -> Optional[float]:
+        if (
+            self._prev_perf_time is not None
+            and (perf_time - self._prev_perf_time) < IOI_THRESHOLD
+        ):
+            self._prev_perf_time = perf_time
+            return None
+        self._prev_perf_time = perf_time
         return super().__call__(observation, perf_time)
 
     def step(self, features) -> None:

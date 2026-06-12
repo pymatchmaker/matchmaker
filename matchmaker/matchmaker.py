@@ -123,7 +123,7 @@ DEFAULT_KWARGS = {
         },
         "pthmm": {"processor": "pitch", "piano_range": True},
         "outerhmm": {
-            "processor": "chord_onset",
+            "processor": "pitch",
             "piano_range": True,
             "polling_period": 0.001,
         },

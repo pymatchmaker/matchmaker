@@ -438,13 +438,18 @@ def plot_alignment(
     ref_frame_to_beat: Optional[np.ndarray] = None,
 ):
     """Plot alignment path, GT annotations, and predicted points."""
+    label_fontsize = 7
+    tick_fontsize = 5
+    legend_fontsize = 6
+    title_fontsize = 7
+
     save_dir.mkdir(parents=True, exist_ok=True)
     gt = np.asarray(perf_annots, dtype=float)
     pred = np.asarray(perf_annots_predicted, dtype=float)
     n = min(len(gt), len(pred))
     gt, pred = gt[:n], pred[:n]
 
-    fig, ax = plt.subplots(figsize=(30, 30))
+    fig, ax = plt.subplots(figsize=(10, 10))
 
     # Distance matrix background
     show_dist = False
@@ -454,6 +459,12 @@ def plot_alignment(
         and distance_func is not None
     ):
         try:
+            ref_features = np.asarray(ref_features, dtype=np.float32)
+            input_features = np.asarray(input_features, dtype=np.float32)
+            if ref_features.ndim > 2:
+                ref_features = ref_features.reshape(ref_features.shape[0], -1)
+            if input_features.ndim > 2:
+                input_features = input_features.reshape(input_features.shape[0], -1)
             if isinstance(distance_func, str):
                 dist = scipy.spatial.distance.cdist(
                     ref_features, input_features, metric=distance_func
@@ -509,42 +520,41 @@ def plot_alignment(
         y_pred = y_gt
 
     # Plot layers
-    ax.plot(
+    ax.scatter(
         wp_x,
         wp_y,
-        ".",
-        color="white" if show_dist else "lime",
-        alpha=0.7 if show_dist else 0.5,
-        markersize=15,
         label="alignment path",
-        zorder=2,
-    )
-    ax.scatter(
-        x_gt,
-        y_pred,
-        label="predicted",
-        s=80,
-        alpha=0.9,
-        marker="o",
-        color="blue",
+        s=8,
+        color="white" if show_dist else "limegreen",
+        alpha=0.7 if show_dist else 0.85,
         linewidths=0,
         zorder=3,
     )
     ax.scatter(
         x_gt,
+        y_pred,
+        label="predicted",
+        s=8,
+        marker="o",
+        color="royalblue",
+        zorder=4,
+    )
+    ax.scatter(
+        x_gt,
         y_gt,
         label="ground truth",
-        s=120,
+        s=18,
         alpha=0.9,
         marker="x",
         color="red",
-        linewidths=3,
-        zorder=4,
+        linewidths=1.4,
+        zorder=5,
     )
 
     if show_dist:
         ax.set_xlim(0, input_features.shape[0] - 1)
         ax.set_ylim(0, ref_features.shape[0] - 1)
+        ax.set_box_aspect(1)
 
     # Beat tick labels when projected to frame space
     if show_dist and wp_in_beats and ref_frame_to_beat is not None:
@@ -558,15 +568,16 @@ def plot_alignment(
             np.round(np.linspace(beat_min, beat_max, n_ticks)).astype(int)
         )
         ax.set_yticks(_beats_to_frames(beat_ticks.astype(float), ref_frame_to_beat))
-        ax.set_yticklabels([str(b) for b in beat_ticks])
+        ax.set_yticklabels([str(b) for b in beat_ticks], fontsize=tick_fontsize)
+    ax.set_xlabel("performance frame", fontsize=label_fontsize)
+    ax.set_ylabel("score position (beats)", fontsize=label_fontsize)
+    ax.set_title(f"[{save_dir.name}] alignment ({name})", fontsize=title_fontsize)
+    ax.tick_params(axis="both", labelsize=tick_fontsize, width=0.5, length=2)
+    ax.grid(True, alpha=0.25, linewidth=0.3)
+    ax.legend(loc="best", fontsize=legend_fontsize, markerscale=1.4, framealpha=0.9)
 
-    ax.set_xlabel("performance frame")
-    ax.set_ylabel("score position (beats)")
-    ax.set_title(f"[{save_dir.name}] alignment ({name})")
-    ax.grid(True, alpha=0.2)
-    ax.legend(loc="best")
     fig.tight_layout()
-    fig.savefig(save_dir / f"{name}.png", dpi=150)
+    fig.savefig(save_dir / f"{name}.png", bbox_inches="tight", pad_inches=0.05)
     plt.close(fig)
 
 
