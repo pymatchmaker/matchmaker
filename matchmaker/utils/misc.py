@@ -449,7 +449,15 @@ def plot_alignment(
     n = min(len(gt), len(pred))
     gt, pred = gt[:n], pred[:n]
 
-    fig, ax = plt.subplots(figsize=(10, 10))
+    # Figure size + dpi scale with performance duration (song length):
+    perf_times = np.asarray(alignment_path[1], dtype=float)
+    perf_times = perf_times[np.isfinite(perf_times)]
+    perf_dur = float(perf_times.max()) if perf_times.size else 0.0
+    t = float(np.clip((perf_dur - 30.0) / (540.0 - 30.0), 0.0, 1.0))
+    fig_side = 4.0 + t * (16.0 - 4.0)
+    fig_dpi = int(100 + t * (200 - 100))
+
+    fig, ax = plt.subplots(figsize=(fig_side, fig_side))
 
     # Distance matrix background
     show_dist = False
@@ -539,15 +547,18 @@ def plot_alignment(
         color="royalblue",
         zorder=4,
     )
+    t_gt = float(np.clip((perf_dur - 20.0) / (75.0 - 20.0), 0.0, 1.0))
+    gt_size = 10.0 - t_gt * (10.0 - 4.0)
+    gt_lw = 1.0 - t_gt * (1.0 - 0.8)
     ax.scatter(
         x_gt,
         y_gt,
         label="ground truth",
-        s=18,
+        s=gt_size,
         alpha=0.9,
         marker="x",
         color="red",
-        linewidths=1.4,
+        linewidths=gt_lw,
         zorder=5,
     )
 
@@ -577,7 +588,9 @@ def plot_alignment(
     ax.legend(loc="best", fontsize=legend_fontsize, markerscale=1.4, framealpha=0.9)
 
     fig.tight_layout()
-    fig.savefig(save_dir / f"{name}.png", bbox_inches="tight", pad_inches=0.05)
+    fig.savefig(
+        save_dir / f"{name}.png", dpi=fig_dpi, bbox_inches="tight", pad_inches=0.05
+    )
     plt.close(fig)
 
 
