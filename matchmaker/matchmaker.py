@@ -42,6 +42,7 @@ from matchmaker.utils.eval import (
     TOLERANCES_IN_BEATS,
     TOLERANCES_IN_MILLISECONDS,
     evaluate_alignment,
+    resolve_gt,
     transfer_positions,
 )
 from matchmaker.utils.misc import (
@@ -690,7 +691,7 @@ class Matchmaker(object):
 
     def run_evaluation(
         self,
-        perf_annotations: Union[PathLike, np.ndarray],
+        perf_annotations: Union[PathLike, np.ndarray] = None,
         level: str = "note",
         tolerances: list = None,
         musical_beat: bool = False,
@@ -700,6 +701,7 @@ class Matchmaker(object):
         domain: str = "score",
         plot_dist_matrix: bool = True,
         make_plot: bool = True,
+        gt: Union[PathLike, np.ndarray] = None,
     ) -> dict:
         """
         Evaluate the score following process.
@@ -735,21 +737,29 @@ class Matchmaker(object):
         if not self._has_run:
             raise ValueError("Must call run() before evaluation")
 
-        if isinstance(perf_annotations, np.ndarray):
-            perf_annots = perf_annotations
-        else:
-            perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
-
         wp = self.score_follower.alignment_path
         wp_score = wp[0].astype(float)
         wp_perf_sec = self._wp_perf_to_seconds(wp[1].astype(float))
 
-        score_annots_beats = self.build_score_annotations(
-            level, musical_beat, return_type="beats"
-        )
-        min_length = min(len(score_annots_beats), len(perf_annots))
-        score_annots_beats = score_annots_beats[:min_length]
-        perf_annots = perf_annots[:min_length]
+        if gt is not None:
+            score_annots_beats, perf_annots = resolve_gt(
+                gt, self.score_part.note_array()
+            )
+        else:
+            if isinstance(perf_annotations, np.ndarray):
+                perf_annots = perf_annotations
+            else:
+                perf_annots = np.loadtxt(
+                    fname=perf_annotations, delimiter="\t", usecols=0
+                )
+            score_annots_beats = self.build_score_annotations(
+                level, musical_beat, return_type="beats"
+            )
+            assert len(score_annots_beats) == len(perf_annots), (
+                f"score/perf annotation count mismatch: "
+                f"{len(score_annots_beats)} score annotations vs "
+                f"{len(perf_annots)} performance annotations"
+            )
 
         eval_results = evaluate_alignment(
             wp_score,

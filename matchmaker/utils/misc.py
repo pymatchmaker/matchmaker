@@ -527,12 +527,16 @@ def plot_alignment(
     else:
         y_pred = y_gt
 
-    # Plot layers
+    # Plot layers. GT and the dense alignment path share one length-scaled
+    # size (~10 short -> ~4 long) so they look consistent.
+    t_gt = float(np.clip((perf_dur - 20.0) / (75.0 - 20.0), 0.0, 1.0))
+    gt_size = 10.0 - t_gt * (10.0 - 4.0)
+    gt_lw = 1.0 - t_gt * (1.0 - 0.8)
     ax.scatter(
         wp_x,
         wp_y,
         label="alignment path",
-        s=8,
+        s=gt_size,
         color="white" if show_dist else "limegreen",
         alpha=0.7 if show_dist else 0.85,
         linewidths=0,
@@ -542,14 +546,11 @@ def plot_alignment(
         x_gt,
         y_pred,
         label="predicted",
-        s=8,
+        s=6,
         marker="o",
         color="royalblue",
         zorder=4,
     )
-    t_gt = float(np.clip((perf_dur - 20.0) / (75.0 - 20.0), 0.0, 1.0))
-    gt_size = 10.0 - t_gt * (10.0 - 4.0)
-    gt_lw = 1.0 - t_gt * (1.0 - 0.8)
     ax.scatter(
         x_gt,
         y_gt,

@@ -1,4 +1,7 @@
+from pathlib import Path
+
 import numpy as np
+import partitura as pt
 import scipy
 
 TOLERANCES_IN_MILLISECONDS = [50, 100, 300, 500, 1000, 2000]
@@ -209,3 +212,56 @@ def evaluate_alignment(
     )
 
     return {"beat": beat_results, "ms": ms_results}
+
+
+def gt_from_match(match_path, score_notes):
+    perf, alignment, match_score = pt.load_match(str(match_path), create_score=True)
+    match_notes = match_score.note_array()
+    shared_ids = {str(n["id"]) for n in score_notes} & {
+        str(n["id"]) for n in match_notes
+    }
+    if shared_ids:
+        beat_at = {str(n["id"]): float(n["onset_beat"]) for n in score_notes}
+        beat_of_match = {str(n["id"]): beat_at.get(str(n["id"])) for n in match_notes}
+    else:
+        beat_at = {
+            (int(n["pitch"]), round(float(n["onset_beat"]), 4)): float(n["onset_beat"])
+            for n in score_notes
+        }
+        beat_of_match = {
+            str(n["id"]): beat_at.get(
+                (int(n["pitch"]), round(float(n["onset_beat"]), 4))
+            )
+            for n in match_notes
+        }
+    onset_at = {str(n["id"]): float(n["onset_sec"]) for n in perf.note_array()}
+
+    beats, secs = [], []
+    for a in alignment:
+        if a.get("label") != "match" or a["performance_id"] not in onset_at:
+            continue
+        beat = beat_of_match.get(str(a["score_id"]))
+        if beat is not None:
+            beats.append(beat)
+            secs.append(onset_at[a["performance_id"]])
+
+    beats = np.array(beats, dtype=float)
+    secs = np.array(secs, dtype=float)
+    order = np.argsort(secs, kind="stable")
+    beats, secs = beats[order], secs[order]
+    keep = np.ones(len(beats), dtype=bool)
+    keep[1:] = beats[1:] != beats[:-1]
+    return beats[keep], secs[keep]
+
+
+def resolve_gt(gt, score_notes):
+    if isinstance(gt, np.ndarray):
+        arr = np.asarray(gt, dtype=float)
+    elif Path(gt).suffix.lower() == ".match":
+        return gt_from_match(gt, score_notes)
+    else:
+        try:
+            arr = np.loadtxt(gt, delimiter="\t")
+        except ValueError:
+            arr = np.loadtxt(gt, delimiter="\t", skiprows=1)
+    return arr[:, 0].astype(float), arr[:, 1].astype(float)
