@@ -624,3 +624,40 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
         )
 
         return self.current_position
+
+    def set_position(self, beat: float, strength: float = 1.0) -> bool:
+        """Re-anchor the hypothesis beam at the chord nearest ``beat``.
+
+        Injects a fresh ``(chord, age=1)`` hypothesis with weight ``strength``
+        and down-weights the existing beam by ``1 - strength`` before
+        renormalizing (``strength=1`` fully resets the beam to the target).
+        """
+        if strength <= 0 or self.score_positions is None:
+            return False
+        idx = self._snap_index(beat)
+        strength = float(np.clip(strength, 0.0, 1.0))
+        corrected = {(idx, 1): (strength, self.init_tempo, self.init_tempo_var)}
+        if strength < 1.0 and self.hypotheses:
+            tot = sum(p for p, _, _ in self.hypotheses.values()) or 1.0
+            for key, (p, mu, var) in self.hypotheses.items():
+                w = (1.0 - strength) * p / tot
+                if key in corrected:
+                    op, omu, ovar = corrected[key]
+                    corrected[key] = (op + w, omu, ovar)
+                else:
+                    corrected[key] = (w, mu, var)
+        tot = sum(p for p, _, _ in corrected.values()) or 1.0
+        self.hypotheses = {
+            k: (p / tot, mu, var) for k, (p, mu, var) in corrected.items()
+        }
+        self.current_index = idx
+        self.current_position = float(self.onset_beats[idx])
+        return True
+
+    def confidence(self) -> Optional[float]:
+        if not getattr(self, "hypotheses", None):
+            return None
+        chord_probs = np.zeros(self.K)
+        for (k, _a), (prob, _, _) in self.hypotheses.items():
+            chord_probs[k] += prob
+        return self._belief_confidence(chord_probs)

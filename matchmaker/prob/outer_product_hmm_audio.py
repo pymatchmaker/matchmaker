@@ -331,6 +331,36 @@ class AudioOuterProductHMM(OnlineAlignment):
         )
         return self.current_position
 
+    def set_position(self, beat: float, strength: float = 1.0) -> bool:
+        """Re-concentrate the chord-level belief around ``beat``.
+
+        The state vector interleaves an active and a pause state per chord
+        (``probs[0::2]`` / ``probs[1::2]``); the blend is done on the chord-level
+        marginal and redistributed back while preserving each chord's
+        active/pause ratio.
+        """
+        if strength <= 0 or self.score_positions is None:
+            return False
+        idx = self._snap_index(beat)
+        probs = self.state_probabilities
+        top = probs[0::2] + probs[1::2]
+        blended_top = self._blend_belief(top, idx, strength)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            active_ratio = np.where(top > 0, probs[0::2] / top, 1.0)
+        new = np.empty_like(probs)
+        new[0::2] = blended_top * active_ratio
+        new[1::2] = blended_top * (1.0 - active_ratio)
+        self.state_probabilities = new
+        self.current_index = int(np.argmax(blended_top))
+        self.current_position = float(self.score_positions[self.current_index])
+        return True
+
+    def confidence(self) -> Optional[float]:
+        probs = getattr(self, "state_probabilities", None)
+        if probs is None:
+            return None
+        return self._belief_confidence(probs[0::2] + probs[1::2])
+
     def compute_obs_likelihood(
         self,
         observation: np.ndarray,

@@ -314,6 +314,20 @@ class OuterProductHMM(OnlineAlignment):
         self.current_index = int(np.argmax(self.state_probabilities))
         self.input_index += 1
 
+    def set_position(self, beat: float, strength: float = 1.0) -> bool:
+        """Re-concentrate the Viterbi state distribution around ``beat``."""
+        if strength <= 0 or self.score_positions is None:
+            return False
+        idx = self._snap_index(beat)
+        self.state_probabilities = self._blend_belief(
+            self.state_probabilities, idx, strength
+        )
+        self.current_index = int(np.argmax(self.state_probabilities))
+        return True
+
+    def confidence(self) -> Optional[float]:
+        return self._belief_confidence(getattr(self, "state_probabilities", None))
+
     # Observation likelihood
     def compute_obs_likelihood(
         self,

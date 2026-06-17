@@ -20,6 +20,8 @@ A new score follower class **must** inherit from `matchmaker.base.OnlineAlignmen
 | `self.step(features)`         | features: whatever input observation your score follower requires. choose a fitting or custom `Processor` to provide this object | None                           | main update step, must update reference position estimation. |
 | `self.__init__(**kwargs)`     | add arguments as needed                                                                                                          | None                           | all setup logic                                              |
 | `self.get_current_position()` | None                                                                                                                             | current position in beat units | defaults to indexing                                         |
+| `self.set_position(beat, strength)` | beat: external position estimate; strength: `[0,1]` correction strength | `bool` (applied?) | *optional.* lets a meta-follower (e.g. ensemble) nudge this follower toward an external estimate. Default: no-op returning `False`. |
+| `self.confidence()` | None | `float` in `[0,1]` or `None` | *optional.* self-reported confidence in the latest position. Default: `None`. |
 ### Examples
 
 Here is an extremely simple score follower with random steps:
@@ -153,4 +155,14 @@ mm = Matchmaker(
 for beat in mm.run():
     print(beat)
 ```
+
+## Combine several followers (ensemble)
+
+The built-in `"ensemble"` method runs several followers at once and uses a
+swappable meta-policy to decide which one to trust per step, optionally feeding
+the chosen position back into the others. Implementing `set_position` and
+`confidence` on your follower lets it participate fully (be corrected, and have
+its confidence weighed). See the
+[Ensemble score following](README.md#ensemble-score-following) section of the
+README and `matchmaker/ensemble/`.
 

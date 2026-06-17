@@ -267,6 +267,84 @@ for current_position in mm.run():
 For options regarding the `method`, please refer to the [Alignment Methods](#alignment-methods) section.
 For options regarding the `processor`, please refer to the [Features](#features) section.
 
+### Ensemble score following
+
+Different followers fail in different places: an HMM may track a passage that an
+OLTW loses, and vice versa. The `"ensemble"` method runs several followers at
+once on the **same input** and a swappable *meta-policy* decides, at each step,
+which follower's position to trust. The chosen position is then fed back into the
+other followers (via their `set_position`) so a follower that has drifted gets
+another chance to recover.
+
+```python
+from matchmaker import Matchmaker
+
+mm = Matchmaker(
+    score_file="path/to/score.musicxml",
+    performance_file="path/to/performance.mid",
+    input_type="midi",
+    method="ensemble",
+    kwargs={
+        "members": [
+            {"method": "pthmm"},
+            {"method": "outerhmm"},
+            {"method": "arzt"},
+        ],
+        "policy": "agreement",   # or "confidence_median", "rl"
+        "feedback": True,         # push the chosen position back into members
+    },
+)
+for beat in mm.run():
+    print(beat)
+```
+
+**Mixing modalities.** Members may have different modalities. Give each member
+an `input_type` and supply a performance file per modality (one audio + one MIDI
+stream are merged into a single tagged input; for live use, pass
+`device={"audio": ..., "midi": ...}`):
+
+```python
+mm = Matchmaker(
+    score_file="path/to/score.musicxml",
+    input_type="midi",
+    method="ensemble",
+    kwargs={
+        "members": [
+            {"method": "pthmm", "input_type": "midi"},
+            {"method": "arzt",  "input_type": "audio"},
+        ],
+        "midi_performance_file":  "path/to/performance.mid",
+        "audio_performance_file": "path/to/performance.wav",
+        "policy": "agreement",
+    },
+)
+```
+
+**Meta-policies** (`policy=`):
+
+| Policy | Behavior |
+|---|---|
+| `"agreement"` (default) | Clusters the members' positions, picks the group the ensemble agrees on, and within it trusts the most confident member — i.e. it both votes and "jumps" between followers. |
+| `"confidence_median"` | Confidence-weighted median of the member positions (robust blend). |
+| `"rl"` | Reinforcement-learning selection over members. The policy is trained *offline* (reward = alignment error vs. ground-truth annotations); until a trained policy is supplied it falls back to the agreement policy. See `matchmaker/ensemble/policy.py`. |
+
+**Ensemble `kwargs`:**
+
+| Key | Default | Description |
+|---|---|---|
+| `members` | (required) | List of `{"method", "input_type", "processor", "name", "kwargs"}` dicts. Only `method` is required; `input_type` defaults to the top-level one. |
+| `policy` | `"agreement"` | Meta-policy name or a `MetaPolicy` instance. |
+| `feedback` | `True` | Feed the chosen position back into drifted members. |
+| `feedback_strength` | `0.5` | Correction strength `[0, 1]` (hard snap for OLTW, soft belief-nudge for HMM/PF/SKF). |
+| `feedback_threshold` | `2.0` | Only members farther than this many beats from the chosen position are corrected, preserving member diversity. |
+| `audio` | `{}` | Shared audio framing for all audio members, e.g. `{"sample_rate": 22050, "frame_rate": 50}`. |
+| `audio_performance_file` / `midi_performance_file` | `None` | Per-modality performance files (simulation). |
+| `device` | `{}` | Per-modality live devices, e.g. `{"audio": ..., "midi": ...}`. |
+
+> **Note:** all audio members share a single capture, so they run at one common
+> `sample_rate`/`hop_length` (set via the `audio` key) rather than each method's
+> individually tuned rate; likewise all MIDI members share one `polling_period`.
+
 
 ## Package Overview
 
@@ -344,6 +422,7 @@ Default method: `"arzt"`
 | `"dixon"` | On-line time warping by Dixon (2005) |
 | `"outerhmm"` | Outer-product HMM score follower by Nakamura (2014) |
 | `"skf"` | Switching Kalman Filter with hidden tempo by Jiang and Raphael (2020) |
+| `"ensemble"` | Runs several followers at once and arbitrates between them (see [Ensemble score following](#ensemble-score-following)) |
 
 ### MIDI (`input_type="midi"`)
 
@@ -356,6 +435,7 @@ Default method: `"pthmm"`
 | `"outerhmm"` | Outer-product HMM score follower by Nakamura (2014) |
 | `"hmm"` | HMM score follower by Cancino-Chacón et al. (2023) |
 | `"pthmm"` | Pitch-based HMM score follower |
+| `"ensemble"` | Runs several followers at once and arbitrates between them (see [Ensemble score following](#ensemble-score-following)) |
 
 ## Features
 

@@ -93,6 +93,95 @@ class OnlineAlignment(object):
         """Update self.current_index based on the observation features."""
         raise NotImplementedError
 
+    def set_position(self, beat: float, strength: float = 1.0) -> bool:
+        """Nudge this follower's internal state toward an external estimate.
+
+        Used by meta-followers (e.g. ``EnsembleFollower``) to feed a trusted
+        position back into every member so they get another chance to recover.
+
+        Parameters
+        ----------
+        beat : float
+            Target score position in beat units (matched against
+            ``self.score_positions``).
+        strength : float, optional
+            Correction strength in ``[0, 1]``. ``1.0`` snaps as hard as the
+            follower allows; smaller values blend the correction with the
+            follower's own belief (meaningful for probabilistic followers).
+
+        Returns
+        -------
+        bool
+            ``True`` if the follower applied the correction, ``False`` if it
+            does not support correction (default).
+        """
+        return False
+
+    def confidence(self) -> Optional[float]:
+        """Self-reported confidence in the latest ``current_position``.
+
+        Returns a value in ``[0, 1]`` (higher = more certain) or ``None`` when
+        the follower exposes no usable confidence signal. Meta-policies fall
+        back to uniform weighting for ``None``.
+        """
+        return None
+
+    @staticmethod
+    def _blend_belief(
+        belief: NDArray[np.float64], target_index: int, strength: float
+    ) -> NDArray[np.float64]:
+        """Blend a probability vector toward a Gaussian bump at ``target_index``.
+
+        Helper for probabilistic followers' ``set_position``: builds a peaked
+        correction distribution over state indices and mixes it with the
+        current ``belief`` according to ``strength`` (1.0 = fully replace).
+        Returns a normalized vector of the same length.
+        """
+        n = len(belief)
+        p = np.asarray(belief, dtype=np.float64)
+        s = p.sum()
+        p = np.full(n, 1.0 / n) if s <= 0 else p / s
+
+        sigma = max(1.0, 0.01 * n)
+        states = np.arange(n)
+        bump = np.exp(-0.5 * ((states - target_index) / sigma) ** 2)
+        bump /= bump.sum()
+
+        strength = float(np.clip(strength, 0.0, 1.0))
+        blended = strength * bump + (1.0 - strength) * p
+        total = blended.sum()
+        return blended / total if total > 0 else blended
+
+    @staticmethod
+    def _belief_confidence(belief: Optional[NDArray[np.float64]]) -> Optional[float]:
+        """Confidence in ``[0, 1]`` from a belief vector's peakedness
+        (``1 - normalized entropy``). ``None`` if the vector is empty/degenerate."""
+        if belief is None:
+            return None
+        p = np.asarray(belief, dtype=np.float64)
+        s = p.sum()
+        if s <= 0:
+            return None
+        p = p / s
+        nz = p[p > 0]
+        if len(nz) <= 1:
+            return 1.0
+        entropy = -np.sum(nz * np.log(nz))
+        return float(1.0 - entropy / np.log(len(p)))
+
+    def _snap_index(self, beat: float) -> int:
+        """Index of the score position nearest to ``beat`` (helper for
+        ``set_position`` in index-based followers)."""
+        if self.score_positions is None:
+            return self.current_index
+        idx = int(np.searchsorted(self.score_positions, beat))
+        idx = max(0, min(idx, len(self.score_positions) - 1))
+        if idx > 0 and abs(self.score_positions[idx - 1] - beat) <= abs(
+            self.score_positions[idx] - beat
+        ):
+            idx -= 1
+        return idx
+
     def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
         """Drive the score follower from `self.queue`.
 

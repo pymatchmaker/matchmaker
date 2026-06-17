@@ -225,5 +225,31 @@ class ParticleFilter(OnlineAlignment):
     def get_current_position(self) -> float:
         return self.current_position
 
+    def set_position(self, beat: float, strength: float = 1.0) -> bool:
+        """Relocate a ``strength`` fraction of particles around ``beat``.
+
+        Soft correction by particle injection: a random subset of particles is
+        teleported to a tight cloud around the target beat and weights are reset
+        to uniform, so the filter re-anchors while keeping diversity.
+        """
+        if strength <= 0:
+            return False
+        n = self.num_particles
+        mask = self.rng.random_sample(n) < float(np.clip(strength, 0.0, 1.0))
+        m = int(mask.sum())
+        if m > 0:
+            self.x[mask] = beat + self.rng.normal(0, 0.1, m)
+            self.v[mask] = self.tempo_mean
+        self.weights.fill(1.0 / n)
+        self.previous_state = self.current_position
+        self.current_position = round(float(np.mean(self.x)), 2)
+        return True
+
+    def confidence(self) -> Optional[float]:
+        """Confidence from particle spread: tighter cloud = higher confidence."""
+        if not hasattr(self, "x"):
+            return None
+        return 1.0 / (1.0 + float(np.std(self.x)))
+
     def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
         return (yield from super().run(verbose=verbose))

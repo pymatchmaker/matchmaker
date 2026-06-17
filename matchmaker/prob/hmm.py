@@ -115,6 +115,30 @@ class BaseHMM(HiddenMarkovModel, OnlineAlignment):
         self.input_index += 1
         self.observation_model.current_state = current_state
 
+    def set_position(self, beat: float, strength: float = 1.0) -> bool:
+        """Re-concentrate the forward variable (belief) around ``beat``.
+
+        Soft correction: the belief is blended toward a bump at the nearest
+        score state by ``strength`` (1.0 = replace), giving the HMM a fresh
+        anchor while preserving its dynamics on subsequent steps.
+        """
+        if strength <= 0 or self.score_positions is None:
+            return False
+        idx = self._snap_index(beat)
+        n = len(self.score_positions)
+        belief = (
+            self.forward_variable
+            if self.forward_variable is not None
+            else np.full(n, 1.0 / n)
+        )
+        self.forward_variable = self._blend_belief(belief, idx, strength)
+        self.current_index = int(np.argmax(self.forward_variable))
+        self.observation_model.current_state = self.current_index
+        return True
+
+    def confidence(self) -> Optional[float]:
+        return self._belief_confidence(getattr(self, "forward_variable", None))
+
 
 class PitchHMM(BaseHMM):
     """

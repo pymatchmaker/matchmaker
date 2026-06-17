@@ -35,6 +35,7 @@ from matchmaker.features.midi import (
     onset_pianoroll,
 )
 from matchmaker.io.midi import POLLING_PERIOD
+from matchmaker.io.queue import RECVQueue
 from matchmaker.prob import AudioOuterProductHMM, OuterProductHMM, PitchHMM, PitchIOIHMM
 from matchmaker.prob.particle_filter import ParticleFilter
 from matchmaker.prob.skf import SwitchingKalmanFilterFollower
@@ -62,9 +63,9 @@ MIDI_FRAME_RATE = 1  # dummy value for MIDI input
 OLTW_METHODS = {"arzt", "dixon"}
 PARANGONAR_METHODS = {"SLT_OLTW", "SL_OLTW", "OTM", "OPTM"}
 AVAILABLE_METHODS = {
-    "audio": sorted(OLTW_METHODS) + ["outerhmm", "skf", "pf"],
+    "audio": sorted(OLTW_METHODS) + ["outerhmm", "skf", "pf", "ensemble"],
     "midi": sorted(OLTW_METHODS)
-    + ["hmm", "pthmm", "outerhmm", "pf"]
+    + ["hmm", "pthmm", "outerhmm", "pf", "ensemble"]
     + sorted(PARANGONAR_METHODS),
 }
 DEFAULT_METHOD = {"audio": "arzt", "midi": "pthmm"}
@@ -94,6 +95,11 @@ DEFAULT_KWARGS = {
             ),  # converts to closest power of 2 for a 46ms window (as proposed by Duan et al.) for default sample rates.
             "frame_rate": 100,
             "num_particles": 1000,
+        },
+        "ensemble": {
+            "members": [{"method": "arzt"}, {"method": "dixon"}],
+            "policy": "agreement",
+            "feedback": True,
         },
     },
     "midi": {
@@ -131,8 +137,29 @@ DEFAULT_KWARGS = {
         "SL_OLTW": {"processor": "pitch", "piano_range": True},
         "OTM": {"processor": "pitch", "piano_range": True},
         "OPTM": {"processor": "pitch", "piano_range": True},
+        "ensemble": {
+            "members": [
+                {"method": "pthmm"},
+                {"method": "outerhmm"},
+                {"method": "arzt"},
+            ],
+            "policy": "agreement",
+            "feedback": True,
+        },
     },
 }
+
+
+class _PlaceholderStream:
+    """Minimal stand-in stream used while building ensemble members.
+
+    Member followers are constructed with ``queue=stream.queue``; the ensemble
+    drives them directly via a ``MergedStream`` instead of their own stream, so
+    this placeholder only needs to expose a queue (no device/file is opened).
+    """
+
+    def __init__(self) -> None:
+        self.queue = RECVQueue()
 
 
 class Matchmaker(object):
@@ -302,6 +329,10 @@ class Matchmaker(object):
             score_tempo = get_tempo_from_score(self.score_part, self.score_file)
             self.tempo = score_tempo if score_tempo is not None else DEFAULT_TEMPO
 
+        if self.method == "ensemble":
+            self._build_ensemble(wait=wait, unfold_score=unfold_score, tempo=tempo)
+            return
+
         processor_type = processor or self.config.pop(
             "processor", DEFAULT_PROCESSOR[self.input_type]
         )
@@ -393,6 +424,156 @@ class Matchmaker(object):
                 "install with: pip install pymatchmaker[devices]"
             ) from e
         raise ValueError(f"Invalid input type '{self.input_type}'")
+
+    def _build_ensemble(self, wait, unfold_score, tempo):
+        """Build an ``EnsembleFollower`` from ``config['members']``.
+
+        Each member is built through a full (sub-)``Matchmaker`` with a
+        placeholder stream — reusing the exact per-method processor / reference /
+        follower construction — and then driven by a single ``MergedStream`` that
+        fans the raw input out by modality. See the ensemble package docs.
+        """
+        from matchmaker.ensemble import (
+            EnsembleFollower,
+            EnsembleMember,
+            MergedStream,
+            RawProcessor,
+        )
+
+        cfg = self.config
+        members_spec = cfg.get("members")
+        if not members_spec:
+            raise ValueError(
+                "method='ensemble' requires kwargs['members'] (a non-empty list "
+                "of {'method': ..., 'input_type': ...} dicts)."
+            )
+
+        # Common audio framing shared by all audio members (single capture).
+        audio_cfg = dict(cfg.get("audio", {}))
+        common_sr = int(audio_cfg.get("sample_rate", SAMPLE_RATE))
+        if audio_cfg.get("hop_length") is not None:
+            common_hop = int(audio_cfg["hop_length"])
+            audio_frame_rate = common_sr / common_hop
+        else:
+            audio_frame_rate = audio_cfg.get("frame_rate", FRAME_RATE)
+            common_hop = int(common_sr // audio_frame_rate)
+        common_polling = cfg.get(
+            "polling_period", getattr(self, "polling_period", POLLING_PERIOD)
+        )
+
+        # Per-modality input sources (simulation files / live devices).
+        devices = cfg.get("device", {})
+        audio_perf = cfg.get("audio_performance_file") or (
+            self.performance_file if self.input_type == "audio" else None
+        )
+        midi_perf = cfg.get("midi_performance_file") or (
+            self.performance_file if self.input_type == "midi" else None
+        )
+
+        members = []
+        used_names = set()
+        modalities_present = set()
+        max_audio_nfft = 2 * common_hop
+        for spec in members_spec:
+            m_method = spec["method"]
+            modality = spec.get("input_type", self.input_type)
+            if modality not in ("audio", "midi"):
+                raise ValueError(
+                    f"ensemble member modality must be 'audio' or 'midi', "
+                    f"got '{modality}'"
+                )
+            member_kwargs = dict(DEFAULT_KWARGS[modality].get(m_method, {}))
+            member_kwargs.update(spec.get("kwargs", {}))
+            if modality == "audio":
+                member_kwargs["sample_rate"] = common_sr
+                member_kwargs["hop_length"] = common_hop
+            member_perf = audio_perf if modality == "audio" else midi_perf
+
+            sub = Matchmaker(
+                score_file=self.score_file,
+                performance_file=member_perf,
+                input_type=modality,
+                method=m_method,
+                processor=spec.get("processor"),
+                tempo=tempo,
+                unfold_score=unfold_score,
+                kwargs=member_kwargs,
+                stream=_PlaceholderStream(),
+            )
+
+            name = spec.get("name", m_method)
+            dup = 1
+            while name in used_names:
+                dup += 1
+                name = f"{m_method}_{dup}"
+            used_names.add(name)
+            members.append(
+                EnsembleMember(
+                    name=name,
+                    follower=sub.score_follower,
+                    processor=sub.processor,
+                    modality=modality,
+                )
+            )
+            modalities_present.add(modality)
+            if modality == "audio":
+                max_audio_nfft = max(
+                    max_audio_nfft,
+                    int(getattr(sub.processor, "n_fft", 2 * common_hop)),
+                )
+
+        # One raw stream per present modality, merged into a tagged queue.
+        children = []
+        if "audio" in modalities_present:
+            from matchmaker.io.audio import AudioStream
+
+            children.append(
+                (
+                    "audio",
+                    AudioStream(
+                        processor=RawProcessor(n_fft=max_audio_nfft),
+                        device_name_or_index=devices.get(
+                            "audio", self.device_name_or_index
+                        ),
+                        file_path=audio_perf,
+                        wait=wait,
+                        target_sr=common_sr,
+                        sample_rate=common_sr,
+                        hop_length=common_hop,
+                    ),
+                )
+            )
+        if "midi" in modalities_present:
+            from matchmaker.io.midi import MidiStream
+
+            children.append(
+                (
+                    "midi",
+                    MidiStream(
+                        processor=RawProcessor(),
+                        port=devices.get("midi", self.device_name_or_index),
+                        file_path=midi_perf,
+                        polling_period=common_polling,
+                    ),
+                )
+            )
+
+        self.stream = MergedStream(children)
+        self.frame_rate = (
+            audio_frame_rate if "audio" in modalities_present else MIDI_FRAME_RATE
+        )
+        self.reference_features = None
+        score_positions = np.unique(self.score_part.note_array()["onset_beat"])
+        self.score_follower = EnsembleFollower(
+            members=members,
+            score_positions=score_positions,
+            queue=self.stream.queue,
+            policy=cfg.get("policy"),
+            feedback=cfg.get("feedback", True),
+            feedback_strength=cfg.get("feedback_strength", 0.5),
+            feedback_threshold=cfg.get("feedback_threshold", 2.0),
+            feedback_exclude_selected=cfg.get("feedback_exclude_selected", False),
+        )
 
     def _build_score_follower(self, method):
         if self.input_type == "audio":

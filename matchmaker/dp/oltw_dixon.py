@@ -170,6 +170,24 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
         # Frame-precision beat via _ref_frame_to_beat lookup.
         return self._frame_to_beat(self.best_ref)
 
+    def set_position(self, beat: float, strength: float = 1.0) -> bool:
+        """Best-effort re-anchor of the backward-forward search at ``beat``.
+
+        Snaps the reference pointer/best frame to the target and clears the
+        accumulated distance matrix so the local search restarts around the new
+        location. There is no soft blend, so ``strength`` only gates whether the
+        snap happens.
+        """
+        if strength <= 0:
+            return False
+        frame = int(np.searchsorted(self._ref_frame_to_beat, beat))
+        frame = max(0, min(frame, len(self._ref_frame_to_beat) - 1))
+        self.ref_pointer = frame
+        self.best_ref = frame
+        self.current_index = self._frame_to_score_idx(frame)
+        self.acc_dist_matrix[:] = np.inf
+        return True
+
     @property
     def alignment_path(self) -> NDArray:
         return self.wp
@@ -497,6 +515,20 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
         best_ref, _ = self._argmin_path_cost()
         self.current_index = min(best_ref, self.N_ref - 1)
         self.input_index += 1
+
+    def set_position(self, beat: float, strength: float = 1.0) -> bool:
+        """Snap the event-level reference pointer to the score row at ``beat``.
+
+        The sparse DP cost cache is kept; only the search anchor (``self.j``)
+        and reported index move, so the next step's local search recenters on
+        the corrected position.
+        """
+        if strength <= 0:
+            return False
+        idx = self._snap_index(beat)
+        self.j = idx
+        self.current_index = idx
+        return True
 
     def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
         self.reset()

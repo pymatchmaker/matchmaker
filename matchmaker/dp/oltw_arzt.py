@@ -93,6 +93,7 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
             (self.N_ref + 1, 2), np.inf, dtype=np.float32
         )
         self.input_index: int = 0
+        self._last_cost: Optional[float] = None
 
     @property
     def window_index(self) -> int:
@@ -105,6 +106,29 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
     def step(self, input_features: NDArray[np.float32]) -> None:
         """Process one input element and update self.current_index."""
         raise NotImplementedError
+
+    def set_position(self, beat: float, strength: float = 1.0) -> bool:
+        """Re-anchor the rolling DP at the externally supplied ``beat``.
+
+        OLTW has no soft belief to blend, so ``strength`` is treated as a hard
+        snap whenever it is positive: the current index jumps to the nearest
+        score row and the cost matrix is reseeded so the search window recenters
+        there on the next step.
+        """
+        if strength <= 0:
+            return False
+        idx = self._snap_index(beat)
+        self.current_index = idx
+        self.global_cost_matrix[:] = np.inf
+        self.global_cost_matrix[idx + 1, 0] = 0.0
+        return True
+
+    def confidence(self) -> Optional[float]:
+        """Map the latest minimal warping cost to ``(0, 1]`` (lower cost =
+        higher confidence). ``None`` until the first step has run."""
+        if self._last_cost is None or not np.isfinite(self._last_cost):
+            return None
+        return 1.0 / (1.0 + float(self._last_cost))
 
     def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
         self.reset()
@@ -190,6 +214,18 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
             self._ref_frame_to_beat[min(frame, len(self._ref_frame_to_beat) - 1)]
         )
 
+    def set_position(self, beat: float, strength: float = 1.0) -> bool:
+        """Re-anchor the frame-level search at ``beat`` (hard snap)."""
+        if strength <= 0:
+            return False
+        frame = int(np.searchsorted(self._ref_frame_to_beat, beat))
+        frame = max(0, min(frame, len(self._ref_frame_to_beat) - 1))
+        self._current_frame = frame
+        self.current_index = self._frame_to_score_idx(frame)
+        self.global_cost_matrix[:] = np.inf
+        self.global_cost_matrix[frame + 1, 0] = 0.0
+        return True
+
     def _frame_to_score_idx(self, frame: int) -> int:
         """Project a reference-frame index to the score_positions index."""
         beat = self._frame_to_beat(frame)
@@ -263,6 +299,7 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
             min_costs=min_costs,
             min_index=min_index,
         )
+        self._last_cost = float(min_costs)
 
         if self.input_index > 0:
             self._current_frame = int(
@@ -371,6 +408,7 @@ class OnlineTimeWarpingArztEvent(OnlineTimeWarpingArzt):
             )
         else:
             self.current_index = min_index
+        self._last_cost = float(min_costs)
         self.input_index += 1
 
 
