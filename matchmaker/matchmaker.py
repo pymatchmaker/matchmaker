@@ -99,7 +99,7 @@ DEFAULT_KWARGS = {
         "ensemble": {
             "members": [{"method": "arzt"}, {"method": "dixon"}],
             "policy": "agreement",
-            "feedback": True,
+            "feedback": False,
         },
     },
     "midi": {
