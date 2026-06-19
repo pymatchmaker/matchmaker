@@ -76,7 +76,7 @@ class ParticleFilter(OnlineAlignment):
 
         self.weights = np.ones(num_particles) / num_particles
 
-        self._alignment_path = [(self.current_position, self.input_index)]
+        self._alignment_path = [(self.input_index, self.current_position)]
 
         self.last_queue_update = time.time()
         self.latency_stats: Dict[str, float] = {

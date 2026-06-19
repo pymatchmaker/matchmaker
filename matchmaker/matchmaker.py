@@ -530,7 +530,7 @@ class Matchmaker(object):
     def _wp_perf_to_seconds(self, wp_perf):
         """Convert alignment path performance axis to absolute seconds.
 
-        All trackers now store absolute perf time in alignment_path[1].
+        alignment_path[0] already holds absolute perf seconds, so this is a pass-through.
         """
         return wp_perf
 
@@ -741,10 +741,10 @@ class Matchmaker(object):
             raise ValueError("Must call run() before evaluation")
 
         wp = self.score_follower.alignment_path
-        wp_score = wp[0].astype(float)
-        wp_perf_sec = self._wp_perf_to_seconds(wp[1].astype(float))
+        wp_score = wp[1].astype(float)
+        wp_perf_sec = self._wp_perf_to_seconds(wp[0].astype(float))
 
-        score_annots_beats, perf_annots = resolve_gt(gt, self.score_part.note_array())
+        perf_annots, score_annots_beats = resolve_gt(gt, self.score_part.note_array())
 
         eval_results = evaluate_alignment(
             wp_score,
@@ -770,7 +770,7 @@ class Matchmaker(object):
             eval_results.update(latency_results)
 
         if debug and save_dir is not None:
-            wp_sec = np.array([wp_score, wp_perf_sec])
+            wp_sec = np.array([wp_perf_sec, wp_score])
             sf = self.score_follower
             save_debug_results(
                 alignment_path=wp_sec,

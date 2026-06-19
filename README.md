@@ -298,7 +298,7 @@ Matchmaker has the following pipeline:
   observations from the queue (or directly via `__call__`), updates its
   score position per step, and yields the current beat. On stream end it
   returns the final `alignment_path` — a `(2, T)` `np.ndarray` of
-  `(score_beat, perf_time)` pairs.
+  `(perf_time, score_beat)` pairs.
 
 `STREAM_END` is a module-level sentinel (not a tuple); `OnlineAlignment.run()`
 checks for it and exits the read loop.

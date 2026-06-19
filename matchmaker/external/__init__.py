@@ -118,7 +118,7 @@ class OnlineParangonarAlignment(OnlineAlignment):
                 self.current_position = float(beat)
                 self.current_perf_time = float(perf_t)
                 self._alignment_path.append(
-                    (self.current_position, self.current_perf_time)
+                    (self.current_perf_time, self.current_position)
                 )
                 yield self.current_position
             return self.alignment_path

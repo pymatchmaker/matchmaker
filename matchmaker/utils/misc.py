@@ -452,7 +452,7 @@ def plot_alignment(
     gt, pred = gt[:n], pred[:n]
 
     # Figure size + dpi scale with performance duration (song length):
-    perf_times = np.asarray(alignment_path[1], dtype=float)
+    perf_times = np.asarray(alignment_path[0], dtype=float)
     perf_times = perf_times[np.isfinite(perf_times)]
     perf_dur = float(perf_times.max()) if perf_times.size else 0.0
     t = float(np.clip((perf_dur - 30.0) / (540.0 - 30.0), 0.0, 1.0))
@@ -502,16 +502,16 @@ def plot_alignment(
 
     # x-axis: performance time in frames
     x_gt = gt * float(frame_rate)
-    wp_x = alignment_path[1] * float(frame_rate)
+    wp_x = alignment_path[0] * float(frame_rate)
 
     # y-axis: score position (beats)
-    wp_in_beats = np.issubdtype(alignment_path[0].dtype, np.floating)
+    wp_in_beats = np.issubdtype(alignment_path[1].dtype, np.floating)
     if score_positions is not None and not wp_in_beats:
-        wp_y = score_positions[alignment_path[0]]
+        wp_y = score_positions[alignment_path[1]]
     elif show_dist and wp_in_beats and ref_frame_to_beat is not None:
-        wp_y = _beats_to_frames(alignment_path[0], ref_frame_to_beat)
+        wp_y = _beats_to_frames(alignment_path[1], ref_frame_to_beat)
     else:
-        wp_y = alignment_path[0]
+        wp_y = alignment_path[1]
 
     # GT score positions (y-axis for annotation dots)
     if score_y is not None:
@@ -618,9 +618,9 @@ def save_debug_results(
     save_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Alignment path TSV + results JSON + GT annotations
-    # Column order: perf_sec, score_beat
+    # Column order: perf_sec, score_beat (alignment_path is already [perf, score])
     save_nparray_to_csv(
-        alignment_path[[1, 0]].T,
+        alignment_path.T,
         (save_dir / f"wp_{run_name}.tsv").as_posix(),
         header="perf_sec\tscore_beat",
     )

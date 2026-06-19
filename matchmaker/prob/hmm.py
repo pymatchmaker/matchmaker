@@ -1798,7 +1798,7 @@ class GaussianAudioPitchHMM(BaseHMM):
             observation=frame,
             log_probabilities=False,
         )
-        self._alignment_path.append((current_state, self.input_index))
+        self._alignment_path.append((self.input_index, current_state))
         self.input_index = self.input_index + 1 if frame_index is None else frame_index
 
         self.current_index = current_state
@@ -2000,7 +2000,7 @@ class GaussianAudioPitchTempoHMM(BaseHMM):
             log_probabilities=False,
         )
 
-        self._alignment_path.append((current_state, self.input_index))
+        self._alignment_path.append((self.input_index, current_state))
         self.input_index = self.input_index + 1 if frame_index is None else frame_index
 
         if current_state >= self.current_index:

@@ -22,7 +22,7 @@ def transfer_positions(
     Parameters
     ----------
     wp : np.array with shape (2, T)
-        Alignment path. wp[0] = score beats, wp[1] = performance time (seconds).
+        Alignment path. wp[0] = performance time (seconds), wp[1] = score beats.
     ref_anns : array-like
         Query positions (seconds for domain="score",
         beats for domain="performance").
@@ -50,8 +50,8 @@ def transfer_positions(
     if domain not in {"score", "performance"}:
         raise ValueError(f"Invalid domain={domain!r}. Use 'score' or 'performance'.")
 
-    wp_score = wp[0].astype(float)
-    wp_perf = wp[1].astype(float)
+    wp_perf = wp[0].astype(float)
+    wp_score = wp[1].astype(float)
     queries = np.asarray(ref_anns, dtype=float)
 
     def _last(arr):
@@ -186,7 +186,7 @@ def evaluate_alignment(
     )
 
     # Beat metrics: perf→score prediction
-    wp_sec = np.array([wp_score, wp_perf_sec])
+    wp_sec = np.array([wp_perf_sec, wp_score])
     score_predicted = transfer_positions(
         wp_sec,
         gt_perf_sec,
@@ -251,12 +251,13 @@ def gt_from_match(match_path, score_notes):
     beats, secs = beats[order], secs[order]
     keep = np.ones(len(beats), dtype=bool)
     keep[1:] = beats[1:] != beats[:-1]
-    return beats[keep], secs[keep]
+    return secs[keep], beats[keep]
 
 
 def resolve_gt(gt, score_notes):
+    """Return GT as (perf_sec, score_beat) arrays, from an ndarray, .match, or .tsv."""
     if isinstance(gt, np.ndarray):
-        # gt array columns: [score_beat, perf_sec]
+        # gt array columns: [perf_sec, score_beat]
         arr = np.asarray(gt, dtype=float)
         return arr[:, 0], arr[:, 1]
     if Path(gt).suffix.lower() == ".match":
@@ -264,4 +265,4 @@ def resolve_gt(gt, score_notes):
     with open(gt) as f:
         header = f.readline().rstrip("\n").split("\t")
     data = np.loadtxt(gt, delimiter="\t", skiprows=1, ndmin=2)
-    return data[:, header.index("score_beat")], data[:, header.index("perf_sec")]
+    return data[:, header.index("perf_sec")], data[:, header.index("score_beat")]

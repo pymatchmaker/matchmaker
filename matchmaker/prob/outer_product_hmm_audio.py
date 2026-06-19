@@ -415,7 +415,7 @@ class AudioOuterProductHMM(OnlineAlignment):
 
         self.current_index = new_top
         self.current_position = float(self.score_positions[self.current_index])
-        self._alignment_path.append((self.current_position, self.current_perf_time))
+        self._alignment_path.append((self.current_perf_time, self.current_position))
         self.input_index += 1
         self.latency_stats = set_latency_stats(
             time.time() - t0, self.latency_stats, self.input_index

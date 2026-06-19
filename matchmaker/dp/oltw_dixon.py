@@ -299,7 +299,7 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
         # best_input is the input-buffer index of the best match; convert to seconds
         perf_time = self.best_input / float(self.frame_rate)
         beat = self.get_current_position()
-        new_point = np.array([[beat], [perf_time]])
+        new_point = np.array([[perf_time], [beat]])
         self.wp = np.concatenate((self.wp, new_point), axis=1)
 
     def step(self, input_features):

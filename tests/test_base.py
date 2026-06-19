@@ -46,17 +46,17 @@ class TestOnlineAlignmentContract(unittest.TestCase):
         self.assertAlmostEqual(beat, 0.5)
 
     def test_alignment_path_shape_and_units(self):
-        """alignment_path is (2, T) with row 0 score beat, row 1 perf time (sec)."""
+        """alignment_path is (2, T) with row 0 perf time (sec), row 1 score beat."""
         tr = _make_dummy()
         for k in range(3):
             tr(np.zeros(4, dtype=np.float32), float(k) * 0.1)
         wp = tr.alignment_path
         self.assertEqual(wp.shape, (2, 3))
         self.assertEqual(wp.dtype, np.float64)
-        # row 0: score beats from score_positions
-        np.testing.assert_allclose(wp[0], [0.5, 1.0, 1.5])
-        # row 1: perf times we passed in
-        np.testing.assert_allclose(wp[1], [0.0, 0.1, 0.2], atol=1e-6)
+        # row 0: perf times we passed in
+        np.testing.assert_allclose(wp[0], [0.0, 0.1, 0.2], atol=1e-6)
+        # row 1: score beats from score_positions
+        np.testing.assert_allclose(wp[1], [0.5, 1.0, 1.5])
 
     def test_alignment_path_empty(self):
         """alignment_path returns (2, 0) before any step."""
