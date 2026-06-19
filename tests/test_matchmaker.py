@@ -107,7 +107,7 @@ class TestMatchmaker(unittest.TestCase):
 
                     current_test = f"{dataset['name']}_{method}"
                     results = mm.run_evaluation(
-                        dataset["annotations"],
+                        gt=dataset["match"],
                         debug=False,
                         # save_dir=Path("./tests/results"),
                         # run_name=current_test,
@@ -136,7 +136,7 @@ class TestMatchmaker(unittest.TestCase):
             mm._has_run = True
 
         results = mm.run_evaluation(
-            EXAMPLE_PIECES["simple_mozart"]["annotations"],
+            gt=EXAMPLE_PIECES["simple_mozart"]["match"],
             debug=False,
         )
         print(f"RESULTS: {json.dumps(results, indent=4)}")
@@ -161,7 +161,7 @@ class TestMatchmaker(unittest.TestCase):
             mm._has_run = True
 
         results = mm.run_evaluation(
-            self.performance_file_annotations, domain="score", debug=False
+            gt=EXAMPLE_PIECES["bach_fugue"]["match"], domain="score", debug=False
         )
         print(f"RESULTS: {json.dumps(results, indent=4)}")
 
@@ -180,7 +180,7 @@ class TestMatchmaker(unittest.TestCase):
 
         # When: calling run_evaluation before run()
         with self.assertRaises(ValueError):
-            mm.run_evaluation(self.performance_file_annotations, debug=False)
+            mm.run_evaluation(gt=EXAMPLE_PIECES["bach_fugue"]["match"], debug=False)
 
     def test_matchmaker_audio_dixon_init(self):
         # Given: a Matchmaker instance with audio input and Dixon method
@@ -245,7 +245,7 @@ class TestMatchmaker(unittest.TestCase):
                 list(mm.run(verbose=False))
 
                 results = mm.run_evaluation(
-                    EXAMPLE_PIECES["simple_mozart"]["annotations"], debug=False
+                    gt=EXAMPLE_PIECES["simple_mozart"]["match"], debug=False
                 )
                 self.assertIn("rtf", results)
                 self.assertGreater(results["rtf"], 0)
@@ -353,7 +353,7 @@ class TestMatchmaker(unittest.TestCase):
 
                     # Evaluate all methods
                     results = mm.run_evaluation(
-                        dataset["annotations"],
+                        gt=dataset["match"],
                         debug=False,
                     )
                     current_test = f"{dataset['name']}_{method}_midi"

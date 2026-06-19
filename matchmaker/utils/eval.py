@@ -257,11 +257,10 @@ def gt_from_match(match_path, score_notes):
 def resolve_gt(gt, score_notes):
     if isinstance(gt, np.ndarray):
         arr = np.asarray(gt, dtype=float)
-    elif Path(gt).suffix.lower() == ".match":
+        return arr[:, 1], arr[:, 0]
+    if Path(gt).suffix.lower() == ".match":
         return gt_from_match(gt, score_notes)
-    else:
-        try:
-            arr = np.loadtxt(gt, delimiter="\t")
-        except ValueError:
-            arr = np.loadtxt(gt, delimiter="\t", skiprows=1)
-    return arr[:, 0].astype(float), arr[:, 1].astype(float)
+    with open(gt) as f:
+        header = f.readline().rstrip("\n").split("\t")
+    data = np.loadtxt(gt, delimiter="\t", skiprows=1, ndmin=2)
+    return data[:, header.index("score_beat")], data[:, header.index("perf_sec")]

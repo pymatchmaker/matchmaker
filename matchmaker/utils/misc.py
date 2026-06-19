@@ -408,8 +408,10 @@ def generate_score_audio(score: ScoreLike, bpm: float, samplerate: int):
     return score_audio
 
 
-def save_nparray_to_csv(array: NDArray, save_path: str):
+def save_nparray_to_csv(array: NDArray, save_path: str, header: Optional[str] = None):
     with open(save_path, "w") as csvfile:
+        if header is not None:
+            csvfile.write(header + "\n")
         writer = csv.writer(csvfile, delimiter="\t")
         writer.writerows(array)
 
@@ -616,9 +618,18 @@ def save_debug_results(
     save_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Alignment path TSV + results JSON + GT annotations
-    save_nparray_to_csv(alignment_path.T, (save_dir / f"wp_{run_name}.tsv").as_posix())
-    gt_pairs = np.column_stack([score_annots, perf_annots])
-    save_nparray_to_csv(gt_pairs, (save_dir / f"gt_{run_name}.tsv").as_posix())
+    # Column order: perf_sec, score_beat
+    save_nparray_to_csv(
+        alignment_path[[1, 0]].T,
+        (save_dir / f"wp_{run_name}.tsv").as_posix(),
+        header="perf_sec\tscore_beat",
+    )
+    gt_pairs = np.column_stack([perf_annots, score_annots])
+    save_nparray_to_csv(
+        gt_pairs,
+        (save_dir / f"gt_{run_name}.tsv").as_posix(),
+        header="perf_sec\tscore_beat",
+    )
     import json
 
     with open(save_dir / f"{run_name}.json", "w") as f:
