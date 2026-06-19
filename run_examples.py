@@ -71,7 +71,7 @@ def main():
     print(f"Running evaluation using the annotations file ({ANNOTATION_FILE.name})...")
 
     results = mm.run_evaluation(
-        perf_annotations=ANNOTATION_FILE,
+        gt=_piece["match"],
         debug=True,
         save_dir=ROOT_DIR / "results",
         run_name="simple_example",
