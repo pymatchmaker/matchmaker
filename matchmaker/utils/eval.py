@@ -256,8 +256,9 @@ def gt_from_match(match_path, score_notes):
 
 def resolve_gt(gt, score_notes):
     if isinstance(gt, np.ndarray):
+        # gt array columns: [score_beat, perf_sec]
         arr = np.asarray(gt, dtype=float)
-        return arr[:, 1], arr[:, 0]
+        return arr[:, 0], arr[:, 1]
     if Path(gt).suffix.lower() == ".match":
         return gt_from_match(gt, score_notes)
     with open(gt) as f:

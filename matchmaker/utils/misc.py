@@ -639,13 +639,10 @@ def save_debug_results(
         return
 
     # 2. Alignment plot
-    # score_y = beat positions for each annotation (y-axis of the plot)
+    # score_y = beat positions for each annotation (y-axis of the plot).
+    # Not gated on monotonicity: note-level GT dips locally at chords.
     sx = np.asarray(score_annots, dtype=float)
-    score_y = (
-        sx
-        if sx.ndim == 1 and len(sx) == len(perf_annots) and np.all(np.diff(sx) >= 0)
-        else None
-    )
+    score_y = sx if sx.ndim == 1 and len(sx) == len(perf_annots) else None
     plot_alignment(
         alignment_path,
         perf_annots,
