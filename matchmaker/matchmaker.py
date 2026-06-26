@@ -65,7 +65,11 @@ DEFAULT_PROCESSOR = {"audio": "chroma", "midi": "pitch"}
 DEFAULT_KWARGS = {
     "audio": {
         "arzt": {"window_size": 10, "start_window_size": 0.1, "step_size": 3},
-        "dixon": {"processor": "lse", "window_size": 10},
+        "dixon": {
+            "processor": "lse",
+            "window_size": 10,
+            "frame_rate": 50,
+        },
         "outerhmm": {
             "processor": "cqt_spectral_flux",
             "sample_rate": 16000,
