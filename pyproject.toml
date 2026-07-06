@@ -63,6 +63,9 @@ dev = [
 [tool.setuptools.packages.find]
 exclude = ["tests", "docs"]
 
+[tool.setuptools.package-data]
+"matchmaker.prob" = ["templates/*.npz"]
+
 [tool.ruff]
 line-length = 88
 
