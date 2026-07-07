@@ -448,7 +448,7 @@ class Matchmaker(object):
                 notated_tempo=self.tempo,
                 hop_size=self.hop_length / self.sample_rate,
                 queue=queue,
-                num_particles=self.config.get("num_particles", 1000),
+                num_particles=self.config.get("num_particles", 100),
             )
         raise ValueError(f"No audio follower for method '{method}'")
 
@@ -513,7 +513,7 @@ class Matchmaker(object):
                 notated_tempo=self.tempo,
                 hop_size=POLLING_PERIOD,
                 queue=queue,
-                num_particles=self.config.get("num_particles", 1000),
+                num_particles=self.config.get("num_particles", 100),
             )
         elif method in PARANGONAR_METHODS:
             from matchmaker.external import OnlineParangonarAlignment

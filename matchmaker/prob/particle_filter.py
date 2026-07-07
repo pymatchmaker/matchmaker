@@ -30,7 +30,7 @@ class ParticleFilter(OnlineAlignment):
         notated_tempo: float = 120.0,  # BPM from score
         hop_size: float = HOP_SIZE,  # hop size in seconds
         queue: Optional[RECVQueue] = None,
-        num_particles=1000,
+        num_particles=100,
     ):
         self.reference_features = reference_features
         self.notated_tempo = notated_tempo
@@ -47,6 +47,9 @@ class ParticleFilter(OnlineAlignment):
         self.queue_timeout: Optional[float] = QUEUE_TIMEOUT
         self.N_ref = len(score_positions)
         self.input_index = 0
+        self.first_input_found = False
+
+        self._alignment_path: List[Tuple[float, float]] = []
 
         self.input_features: List = []
         self.rng = RNG
@@ -60,13 +63,14 @@ class ParticleFilter(OnlineAlignment):
         self.v_min = 0.5 * notated_tempo
         self.v_max = 2.0 * notated_tempo
 
-        init_tempo_std = 0.05 * notated_tempo
-
         # Tempo noise (paper: quarter of notated tempo)
         self.sigma_v = 0.25 * notated_tempo
 
         # Particle state arrays
         self.x = np.zeros(self.num_particles)  # Beat position of each particle
+        # Every particle takes the first score position as the initial position
+        self.x.fill(self.score_positions[0])
+        
         self.prev_x = self.x.copy()
         self.v = self.rng.uniform(
             self.v_min, self.v_max, self.num_particles
@@ -74,9 +78,7 @@ class ParticleFilter(OnlineAlignment):
 
         self.tempo_mean = np.mean(self.v)
 
-        self.weights = np.ones(num_particles) / num_particles
-
-        self._alignment_path = [(self.current_position, self.input_index)]
+        self.weights = np.ones(self.num_particles) / self.num_particles
 
         self.last_queue_update = time.time()
         self.latency_stats: Dict[str, float] = {
@@ -108,31 +110,18 @@ class ParticleFilter(OnlineAlignment):
 
         for i in range(self.num_particles):
             score_feature = self._get_score_feature(self.x[i])
-            alpha = self._cosine_angle(feature, score_feature)
-            likelihoods[i] = np.exp(-(alpha**2) / 0.2**2)
+            alpha = self._cosine_angle(feature[0], score_feature)
+            #likelihoods[i] = np.exp(-(alpha**2) / 0.2**2)
+            likelihoods[i] = np.exp(-(alpha**2))
 
         return likelihoods
 
     def _get_score_feature(self, beat_position):
-        # Find interval
-        idx = np.searchsorted(self.score_positions, beat_position)
-
-        if idx <= 0:
-            return self.reference_features[0]
-        if idx >= len(self.score_positions):
-            return self.reference_features[-1]
-
-        left = idx - 1
-        right = idx
-
-        beat_left = self.score_positions[left]
-        beat_right = self.score_positions[right]
-
-        frac = (beat_position - beat_left) / (beat_right - beat_left + 1e-12)
-
-        return (1 - frac) * self.reference_features[
-            left
-        ] + frac * self.reference_features[right]
+        # Convert beats to score time (seconds) using notated tempo.
+        time_seconds = (float(beat_position) * 60.0) / self.notated_tempo
+        idx = int(np.clip(np.round(time_seconds / self.hop_size), 0, self.N_ref - 1))
+        return self.reference_features[idx]
+        
 
     @staticmethod
     def _cosine_angle(ca, cm):
@@ -157,21 +146,10 @@ class ParticleFilter(OnlineAlignment):
                     & (self.score_boundaries <= self.current_position)
                 ]
                 if len(crossed_boundaries) > 0:
-                    # for each crossed boundary, check if it falls in between self.prev_x and self.x for each particle, and store the indexes of the particles that crossed the boundary
-                    indices_crossed = []
-                    for boundary in crossed_boundaries:
-                        particles_crossed_indices = np.where(
-                            (self.prev_x < boundary) & (self.x >= boundary)
-                        )[0]
-                        indices_crossed.append(particles_crossed_indices)
-
-                    unique_indices_crossed = np.unique(np.concatenate(indices_crossed))
-                    if len(unique_indices_crossed) > 0:
-                        # For particles that crossed the boundary, reset their tempo to a random value around the mean tempo
-                        self.v[unique_indices_crossed] = self.rng.normal(
-                            self.tempo_mean, self.sigma_v, len(unique_indices_crossed)
-                        )
-                        self.v = np.clip(self.v, self.v_min, self.v_max)
+                    self.v = self.rng.normal(
+                        self.tempo_mean, self.sigma_v, self.num_particles
+                    )
+                    self.v = np.clip(self.v, self.v_min, self.v_max)
 
     def resample(self):
         indices = self.rng.choice(
@@ -196,7 +174,7 @@ class ParticleFilter(OnlineAlignment):
         current_position = round(np.mean(self.x), 2)
 
         self.previous_state = self.current_position
-        self.current_position = current_position
+        
         self.check_crossing()
 
         likelihoods = self.compute_likelihood(feature)
@@ -207,20 +185,39 @@ class ParticleFilter(OnlineAlignment):
 
         self.resample()
 
+        self.current_position = current_position
+
         self.tempo_mean = np.mean(self.v)
-        self.sigma_v = 0.25 * self.tempo_mean
 
         return self.current_position
 
     def __call__(self, observation: Any, perf_time: float) -> float:
         t0 = time.time()
         self.input_features.append(observation)
-        beat = super().__call__(observation, perf_time)
-        self.latency_stats = set_latency_stats(
-            time.time() - t0, self.latency_stats, self.input_index
-        )
-        self.input_index += 1
-        return beat
+
+        if self.first_input_found:
+            beat = super().__call__(observation, perf_time)
+            self.latency_stats = set_latency_stats(
+                time.time() - t0, self.latency_stats, self.input_index
+            )
+            self.input_index += 1
+            return beat
+        else:
+            # normalize the observation to check if it is close to a uniform distribution.
+            # This is to ignore silent frames at the beginning of the performance.
+            # Needs a better implementation, but this is a quick fix for now.
+            norm_obs = observation[0] / np.sum(observation[0]) if np.sum(observation[0]) > 0 else observation[0]
+            if max(norm_obs) > 1/(len(norm_obs) - 1):
+                self.first_input_found = True
+                beat = super().__call__(observation, perf_time)
+                self.latency_stats = set_latency_stats(
+                    time.time() - t0, self.latency_stats, self.input_index
+                )
+                self.input_index += 1
+                return beat
+            else:
+                self.input_index += 1
+                return self.score_positions[0]
 
     def get_current_position(self) -> float:
         return self.current_position
