@@ -810,7 +810,7 @@ class Matchmaker(object):
         Returns
         -------
         np.ndarray
-            Alignment path (2, T): row 0 score beat, row 1 perf time (sec).
+            Alignment path (2, T): row 0 perf time (sec), row 1 score beat.
         """
         with self.stream:
             self.stream.stream_start.wait()
