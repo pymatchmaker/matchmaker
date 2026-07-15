@@ -1,6 +1,5 @@
 import argparse
 import datetime
-import json
 from _queue import Empty
 from pathlib import Path
 
@@ -11,7 +10,6 @@ _piece = EXAMPLE_PIECES["simple_mozart"]  # simple_mozart, bach_fugue
 SCORE_FILE = Path(_piece["score"])
 PERFORMANCE_AUDIO_FILE = Path(_piece["audio"])
 PERFORMANCE_MIDI_FILE = Path(_piece["midi"])
-ANNOTATION_FILE = Path(_piece["annotations"])
 
 
 def select_performance_file(input_mode):
@@ -24,9 +22,7 @@ def select_performance_file(input_mode):
 
 def main():
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Run Matchmaker and evaluate the results (only in simulation mode)"
-    )
+    parser = argparse.ArgumentParser(description="Run Matchmaker in simulation mode")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--audio", action="store_true", help="Use audio input mode")
     group.add_argument("--midi", action="store_true", help="Use MIDI input mode")
@@ -66,20 +62,11 @@ def main():
         timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[{timestamp}] Current beat position: {current_position}")
 
-    # Run evaluation
     print("-" * 50)
-    print(f"Running evaluation using the annotations file ({ANNOTATION_FILE.name})...")
-
-    results = mm.run_evaluation(
-        gt=_piece["match"],
-        debug=True,
-        save_dir=ROOT_DIR / "results",
-        run_name="simple_example",
-        level="note",
+    print(
+        "Done. For evaluation against ground-truth annotations, see the "
+        "matchmaker_benchmark repository."
     )
-
-    print(f"Evaluation Result: {json.dumps(results, indent=4)}")
-    print(f"Detailed evaluation results saved in {ROOT_DIR / 'results'}")
 
 
 if __name__ == "__main__":

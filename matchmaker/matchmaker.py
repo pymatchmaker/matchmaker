@@ -38,19 +38,11 @@ from matchmaker.io.midi import POLLING_PERIOD
 from matchmaker.prob import AudioOuterProductHMM, OuterProductHMM, PitchHMM, PitchIOIHMM
 from matchmaker.prob.particle_filter import ParticleFilter
 from matchmaker.prob.skf import SwitchingKalmanFilterFollower
-from matchmaker.utils.eval import (
-    TOLERANCES_IN_BEATS,
-    TOLERANCES_IN_MILLISECONDS,
-    evaluate_alignment,
-    resolve_gt,
-    transfer_positions,
-)
 from matchmaker.utils.misc import (
     generate_score_audio,
     get_tempo_from_score,
     is_audio_file,
     is_midi_file,
-    save_debug_results,
 )
 from matchmaker.utils.symbolic import framed_midi_messages_from_performance
 from matchmaker.utils.tempo_models import KalmanTempoModel
@@ -688,115 +680,6 @@ class Matchmaker(object):
                 3,
             ),
         }
-
-    def run_evaluation(
-        self,
-        perf_annotations: Union[PathLike, np.ndarray] = None,
-        gt: Union[PathLike, np.ndarray] = None,
-        level: str = "note",
-        tolerances: list = None,
-        musical_beat: bool = False,
-        debug: bool = False,
-        save_dir: PathLike = None,
-        run_name: str = None,
-        domain: str = "score",
-        plot_dist_matrix: bool = True,
-        make_plot: bool = True,
-    ) -> dict:
-        """
-        Evaluate the score following process.
-
-        When domain="score" (default), returns beat-based metrics as primary
-        and ms-based metrics under "ms" key. When domain="performance",
-        returns ms-based metrics only (legacy behavior).
-
-        Parameters
-        ----------
-        perf_annotations : PathLike or np.ndarray (deprecated)
-            Path to the performance annotations file or numpy array of onset times (seconds).
-        gt : PathLike or np.ndarray
-            Ground truth: a .match file, a .tsv (perf_sec, score_beat) file,
-            or an (N, 2) array of [perf_sec, score_beat].
-        level : str
-            Score annotation level ("note" or "beat"), used by callers.
-        tolerances : list or None
-            Tolerances for evaluation. If None, uses default for the domain.
-        musical_beat : bool
-            Whether the score uses musical beat (e.g. asap, pfvn).
-        debug : bool
-            Whether to save debug outputs
-        domain : str
-            "score" (default, beat-based primary) or "performance" (ms-based, legacy)
-
-        Returns
-        -------
-        dict
-            Evaluation results. If domain="score", includes both beat and ms metrics.
-        """
-        if tolerances is None:
-            tolerances = (
-                TOLERANCES_IN_BEATS if domain == "score" else TOLERANCES_IN_MILLISECONDS
-            )
-        if not self._has_run:
-            raise ValueError("Must call run() before evaluation")
-
-        wp = self.score_follower.alignment_path
-        wp_score = wp[1].astype(float)
-        wp_perf_sec = self._wp_perf_to_seconds(wp[0].astype(float))
-
-        perf_annots, score_annots_beats = resolve_gt(gt, self.score_part.note_array())
-
-        eval_results = evaluate_alignment(
-            wp_score,
-            wp_perf_sec,
-            score_annots_beats,
-            perf_annots,
-            beat_tolerances=tolerances if domain == "score" else TOLERANCES_IN_BEATS,
-            ms_tolerances=TOLERANCES_IN_MILLISECONDS,
-        )
-
-        # Real-Time Factor (domain-independent)
-        if self.alignment_duration is not None:
-            finite_perf = perf_annots[np.isfinite(perf_annots)]
-            if len(finite_perf) > 0:
-                perf_duration = float(np.max(finite_perf) - np.min(finite_perf))
-                if perf_duration > 0:
-                    eval_results["rtf"] = float(
-                        f"{self.alignment_duration / perf_duration:.4f}"
-                    )
-
-        if self.input_type == "audio":
-            latency_results = self.get_latency_stats()
-            eval_results.update(latency_results)
-
-        if debug and save_dir is not None:
-            wp_sec = np.array([wp_perf_sec, wp_score])
-            sf = self.score_follower
-            save_debug_results(
-                alignment_path=wp_sec,
-                score_annots=score_annots_beats,
-                perf_annots=perf_annots,
-                perf_annots_predicted=transfer_positions(
-                    wp_sec,
-                    score_annots_beats,
-                    frame_rate=1,
-                    domain="performance",
-                ),
-                eval_results=eval_results,
-                frame_rate=self.frame_rate,
-                save_dir=save_dir,
-                run_name=run_name or "results",
-                score_positions=sf.score_positions,
-                ref_features=sf.reference_features if plot_dist_matrix else None,
-                input_features=(
-                    getattr(sf, "input_features", None) if plot_dist_matrix else None
-                ),
-                distance_func=getattr(sf, "distance_func", None),
-                ref_frame_to_beat=getattr(sf, "_ref_frame_to_beat", None),
-                make_plot=make_plot,
-            )
-
-        return eval_results
 
     def run(self, verbose: bool = True):
         """
