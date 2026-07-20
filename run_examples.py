@@ -64,8 +64,7 @@ def main():
 
     print("-" * 50)
     print(
-        "Done. For evaluation against ground-truth annotations, see the "
-        "matchmaker_benchmark repository."
+        "Done."
     )
 
 
