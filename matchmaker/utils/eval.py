@@ -146,8 +146,8 @@ def get_evaluation_results(
 
 
 def evaluate_alignment(
-    wp_score,
-    wp_perf_sec,
+    aligned_score_beats,
+    aligned_perf_sec,
     gt_score_beats,
     gt_perf_sec,
     beat_tolerances=TOLERANCES_IN_BEATS,
@@ -157,9 +157,9 @@ def evaluate_alignment(
 
     Parameters
     ----------
-    wp_score : np.ndarray
+    aligned_score_beats : np.ndarray
         Alignment path score axis (beats).
-    wp_perf_sec : np.ndarray
+    aligned_perf_sec : np.ndarray
         Alignment path performance axis (seconds).
     gt_score_beats : np.ndarray
         Ground truth score positions (beats).
@@ -186,7 +186,7 @@ def evaluate_alignment(
     )
 
     # Beat metrics: perf→score prediction
-    wp_sec = np.array([wp_perf_sec, wp_score])
+    wp_sec = np.array([aligned_perf_sec, aligned_score_beats])
     score_predicted = transfer_positions(
         wp_sec,
         gt_perf_sec,
@@ -203,11 +203,11 @@ def evaluate_alignment(
     )
 
     # Ms metrics: score→perf prediction
-    gt_perf_for_wp = gt_interp(wp_score)
+    gt_perf_for_wp = gt_interp(aligned_score_beats)
     ms_results = get_evaluation_results(
         gt_perf_for_wp,
-        wp_perf_sec,
-        total_counts=len(wp_score),
+        aligned_perf_sec,
+        total_counts=len(aligned_score_beats),
         tolerances=ms_tolerances,
     )
 

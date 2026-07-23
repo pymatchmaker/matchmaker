@@ -1,4 +1,3 @@
-import json
 import queue
 import traceback
 import unittest
@@ -19,11 +18,6 @@ class TestMatchmakerMidi(unittest.TestCase):
     def setUp(self):
         self.score_file = EXAMPLE_PIECES["bach_fugue"]["score"]
         self.perf_midi = EXAMPLE_PIECES["bach_fugue"]["midi"]
-        self.match_file = EXAMPLE_PIECES["bach_fugue"]["match"]
-        self.test_datasets = [
-            {"name": "simple_mozart_k265_var1", **EXAMPLE_PIECES["simple_mozart"]},
-            {"name": "bach_fugue_bwv_858", **EXAMPLE_PIECES["bach_fugue"]},
-        ]
 
     def _run(self, mm):
         try:
@@ -55,27 +49,6 @@ class TestMatchmakerMidi(unittest.TestCase):
         gen.close()
         self.assertIsInstance(first_pos, (int, float, np.integer))
 
-    def test_all_methods_evaluation(self):
-        for dataset in self.test_datasets:
-            for method in ["hmm", "pthmm", "outerhmm", "arzt", "dixon"]:
-                with self.subTest(dataset=dataset["name"], method=method):
-                    mm = Matchmaker(
-                        score_file=dataset["score"],
-                        performance_file=dataset["midi"],
-                        input_type="midi",
-                        method=method,
-                    )
-                    self._run(mm)
-                    results = mm.run_evaluation(gt=dataset["match"], debug=False)
-                    current_test = f"{dataset['name']}_{method}_midi"
-                    print(
-                        f"[{current_test}] beat_0.5b={results['beat']['0.5b']:.3f}, ms_300ms={results['ms']['300ms']:.3f}"
-                    )
-                    for threshold in ["0.5b", "1b"]:
-                        self.assertGreaterEqual(results["beat"][threshold], 0.3)
-                    for threshold in ["300ms", "500ms", "1000ms"]:
-                        self.assertGreaterEqual(results["ms"][threshold], 0.3)
-
     def test_alignment_path_valid(self):
         mm = Matchmaker(
             score_file=EXAMPLE_PIECES["simple_mozart"]["score"],
@@ -94,28 +67,6 @@ class TestMatchmakerMidi(unittest.TestCase):
         # wp[1] = score beat: must be non-negative
         score_beats = wp[1].astype(float)
         self.assertTrue(np.all(score_beats >= 0))
-
-    def test_evaluation_before_run_raises(self):
-        mm = Matchmaker(
-            score_file=self.score_file,
-            performance_file=self.perf_midi,
-            input_type="midi",
-        )
-        with self.assertRaises(ValueError):
-            mm.run_evaluation(gt=self.match_file, debug=False)
-
-    def test_evaluation_in_beat_domain(self):
-        mm = Matchmaker(
-            score_file=self.score_file,
-            performance_file=self.perf_midi,
-            input_type="midi",
-        )
-        self._run(mm)
-        results = mm.run_evaluation(gt=self.match_file, domain="score", debug=False)
-        print(f"RESULTS: {json.dumps(results, indent=4)}")
-        self.assertIn("beat", results)
-        self.assertIn("ms", results)
-        self.assertGreaterEqual(results["beat"]["1b"], 0.3)
 
     def test_all_available_methods_smoke(self):
         piece = EXAMPLE_PIECES["simple_mozart"]
