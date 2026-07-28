@@ -9,7 +9,7 @@ from typing import Dict, Optional, Tuple, Union
 import librosa
 import numpy as np
 
-from matchmaker.features.processor import Processor
+from matchmaker.features.processor import Processor, KorzeniowskiObservation
 
 SAMPLE_RATE = 44100
 FRAME_RATE = 30
@@ -386,3 +386,171 @@ def compute_features_from_audio(
     features, _ = feature_processor((score_y, 0.0))
 
     return features
+
+
+class KorzeniowskiAudioProcessor(Processor):
+    """
+    Audio feature processor for the Korzeniowski score follower.
+
+    Produces
+
+        • spectral template observation
+        • onset strength
+        • loudness
+
+    for every incoming audio frame.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = 44100,
+        hop_length: int = 512,
+        win_length: int = 2048,
+        n_fft: int = 4096,
+    ):
+
+        super().__init__()
+
+        self.sample_rate = sample_rate
+        self.hop_length = hop_length
+        self.win_length = win_length
+        self.n_fft = n_fft
+
+        self.window = np.hanning(win_length)
+
+        self.previous_spectrum = None
+
+        self.frame_index = 0
+
+    def reset(self):
+
+        self.previous_spectrum = None
+
+        self.frame_index = 0
+
+    def __call__(
+        self,
+        frame: np.ndarray,
+    ):
+
+        spectrum = self.compute_spectrum(frame)
+
+        onset = self.compute_onset(
+            spectrum
+        )
+
+        loudness = self.compute_loudness(
+            frame
+        )
+
+        observation = KorzeniowskiObservation(
+            spectrum=spectrum,
+            onset=onset,
+            loudness=loudness,
+        )
+
+        frame_time = (
+            self.frame_index
+            * self.hop_length
+            / self.sample_rate
+        )
+
+        self.frame_index += 1
+
+        return observation, frame_time
+    
+    def compute_spectrum(
+        self,
+        frame: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Compute the normalized FFT magnitude spectrum
+        used by the Korzeniowski observation model.
+
+        Parameters
+        ----------
+        frame
+            Input audio frame.
+
+        Returns
+        -------
+        np.ndarray
+            Unit-normalized magnitude spectrum.
+        """
+
+        stft = librosa.stft(
+            frame,
+            n_fft=self.n_fft,
+            hop_length=len(frame),
+            win_length=self.win_length,
+            window="hann",
+            center=False,
+        )
+
+        magnitude = np.abs(stft[:, 0])
+
+        norm = np.linalg.norm(magnitude)
+
+        if norm > 0:
+            magnitude /= norm
+
+        return magnitude
+
+
+    def compute_onset(
+        self,
+        frame: np.ndarray,
+    ) -> float:
+        """
+        Compute onset activation using librosa's
+        spectral-flux onset detector.
+
+        Returns
+        -------
+        float
+            Non-negative onset activation.
+        """
+
+        onset = librosa.onset.onset_strength(
+            y=frame,
+            sr=self.sample_rate,
+            hop_length=len(frame),
+            center=False,
+        )
+
+        onset = float(onset[0])
+
+        #
+        # Compress to approximately [0,1]
+        #
+        onset = onset / (1.0 + onset)
+
+        return onset
+
+
+    def compute_loudness(
+        self,
+        frame: np.ndarray,
+    ) -> float:
+        """
+        Compute frame loudness (dBFS).
+
+        Returns
+        -------
+        float
+            Loudness in decibels.
+        """
+
+        rms = librosa.feature.rms(
+            y=frame,
+            frame_length=self.win_length,
+            hop_length=len(frame),
+            center=False,
+        )[0, 0]
+
+        loudness = librosa.amplitude_to_db(
+            np.array([[rms]]),
+            ref=1.0,
+        )[0, 0]
+
+        return float(loudness)
