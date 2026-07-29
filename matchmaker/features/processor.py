@@ -10,8 +10,6 @@ from typing import Any, Callable, Optional
 import numpy as np
 from dataclasses import dataclass
 
-from matchmaker.features.audio import SAMPLE_RATE
-
 
 class Processor(object):
     """
@@ -167,7 +165,7 @@ class KorzeniowskiScoreProcessor(Processor):
 
     def __init__(
         self,
-        sample_rate: int = SAMPLE_RATE,
+        sample_rate: int = 44100,
         n_fft: int = 4096,
         beat_resolution: float = 0.1,
         num_harmonics: int = 10,
@@ -425,6 +423,29 @@ class KorzeniowskiScoreProcessor(Processor):
             template /= norm
 
         return template
+    
+    def compute_nearest_onsets(
+        self,
+        beat_grid,
+        onset_positions,
+    ):
+
+        nearest_onsets = np.zeros(
+            len(beat_grid),
+            dtype=np.float32,
+        )
+
+        for i, beat in enumerate(
+            beat_grid
+        ):
+
+            nearest_onsets[i] = np.min(
+                np.abs(
+                    onset_positions - beat
+                )
+            )
+
+        return nearest_onsets
 
 if __name__ == "__main__":
     pass

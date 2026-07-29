@@ -229,21 +229,29 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
     def nearest_onset(self, idx):
         return self.score_model.nearest_onsets[idx]
     
-    def sample_note_tempo(self, local_tempo):
+    def sample_note_tempo(
+        self,
+        local_tempo,
+    ):
         """
         Sample Eq. (11).
 
-        Mixture of two Gaussians centred on the
-        local tempo.
+        Parameters
+        ----------
+        local_tempo : ndarray
+            Local tempos of particles that crossed
+            a score onset.
 
         Returns
         -------
         ndarray
-            New note tempos (log2 BPM).
+            Sampled note tempos.
         """
 
+        n = len(local_tempo)
+
         choose_fast = (
-            self.rng.rand(self.num_particles)
+            self.rng.rand(n)
             < self.weight_fast
         )
 
@@ -254,9 +262,9 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         )
 
         return local_tempo + self.rng.normal(
-            0.0,
-            sigma,
-            self.num_particles,
+            loc=0.0,
+            scale=sigma,
+            size=n,
         )
     
     def predict_position(self):
@@ -320,7 +328,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
 
         self.m[crossed] = self.sample_note_tempo(
             self.l[crossed]
-        )[crossed]
+        )
 
     
     def predict(self):
@@ -432,6 +440,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         self,
         spectrum,
         beat,
+        idx,
     ):
         """
         Eq. (14).
@@ -442,7 +451,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         if self.is_rest_position(beat):
             return 1.0
 
-        template = self.spectral_template(beat)
+        template = self.spectral_template(idx)
 
         corr = np.dot(
             spectrum,
@@ -455,13 +464,11 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         self,
         observed_notes,
         beat,
+        idx,
     ):
         """
         Compute the symbolic note likelihood.
         """
-
-        # Find nearest beat-grid position.
-        idx = self.beat_index(beat)
 
         expected_notes = self.score_model.active_notes[idx]
 
@@ -550,6 +557,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         self,
         feature,
         beat,
+        idx,
     ):
         """
         Compute the observation feature likelihood.
@@ -565,6 +573,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
             return self.spectral_probability(
                 feature,
                 beat,
+                idx,
             )
 
         elif self.observation_type == "midi":
@@ -572,6 +581,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
             return self.note_probability(
                 feature,
                 beat,
+                idx,
             )
 
         raise ValueError(
@@ -660,17 +670,17 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         #
         # Extract common features
         #
-        loudness = observation["loudness"]
+        loudness = observation.loudness
 
         if self.observation_type == "audio":
 
-            feature = observation["spectrum"]
-            onset = observation["onset"]
+            feature = observation.spectrum
+            onset = observation.onset
 
         else:
 
-            feature = observation["active_notes"]
-            onset = observation["onset_notes"]
+            feature = observation.active_notes
+            onset = observation.onset_notes
 
         for i in range(self.num_particles):
 

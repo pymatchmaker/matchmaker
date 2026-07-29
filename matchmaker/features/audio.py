@@ -430,9 +430,10 @@ class KorzeniowskiAudioProcessor(Processor):
 
     def __call__(
         self,
-        frame: np.ndarray,
+        data: InputAudioFrame,
     ):
 
+        frame, f_time = data
         spectrum = self.compute_spectrum(frame)
 
         onset = self.compute_onset(
@@ -449,45 +450,38 @@ class KorzeniowskiAudioProcessor(Processor):
             loudness=loudness,
         )
 
-        frame_time = (
-            self.frame_index
-            * self.hop_length
-            / self.sample_rate
-        )
+        # frame_time = (
+        #     self.frame_index
+        #     * self.hop_length
+        #     / self.sample_rate
+        # )
 
-        self.frame_index += 1
+        # self.frame_index += 1
 
-        return observation, frame_time
+        return observation, f_time
     
     def compute_spectrum(
         self,
         frame: np.ndarray,
     ) -> np.ndarray:
         """
-        Compute the normalized FFT magnitude spectrum
-        used by the Korzeniowski observation model.
-
-        Parameters
-        ----------
-        frame
-            Input audio frame.
-
-        Returns
-        -------
-        np.ndarray
-            Unit-normalized magnitude spectrum.
+        Compute the normalized magnitude spectrum.
         """
 
-        stft = librosa.stft(
-            frame,
-            n_fft=self.n_fft,
-            hop_length=len(frame),
-            win_length=self.win_length,
-            window="hann",
-            center=False,
+        window = librosa.filters.get_window(
+            "hann",
+            self.win_length,
+            fftbins=True,
         )
 
-        magnitude = np.abs(stft[:, 0])
+        frame = frame[:self.win_length] * window
+
+        magnitude = np.abs(
+            np.fft.rfft(
+                frame,
+                n=self.n_fft,
+            )
+        )
 
         norm = np.linalg.norm(magnitude)
 
