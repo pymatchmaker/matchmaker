@@ -224,48 +224,39 @@ class LogSpectralEnergyProcessor(Processor):
     identity bins up to the linear-to-log crossover (where the FFT bin
     spacing reaches one semitone), nearest-semitone bins above, capped at
     MIDI 127 (84 elements at 44.1 kHz). A half-wave rectified first-order
-    difference then emphasizes note onsets, and each difference vector is
-    normalized per frame.
-
-    ``normalize`` selects the per-frame normalization of the difference
-    vector: ``"l2"`` (default), ``"l1"``, ``"energy"`` (Java MATCH
-    ``normalise1``: divide by the frame's total energy, with its silence
-    gate), or ``"none"`` (the DAFx paper, which specifies no normalization).
+    difference emphasizes note onsets, and each difference vector is
+    L2-normalized per frame.
     """
 
     WINDOW_DURATION = 2048 / 44100  # seconds (paper: "46ms (2048 points)")
     REF_FREQ = 440.0  # Hz
-    SILENCE_GATE = 4e-4  # normalise1 threshold on total energy (MATCH scale)
 
     def __init__(
         self,
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
-        normalize: str = "l2",
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
-        self.normalize = normalize
         self.n_fft = int(2 ** round(np.log2(self.WINDOW_DURATION * self.sample_rate)))
-        self._window = np.hamming(self.n_fft) * np.sqrt(self.n_fft)
-        self._freq_map, self.dim = self._make_freq_map()
-        self._prev_spectrum = None
+        self.window = np.hamming(self.n_fft)
 
-    def reset(self):
-        self._prev_spectrum = None
-
-    def _make_freq_map(self):
-        """Per-FFT-bin output index on the linear-log frequency scale."""
+        # Per-FFT-bin output index on the linear-log frequency scale.
         df = self.sample_rate / self.n_fft
         cross = int(2.0 / (2.0 ** (1.0 / 12.0) - 1.0))
         offset = int(round(np.log2(cross * df / self.REF_FREQ) * 12.0 + 69.0))
         n_bins = self.n_fft // 2 + 1
-        fmap = np.arange(n_bins)
+        self.freq_map = np.arange(n_bins)
         k = np.arange(cross + 1, n_bins)
         midi = np.minimum(np.log2(k * df / self.REF_FREQ) * 12.0 + 69.0, 127.0)
-        fmap[cross + 1 :] = cross + np.round(midi).astype(int) - offset
-        return fmap, int(fmap[-1] + 1)
+        self.freq_map[cross + 1 :] = cross + np.round(midi).astype(int) - offset
+        self.dim = int(self.freq_map[-1] + 1)
+
+        self.prev_spectrum = None
+
+    def reset(self):
+        self.prev_spectrum = None
 
     def __call__(
         self,
@@ -277,7 +268,7 @@ class LogSpectralEnergyProcessor(Processor):
             n_fft=self.n_fft,
             win_length=self.n_fft,
             hop_length=self.hop_length,
-            window=self._window,
+            window=self.window,
             center=False,
         )
 
@@ -285,38 +276,22 @@ class LogSpectralEnergyProcessor(Processor):
 
         # Sum FFT bins into the linear-log frequency scale
         feature_vector = np.zeros((self.dim, spectrum.shape[1]), dtype=np.float32)
-        np.add.at(feature_vector, self._freq_map, spectrum)
+        np.add.at(feature_vector, self.freq_map, spectrum)
 
         # Half-wave rectified first-order difference (stateful for streaming)
-        if self._prev_spectrum is not None:
-            combined = np.hstack((self._prev_spectrum, feature_vector))
+        if self.prev_spectrum is not None:
+            combined = np.hstack((self.prev_spectrum, feature_vector))
             diff = np.diff(combined, axis=1)
         else:
             diff = np.diff(
                 feature_vector, axis=1, prepend=np.zeros_like(feature_vector[:, :1])
             )
 
-        self._prev_spectrum = feature_vector[:, -1:]
+        self.prev_spectrum = feature_vector[:, -1:]
 
         result = np.maximum(diff, 0).T
-
-        if self.normalize == "l2":
-            norms = np.linalg.norm(result, axis=1, keepdims=True)
-            result = result / np.maximum(norms, 1e-10)
-        elif self.normalize == "l1":
-            norms = np.sum(result, axis=1, keepdims=True)
-            result = result / np.maximum(norms, 1e-10)
-        elif self.normalize == "energy":
-            # Java MATCH normalise1: divide the diff by the frame's total
-            # energy, zeroing gated (silent) frames. Energies are rescaled to
-            # MATCH's window scale, where the gate threshold is defined.
-            energies = feature_vector.sum(axis=0) / ((0.54 * self.n_fft) ** 2)
-            gated = energies <= self.SILENCE_GATE
-            result = np.where(
-                gated[:, None],
-                0.0,
-                result / np.maximum(energies, 1e-12)[:, None],
-            )
+        norms = np.linalg.norm(result, axis=1, keepdims=True)
+        result = result / np.maximum(norms, 1e-10)
 
         return result, f_time
 

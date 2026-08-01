@@ -27,13 +27,12 @@ from matchmaker.base import OnlineAlignment
 from matchmaker.features.audio import FRAME_RATE
 from matchmaker.io.audio import QUEUE_TIMEOUT
 from matchmaker.io.queue import RECVQueue
-from matchmaker.io.stream import STREAM_END
 from matchmaker.utils.misc import set_latency_stats
 
 
 class Direction(IntEnum):
     REF = 0
-    TARGET = 1
+    INPUT = 1
     BOTH = 2
 
 
@@ -83,7 +82,9 @@ class OnlineTimeWarpingDixon(OnlineAlignment):
         )
         self.N_ref = self.reference_features.shape[0]
         self.max_run_count = max_run_count
-        self.distance_func = distance_func
+        self.distance_func = (
+            distance_func if isinstance(distance_func, str) else "euclidean"
+        )
         self.current_index = 0
         self.input_index = 0
 
@@ -108,7 +109,7 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
     STEP_WEIGHTS = {
         Direction.BOTH: ((-1, -1), 2.0),
         Direction.REF: ((-1, 0), 1.0),
-        Direction.TARGET: ((0, -1), 1.0),
+        Direction.INPUT: ((0, -1), 1.0),
     }
 
     def __init__(
@@ -177,8 +178,30 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
         return self._frame_to_beat(self.best_ref)
 
     @property
-    def alignment_path(self) -> NDArray:
+    def warping_path(self) -> NDArray:
         return self.wp
+
+    @property
+    def alignment_path(self) -> NDArray:
+        """Return one score position for every consumed performance frame."""
+        if self.input_pointer == 0:
+            return np.empty((2, 0), dtype=float)
+
+        score_positions = np.full(self.input_pointer, np.nan, dtype=float)
+        perf_frames = np.rint(self.wp[0] * self.frame_rate).astype(int)
+        for perf_frame, score_position in zip(perf_frames, self.wp[1]):
+            if 0 <= perf_frame < self.input_pointer:
+                score_positions[perf_frame] = score_position
+
+        previous_position = self._frame_to_beat(0)
+        for perf_frame in range(self.input_pointer):
+            if np.isnan(score_positions[perf_frame]):
+                score_positions[perf_frame] = previous_position
+            else:
+                previous_position = score_positions[perf_frame]
+
+        perf_times = np.arange(self.input_pointer, dtype=float) / self.frame_rate
+        return np.vstack((perf_times, score_positions))
 
     def save_history(self):
         perf_time = self.best_input / float(self.frame_rate)
@@ -200,78 +223,85 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
         return self.current_position
 
     def _distances(self, A, b):
-        """Distances from each row of band A (k, dim) to single frame b (dim,)."""
+        """Distances from each feature in band A to frame b."""
         return scipy.spatial.distance.cdist(
             A, b.reshape(1, -1), metric=self.distance_func
         )[:, 0]
 
-    def evaluate_path_cost(self, i, j, local_dist):
-        """EvaluatePathCost(t, j): DTW recursion at (ref=i, input=j).
+    def evaluate_path_cost(self, ref_idx, input_idx, local_dist):
+        """EvaluatePathCost(t, j): DTW recursion at (ref_idx, input_idx).
 
         Diagonal (BOTH) steps are weighted twice the local distance, straight
         steps once, following Sakoe & Chiba (1978) as adopted by Dixon (2005,
         DAFx): every monotone path then covers equal extent at equal weight,
         which makes the length normalization in ``path_cost`` meaningful.
         """
-        if i == 0 and j == 0:
+        if ref_idx == 0 and input_idx == 0:
             self.accumulated_costs[(0, 0)] = local_dist
             return
         best = None
         for offset, weight in self.STEP_WEIGHTS.values():
-            predecessor = self.accumulated_costs.get((i + offset[0], j + offset[1]))
+            predecessor = self.accumulated_costs.get(
+                (ref_idx + offset[0], input_idx + offset[1])
+            )
             if predecessor is None:
                 continue
             cost = predecessor + weight * local_dist
             if best is None or cost <= best:
                 best = cost
         if best is not None:
-            self.accumulated_costs[(i, j)] = best
+            self.accumulated_costs[(ref_idx, input_idx)] = best
 
-    def path_cost(self, i, j):
-        """Length-normalized path cost at (i, j); None if outside the band."""
-        v = self.accumulated_costs.get((i, j))
+    def path_cost(self, ref_idx, input_idx):
+        """Return normalized cost at (ref_idx, input_idx), if available."""
+        v = self.accumulated_costs.get((ref_idx, input_idx))
         if v is None:
             return None
-        return v / (1 + i + j)
+        return v / (1 + ref_idx + input_idx)
 
-    def get_inc(self):
-        """GetInc(t, j): pick the next expansion direction.
-
-        The minimum normalized path cost over the border row and column of the
-        search band decides the direction; ``best_ref``/``best_input`` (the
-        argmin cell) is the reported alignment position. A side that advanced
-        ``max_run_count`` times in a row is forced to yield to the other.
-        """
-        i = self.ref_pointer - 1
-        j = self.input_pointer - 1
-        best = self.path_cost(i, j)
+    def _update_best_alignment(self):
+        """Report the frontier cell with the minimum normalized path cost."""
+        current_ref = self.ref_pointer - 1
+        current_input = self.input_pointer - 1
+        best = self.path_cost(current_ref, current_input)
         if best is None:
             best = np.inf
-        best_row, best_col = i, j
+        best_ref, best_input = current_ref, current_input
 
-        for r in range(max(0, i - self.w + 1), i + 1):
-            cost = self.path_cost(r, j)
+        for ref_idx in range(max(0, current_ref - self.w + 1), current_ref + 1):
+            cost = self.path_cost(ref_idx, current_input)
             if cost is not None and cost < best:
                 best = cost
-                best_row, best_col = r, j
+                best_ref, best_input = ref_idx, current_input
 
-        for c in range(max(0, j - self.w + 1), j + 1):
-            cost = self.path_cost(i, c)
+        for input_idx in range(max(0, current_input - self.w + 1), current_input + 1):
+            cost = self.path_cost(current_ref, input_idx)
             if cost is not None and cost < best:
                 best = cost
-                best_row, best_col = i, c
+                best_ref, best_input = current_ref, input_idx
 
-        self.best_ref = best_row
-        self.best_input = best_col
+        self.best_ref = best_ref
+        self.best_input = best_input
+        return best_ref, best_input
+
+    def get_inc(self):
+        """Pick expansion direction from the frontier argmin."""
+        current_ref = self.ref_pointer - 1
+        current_input = self.input_pointer - 1
+        best_ref, best_input = self._update_best_alignment()
+
+        # Preserve the frontier argmin while BOTH initializes the c x c band.
+        if self.ref_pointer < self.w or self.input_pointer < self.w:
+            return Direction.BOTH
 
         if self.run_count_ref >= self.max_run_count:
-            return Direction.TARGET
+            return Direction.INPUT
         if self.run_count_input >= self.max_run_count:
             return Direction.REF
-        if best_row == i and best_col == j:
+        if best_ref == current_ref and best_input == current_input:
             return Direction.BOTH
-        if best_row < i:
-            return Direction.TARGET
+        if best_ref < current_ref:
+            return Direction.INPUT
         return Direction.REF
 
     def update_run_counts(self, adv_ref, adv_input):
@@ -288,28 +318,29 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
     # ---- band expansion ----
 
     def advance_ref(self):
-        """Add reference row i, evaluated against input columns [j-w+1, j]."""
+        """Advance REF and evaluate it against the active INPUT range."""
         self.ref_pointer += 1
-        i = self.ref_pointer - 1
-        j = self.input_pointer - 1
-        lo = max(0, j - self.w + 1)
-        input_band = np.asarray(self.input_features[lo : j + 1])
-        dists = self._distances(input_band, self.reference_features[i])
-        for k, c in enumerate(range(lo, j + 1)):
-            self.evaluate_path_cost(i, c, dists[k])
+        ref_idx = self.ref_pointer - 1
+        current_input = self.input_pointer - 1
+        lo = max(0, current_input - self.w + 1)
+        input_band = np.asarray(self.input_features[lo : current_input + 1])
+        dists = self._distances(input_band, self.reference_features[ref_idx])
+        for k, input_idx in enumerate(range(lo, current_input + 1)):
+            self.evaluate_path_cost(ref_idx, input_idx, dists[k])
 
     def advance_input(self, input_features):
-        """Add input column j, evaluated against reference rows [i-w+1, i]."""
+        """Advance INPUT and evaluate it against the active REF range."""
         self.input_features.append(np.asarray(input_features).reshape(-1))
         self.input_pointer += 1
-        j = self.input_pointer - 1
-        i = self.ref_pointer - 1
-        lo = max(0, i - self.w + 1)
+        input_idx = self.input_pointer - 1
+        current_ref = self.ref_pointer - 1
+        lo = max(0, current_ref - self.w + 1)
         dists = self._distances(
-            self.reference_features[lo : i + 1], self.input_features[j]
+            self.reference_features[lo : current_ref + 1],
+            self.input_features[input_idx],
         )
-        for k, r in enumerate(range(lo, i + 1)):
-            self.evaluate_path_cost(r, j, dists[k])
+        for k, ref_idx in enumerate(range(lo, current_ref + 1)):
+            self.evaluate_path_cost(ref_idx, input_idx, dists[k])
         if self.input_pointer % self.w == 0:
             self._prune()
 
@@ -338,65 +369,28 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
 
         self._pending.append(input_features)
         while self.is_still_following():
-            direction = self.get_inc()
-            adv_ref = direction != Direction.TARGET  # REF or BOTH
-            adv_input = direction != Direction.REF  # TARGET or BOTH
+            input_direction = self.get_inc()
+            adv_input = input_direction != Direction.REF
             if adv_input and not self._pending:
-                break  # needs an input frame that has not arrived yet
-            if adv_ref:
-                self.advance_ref()
+                break
             if adv_input:
                 self.advance_input(self._pending.pop(0))
+
+            ref_direction = self.get_inc()
+            adv_ref = ref_direction != Direction.INPUT
+            if adv_ref:
+                self.advance_ref()
+
+            self._update_best_alignment()
             self.update_run_counts(adv_ref, adv_input)
             self.save_history()
 
         self.current_index = self._frame_to_score_idx(self.best_ref)
-        self.save_history()
         self.input_index += 1
-
-    def _pull_input(self):
-        """Block for the next input item from the queue; None at stream end."""
-        while True:
-            item = self.queue.get(timeout=self.queue_timeout)
-            if item is STREAM_END:
-                return None
-            if item is not None:
-                return item
 
     def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
         self.reset()
-        first = self._pull_input()
-        if first is None:
-            return self.alignment_path
-        observation, self.current_perf_time = first
-        self.initialize(observation)
-        self.current_index = self._frame_to_score_idx(self.best_ref)
-        yield self.get_current_position()
-
-        while self.is_still_following():
-            t0 = time.time()
-            direction = self.get_inc()
-            adv_ref = direction != Direction.TARGET
-            adv_input = direction != Direction.REF
-            if adv_input:
-                item = self._pull_input()
-                if item is None:
-                    break
-                observation, self.current_perf_time = item
-            if adv_ref:
-                self.advance_ref()
-            if adv_input:
-                self.advance_input(observation)
-            self.update_run_counts(adv_ref, adv_input)
-            self.current_index = self._frame_to_score_idx(self.best_ref)
-            self.save_history()
-            if adv_input:
-                self.latency_stats = set_latency_stats(
-                    time.time() - t0, self.latency_stats, self.input_index
-                )
-                self.input_index += 1
-            yield self.get_current_position()
-        return self.alignment_path
+        return (yield from super().run(verbose=verbose))
 
 
 # ---------------------------------------------------------------------------
@@ -424,7 +418,7 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
         queue: Optional[RECVQueue] = None,
         c: int = 30,
         max_run_count: int = MAX_RUN_COUNT,
-        distance_func: str = OnlineTimeWarpingDixon.DEFAULT_DISTANCE_FUNC,
+        distance_func: str = "euclidean",
         **kwargs,
     ) -> None:
         super().__init__(
@@ -553,3 +547,7 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
     def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
         self.reset()
         return (yield from super().run(verbose=verbose))
+
+
+if __name__ == "__main__":
+    pass  # pragma: no cover

@@ -12,7 +12,7 @@ from matchmaker import EXAMPLE_PIECES, Matchmaker
 from matchmaker.utils.eval import evaluate_alignment, resolve_gt
 
 ROOT_DIR = Path(__file__).parent
-_piece = EXAMPLE_PIECES["bach_fugue"]  # simple_mozart, bach_fugue
+_piece = EXAMPLE_PIECES["simple_mozart"]  # simple_mozart, bach_fugue
 SCORE_FILE = Path(_piece["score"])
 PERFORMANCE_AUDIO_FILE = Path(_piece["audio"])
 PERFORMANCE_MIDI_FILE = Path(_piece["midi"])
