@@ -106,7 +106,7 @@ DEFAULT_KWARGS = {
             "processor": "chord_onset",
             "piano_range": True,
             "polling_period": 0.001,
-            "window_size": 0.3,
+            "window_size": 30,
         },
         "hmm": {
             "processor": "pitch",
@@ -176,6 +176,7 @@ class Matchmaker(object):
         - ``frame_rate`` (int): Frames per second. Default: 50.
           Ignored if ``hop_length`` is set.
         - ``hop_length`` (int): Hop length in samples. Overrides ``frame_rate``.
+        - ``norm`` (float or None): LSE per-frame norm. Default: 2.
 
         **midi keys**
 
@@ -328,7 +329,10 @@ class Matchmaker(object):
                 "mfcc": lambda: MFCCProcessor(**audio_kw),
                 "cqt": lambda: CQTProcessor(**audio_kw),
                 "mel": lambda: MelSpectrogramProcessor(**audio_kw),
-                "lse": lambda: LogSpectralEnergyProcessor(**audio_kw),
+                "lse": lambda: LogSpectralEnergyProcessor(
+                    **audio_kw,
+                    norm=self.config.pop("norm", 2),
+                ),
                 "cqt_spectral_flux": lambda: CQTSpectralFluxProcessor(**audio_kw),
                 "raw_spectrum": lambda: RawSpectrumProcessor(
                     sample_rate=self.sample_rate,
@@ -459,13 +463,9 @@ class Matchmaker(object):
                 onset_key="onset_beat",
                 piano_range=self.config.get("piano_range", True),
             )
-            # Filter out frame-level config keys
-            skip = {
-                "window_size",
-                "start_window_size",
-                "processor",
-                "piano_range",
-            }
+            skip = {"processor", "piano_range"}
+            if method == "arzt":
+                skip.update({"window_size", "start_window_size"})
             config = {k: v for k, v in self.config.items() if k not in skip}
             cls = (
                 OnlineTimeWarpingArztEvent

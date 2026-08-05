@@ -101,7 +101,7 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
       ``evaluate_path_cost``  <->  EvaluatePathCost(t, j)
       ``get_inc``             <->  GetInc(t, j)
       ``run`` / ``step``       <->  the main loop (advance input, reference, or both)
-      ``self.w``               <->  search width c (seconds * frame_rate)
+      ``self.w``               <->  search width c (window_size seconds * frame_rate)
     """
 
     # Predecessor offsets and step weights of the DTW recursion, keyed by the
@@ -407,7 +407,7 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
 
     Parameters
     ----------
-    c : int
+    window_size : int
         Search width in number of events.
     """
 
@@ -416,10 +416,9 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
         reference_features: NDArray[np.float32],
         score_positions: NDArray[np.float32],
         queue: Optional[RECVQueue] = None,
-        c: int = 30,
+        window_size: int = 30,
         max_run_count: int = MAX_RUN_COUNT,
         distance_func: str = "euclidean",
-        **kwargs,
     ) -> None:
         super().__init__(
             reference_features=reference_features,
@@ -427,16 +426,15 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
             queue=queue,
             max_run_count=max_run_count,
             distance_func=distance_func,
-            **kwargs,
         )
         self.ref = self.reference_features.astype(np.float32)
-        self.c = c
+        self.w = window_size
         self.reset()
 
     def reset(self) -> None:
         self._D: Dict = {}
-        self._L: Dict = {}
         self._inputs = []
+        self._pending = []
         self.t = -1
         self.j = -1
         self.run_count_input = 0
@@ -464,18 +462,14 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
     def _get_D(self, i, j):
         return self._D.get((i, j), np.inf)
 
-    def _get_L(self, i, j):
-        return self._L.get((i, j), 0)
-
     def _evaluate(self, ref_i, inp_j):
         if ref_i < 0 or inp_j < 0 or ref_i >= self.N_ref:
             return
         d = self._local_cost(ref_i, inp_j)
         if ref_i == 0 and inp_j == 0:
             self._D[(ref_i, inp_j)] = d
-            self._L[(ref_i, inp_j)] = 1
             return
-        best_cost, best_len = np.inf, 0
+        best_cost = np.inf
         for prev_i, prev_j, w in [
             (ref_i - 1, inp_j, 1),
             (ref_i, inp_j - 1, 1),
@@ -486,59 +480,85 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
                 c = prev + w * d
                 if c < best_cost:
                     best_cost = c
-                    best_len = self._L.get((prev_i, prev_j), 0) + 1
         if best_cost < np.inf:
             self._D[(ref_i, inp_j)] = best_cost
-            self._L[(ref_i, inp_j)] = best_len
 
     def _norm_cost(self, ref_i, inp_j):
-        L = self._get_L(ref_i, inp_j)
-        return self._get_D(ref_i, inp_j) / L if L > 0 else np.inf
+        return self._get_D(ref_i, inp_j) / (1 + ref_i + inp_j)
 
     def _argmin_path_cost(self):
         best_cost, best_ref, best_inp = np.inf, self.j, self.t
-        for k in range(max(0, self.t - self.c + 1), self.t + 1):
+        for k in range(max(0, self.t - self.w + 1), self.t + 1):
             nc = self._norm_cost(self.j, k)
             if nc < best_cost:
                 best_cost, best_ref, best_inp = nc, self.j, k
-        for k in range(max(0, self.j - self.c + 1), self.j + 1):
+        for k in range(max(0, self.j - self.w + 1), self.j + 1):
             nc = self._norm_cost(k, self.t)
             if nc < best_cost:
                 best_cost, best_ref, best_inp = nc, k, self.t
         return best_ref, best_inp
 
     def _compute_input_column(self):
-        for k in range(max(0, self.j - self.c + 1), self.j + 1):
+        for k in range(max(0, self.j - self.w + 1), self.j + 1):
             self._evaluate(k, self.t)
 
     def _compute_ref_row(self):
-        for k in range(max(0, self.t - self.c + 1), self.t + 1):
+        for k in range(max(0, self.t - self.w + 1), self.t + 1):
             self._evaluate(self.j, k)
 
-    def step(self, input_feat: NDArray[np.float32]) -> None:
-        self._inputs.append(np.asarray(input_feat, dtype=np.float32))
-        self.t += 1
-        self._compute_input_column()
+    def get_inc(self):
+        if self.j >= self.N_ref - 1:
+            return Direction.INPUT
+        if self.t + 1 < self.w or self.j + 1 < self.w:
+            return Direction.BOTH
+        if self.run_count_ref >= self.max_run_count:
+            return Direction.INPUT
+        if self.run_count_input >= self.max_run_count:
+            return Direction.REF
 
-        if self.t < self.c and self.j + 1 < self.N_ref:
-            self.j += 1
-            self._compute_ref_row()
-            self.run_count_input = 0
+        best_ref, best_input = self._argmin_path_cost()
+        if best_ref == self.j and best_input == self.t:
+            return Direction.BOTH
+        if best_ref < self.j:
+            return Direction.INPUT
+        return Direction.REF
+
+    def _update_run_counts(self, adv_ref, adv_input):
+        if adv_ref and adv_input:
             self.run_count_ref = 0
+            self.run_count_input = 0
+        elif adv_ref:
+            self.run_count_ref += 1
+            self.run_count_input = 0
         else:
             self.run_count_input += 1
             self.run_count_ref = 0
-            while self.j + 1 < self.N_ref:
-                best_ref, best_inp = self._argmin_path_cost()
-                if best_ref >= self.j and best_inp < self.t:
+
+    def step(self, input_feat: NDArray[np.float32]) -> None:
+        self._pending.append(np.asarray(input_feat, dtype=np.float32))
+        if self.t < 0:
+            self._inputs.append(self._pending.pop(0))
+            self.t = 0
+            self.j = 0
+            self._evaluate(0, 0)
+        else:
+            while True:
+                input_direction = self.get_inc()
+                adv_input = input_direction != Direction.REF
+                if adv_input and not self._pending:
+                    break
+                if adv_input:
+                    self._inputs.append(self._pending.pop(0))
+                    self.t += 1
+                    self._compute_input_column()
+
+                ref_direction = self.get_inc()
+                adv_ref = ref_direction != Direction.INPUT
+                if adv_ref:
                     self.j += 1
                     self._compute_ref_row()
-                    self.run_count_ref += 1
-                    self.run_count_input = 0
-                    if self.run_count_ref >= self.max_run_count:
-                        break
-                else:
-                    break
+
+                self._update_run_counts(adv_ref, adv_input)
 
         best_ref, _ = self._argmin_path_cost()
         self.current_index = min(best_ref, self.N_ref - 1)

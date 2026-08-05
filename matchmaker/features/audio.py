@@ -225,7 +225,7 @@ class LogSpectralEnergyProcessor(Processor):
     spacing reaches one semitone), nearest-semitone bins above, capped at
     MIDI 127 (84 elements at 44.1 kHz). A half-wave rectified first-order
     difference emphasizes note onsets, and each difference vector is
-    L2-normalized per frame.
+    normalized per frame (L2 by default; ``None`` disables normalization).
     """
 
     WINDOW_DURATION = 2048 / 44100  # seconds (paper: "46ms (2048 points)")
@@ -235,10 +235,12 @@ class LogSpectralEnergyProcessor(Processor):
         self,
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
+        norm: Optional[float] = 2,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
+        self.norm = norm
         self.n_fft = int(2 ** round(np.log2(self.WINDOW_DURATION * self.sample_rate)))
         self.window = np.hamming(self.n_fft)
 
@@ -290,8 +292,8 @@ class LogSpectralEnergyProcessor(Processor):
         self.prev_spectrum = feature_vector[:, -1:]
 
         result = np.maximum(diff, 0).T
-        norms = np.linalg.norm(result, axis=1, keepdims=True)
-        result = result / np.maximum(norms, 1e-10)
+        if self.norm is not None:
+            result = librosa.util.normalize(result, norm=self.norm, axis=1)
 
         return result, f_time
 
