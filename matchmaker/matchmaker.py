@@ -63,9 +63,9 @@ MIDI_FRAME_RATE = 1  # dummy value for MIDI input
 OLTW_METHODS = {"arzt", "dixon"}
 PARANGONAR_METHODS = {"SLT_OLTW", "SL_OLTW", "OTM", "OPTM"}
 AVAILABLE_METHODS = {
-    "audio": sorted(OLTW_METHODS) + ["outerhmm", "skf", "pf", "pf_korzeniowski"],
+    "audio": sorted(OLTW_METHODS) + ["outerhmm", "skf", "pf", "pfkorz"],
     "midi": sorted(OLTW_METHODS)
-    + ["hmm", "pthmm", "outerhmm", "pf", "pf_korzeniowski"]
+    + ["hmm", "pthmm", "outerhmm", "pf", "pfkorz"]
     + sorted(PARANGONAR_METHODS),
 }
 DEFAULT_METHOD = {"audio": "arzt", "midi": "pthmm"}
@@ -96,13 +96,13 @@ DEFAULT_KWARGS = {
             "frame_rate": 100,
             "num_particles": 1000,
         },
-        "pf_korzeniowski": {
+        "pfkorz": {
             "processor": "korzeniowski",
             "sample_rate": SAMPLE_RATE,
             "n_fft": 4096,
             "win_length": 2048,
             "observation_type" : "audio",
-            "num_particles": 1000,
+            "num_particles": 500,
         }
     },
     "midi": {
@@ -130,13 +130,13 @@ DEFAULT_KWARGS = {
             "piano_range": True,
             "num_particles": 1000,
         },
-        "pf_korzeniowski": {
+        "pfkorz": {
             "processor": "korzeniowski",
             "sample_rate": SAMPLE_RATE,
             "n_fft": 4096,
             "win_length": 2048,
             "observation_type" : "midi",
-            "num_particles": 1000,
+            "num_particles": 500,
         },
         "pthmm": {"processor": "pitch", "piano_range": True},
         "outerhmm": {
@@ -343,7 +343,7 @@ class Matchmaker(object):
             audio_kw = dict(sample_rate=self.sample_rate, hop_length=self.hop_length)
             if method == "pf":
                 audio_kw["n_fft"] = self.config.get("n_fft", 1024)
-            elif method == "pf_korzeniowski":
+            elif method == "pfkorz":
                 audio_kw["n_fft"] = self.config.get("n_fft", 4096)
                 audio_kw["win_length"] = self.config.get("win_length", 2048)
             AUDIO_PROCESSORS = {
@@ -473,7 +473,7 @@ class Matchmaker(object):
                 queue=queue,
                 num_particles=self.config.get("num_particles", 1000),
             )
-        elif method == "pf_korzeniowski":
+        elif method == "pfkorz":
             return KorzeniowskiParticleFilter(
                 score_model=ref,
                 score_positions=np.unique(self.score_part.note_array()["onset_beat"]),
@@ -558,7 +558,7 @@ class Matchmaker(object):
                 method=method,
                 queue=queue,
             )
-        elif method == "pf_korzeniowski":
+        elif method == "pfkorz":
             return KorzeniowskiParticleFilter(
                 score_model=ref,
                 score_positions=np.unique(self.score_part.note_array()["onset_beat"]),
@@ -607,7 +607,7 @@ class Matchmaker(object):
             features = np.array(features)
             return features
         
-        if self.method == "pf_korzeniowski":
+        if self.method == "pfkorz":
             korz_score_processor = KorzeniowskiScoreProcessor(
                 sample_rate=self.sample_rate if self.input_type == "audio" else SAMPLE_RATE,
                 n_fft=self.config.get("n_fft", 4096),

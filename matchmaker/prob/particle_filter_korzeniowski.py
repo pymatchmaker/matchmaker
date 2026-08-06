@@ -80,17 +80,13 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
             dtype=np.float64,
         )
 
-        self.m = np.full(
-            num_particles,
-            initial_logtempo,
-            dtype=np.float64,
+        self.m = initial_logtempo + self.rng.normal(
+            0.0,
+            0.15,
+            self.num_particles,
         )
 
-        self.l = np.full(
-            num_particles,
-            initial_logtempo,
-            dtype=np.float64,
-        )
+        self.l = self.m.copy()
 
         self.weights = np.ones(num_particles) / num_particles
 
