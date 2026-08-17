@@ -416,7 +416,11 @@ class KorzeniowskiAudioProcessor(Processor):
         self.win_length = win_length
         self.n_fft = n_fft
 
-        self.window = np.hanning(win_length)
+        self.window = librosa.filters.get_window(
+            "hann",
+            self.win_length,
+            fftbins=True,
+        )
 
         self.previous_spectrum = None
 
@@ -450,14 +454,6 @@ class KorzeniowskiAudioProcessor(Processor):
             loudness=loudness,
         )
 
-        # frame_time = (
-        #     self.frame_index
-        #     * self.hop_length
-        #     / self.sample_rate
-        # )
-
-        # self.frame_index += 1
-
         return observation, f_time
     
     def compute_spectrum(
@@ -468,13 +464,7 @@ class KorzeniowskiAudioProcessor(Processor):
         Compute the normalized magnitude spectrum.
         """
 
-        window = librosa.filters.get_window(
-            "hann",
-            self.win_length,
-            fftbins=True,
-        )
-
-        frame = frame[:self.win_length] * window
+        frame = frame[:self.win_length] * self.window
 
         magnitude = np.abs(
             np.fft.rfft(
@@ -491,35 +481,40 @@ class KorzeniowskiAudioProcessor(Processor):
         return magnitude
 
 
-    def compute_onset(
-        self,
-        frame: np.ndarray,
-    ) -> float:
+    def compute_onset(self, frame: np.ndarray) -> float:
         """
-        Compute onset activation using librosa's
-        spectral-flux onset detector.
+        Compute normalized causal spectral-flux onset activation.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Raw audio samples for the current frame.
 
         Returns
         -------
         float
-            Non-negative onset activation.
+            Non-negative normalized onset activation.
         """
+        windowed = frame[self.win_length] * self.window
 
-        onset = librosa.onset.onset_strength(
-            y=frame,
-            sr=self.sample_rate,
-            hop_length=len(frame),
-            center=False,
-        )
+        spectrum = np.abs(np.fft.rfft(windowed))
 
-        onset = float(onset[0])
+        if self.previous_spectrum is None:
+            self.previous_spectrum = spectrum
+            return 0.0
 
-        #
-        # Compress to approximately [0,1]
-        #
-        onset = onset / (1.0 + onset)
+        # Spectral flux: only count increases.
+        flux = np.maximum(
+            0.0,
+            spectrum - self.previous_spectrum,
+        ).sum()
 
-        return onset
+        # Normalize by current spectral energy.
+        energy = spectrum.sum()
+
+        self.previous_spectrum = spectrum
+
+        return float(flux / (energy + 1e-8))
 
 
     def compute_loudness(

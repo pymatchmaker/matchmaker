@@ -439,11 +439,15 @@ class KorzeniowskiScoreProcessor(Processor):
             beat_grid
         ):
 
-            nearest_onsets[i] = np.min(
+            nearest_index = np.argmin(
                 np.abs(
                     onset_positions - beat
                 )
             )
+
+            nearest_onsets[i] = onset_positions[
+                nearest_index
+            ]
 
         return nearest_onsets
 

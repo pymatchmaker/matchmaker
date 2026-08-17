@@ -44,7 +44,6 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
     def __init__(
         self,
         score_model,
-        score_positions,
         observation_type,
         notated_tempo=120.0,
         hop_size=HOP_SIZE,
@@ -54,7 +53,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         super().__init__()
 
         self.score_model = score_model
-        self.score_positions = score_positions
+        self.score_positions = score_model.onset_positions
         self.observation_type = observation_type.lower()
 
         if self.observation_type not in ("audio", "midi"):
@@ -72,45 +71,63 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         self.num_particles = num_particles
         self.rng = RNG
 
-        initial_logtempo = np.log2(notated_tempo)
+        self.initial_logtempo = np.log2(self.notated_tempo)
 
+
+        # Particle positions (in beats) are initialized to the first score onset.
         self.x = np.full(
             num_particles,
-            score_positions[0],
+            self.score_positions[0],
             dtype=np.float64,
         )
 
-        self.m = initial_logtempo + self.rng.normal(
+        # Particle note log-tempi are initialized to the notated tempo with some Gaussian noise.
+        self.m = self.initial_logtempo + self.rng.normal(
             0.0,
-            0.15,
+            0.1,
             self.num_particles,
         )
 
+        # Particle local (slow-moving/averaged) log-tempi are initialized to the notated tempo with some Gaussian noise.
         self.l = self.m.copy()
 
+        # to adjust tempo according to crossed onsets and expected tempo
+        # midi has a lower phase gain because the note onsets are more reliable than audio onsets
+        # additionally, sustained note frames in midi are identical to each other in midi, 
+        # so the phase gain should be lower to avoid overreacting to these frames
+        self.phase_gain = 0.45 if self.observation_type == "audio" else 0.05
+
+        # initial particle weights are uniform
         self.weights = np.ones(num_particles) / num_particles
 
 
+        # strictness of matching expected and observed notes, used in the midi feature likelihood computation
         self.note_sigma = 0.2
 
-        self.sigma_ms = 0.05
-        self.sigma_mf = 0.30
 
-        self.weight_small = 0.85
-        self.weight_fast = 0.15
+        # sigma value while sampling note tempo from a normal distribution around local tempo
+        self.sigma_ms = 0.1
 
-        self.sigma_onset = 0.15
+        # a certain proportion of particles will sample their note tempo with a wider sigma, to allow for larger tempo deviations.
+        # weight_fast determines the proportion, sigma_mf is the wider sigma value.
+        self.weight_fast = 0.2
+        self.sigma_mf = 0.4
+
+        self.sigma_onset = 0.25
 
         # effective sample threshold
         self.resample_threshold = num_particles / 2
 
-        self.current_position = score_positions[0]
-        self.previous_position = score_positions[0]
+        self.current_position = self.score_positions[0]
+        self.previous_position = self.score_positions[0]
 
+        self.first_score_onset = self.score_positions[0]
         self.input_features = []
 
         self.first_input_found = False
         self.input_index = 0
+
+        self.previous_time = 0.0
 
         self._alignment_path = []
 
@@ -129,7 +146,25 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
             self.num_particles,
         )
 
+        self.sounding_prob_mu = -30.0 if self.observation_type == "audio" else -15.0
+        self.resting_prob_mu = -70.0
+
         self.onset_match_probability = 0.95
+
+        # Loudness calculations from MIDI are not very reliable, so we do not consider them in the likelihood computation.
+        self.feature_weight = 0.70 if self.observation_type == "audio" else 0.80
+        self.onset_weight = 0.20
+        self.loudness_weight = 0.10 if self.observation_type == "audio" else 0.0
+
+        self.last_onset_time = np.full(
+                        self.num_particles,
+                        self.previous_time,
+                        dtype=np.float64,
+                    )
+        
+        self.small_mvt = (notated_tempo/3) * hop_size / 60.0
+        self.large_mvt = (notated_tempo*3) * hop_size / 60.0
+        self.notated_mvt = notated_tempo * hop_size / 60.0
 
     @property
     def warping_path(self):
@@ -137,7 +172,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
 
 
     def is_still_following(self):
-        return self.current_position < self.score_positions[-1]
+        return True
 
 
     @staticmethod
@@ -208,9 +243,93 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         bpm_local = self.log2tempo_to_bpm(local_tempo)
         bpm_note = self.log2tempo_to_bpm(note_tempo)
 
+        # For the particles in bpm_note that are 3 times faster than the local tempo, divide by 2, 
+        # and for the particles that are 3 times slower than the local tempo, multiply by 2. 
+        # This is to prevent the moving average from being skewed by extreme values from the phase gain.
+        bpm_note = np.where(
+            bpm_note > 3 * bpm_local,
+            bpm_note / 2,
+            np.where(
+                bpm_note < bpm_local / 3,
+                bpm_note * 2,
+                bpm_note,
+            ),
+        )
+
         bpm_new = ((n - 1) * bpm_local + bpm_note) / n
 
         return self.bpm_to_log2(bpm_new)
+
+    def phase_error(
+        self,
+        crossed: np.ndarray,
+        curr_idx: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Compute the normalized timing error for particles
+        that crossed a score onset, using the expected interval 
+        from their tempo and the actual time since the last onset.
+
+        Returns
+        -------
+        ndarray
+            Timing error in units of beats, with one value
+            for every particle in ``crossed``.
+        """
+
+        current_time = self.current_perf_time
+
+        onset_idx = curr_idx[crossed]
+
+        phase = np.zeros(
+            len(onset_idx),
+            dtype=np.float64,
+        )
+
+        valid = (
+            (onset_idx > 0)
+            & (onset_idx < len(self.score_positions))
+        )
+
+        if not np.any(valid):
+            return phase
+
+        valid_onset_idx = onset_idx[valid]
+
+        crossed_indices = np.flatnonzero(crossed)
+        valid_particle_indices = crossed_indices[valid]
+
+        delta_beats = (
+            self.score_positions[valid_onset_idx]
+            -
+            self.score_positions[valid_onset_idx - 1]
+        )
+
+        bps = (
+            2.0 ** self.m[valid_particle_indices]
+        ) / 60.0
+
+        expected_interval = (
+            delta_beats
+            / bps
+        )
+
+        actual_interval = (
+            current_time
+            -
+            self.last_onset_time[valid_particle_indices]
+        )
+
+        phase[valid] = (
+            actual_interval
+            -
+            expected_interval
+        ) / (expected_interval * 60)
+
+
+        self.last_onset_time[valid_particle_indices] = current_time
+
+        return phase
     
     
     def is_rest_position(self, beat):
@@ -275,8 +394,18 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
 
         delta_beats = (
             bpm
-            * self.hop_size
+            * (self.current_perf_time - self.previous_time)
             / 60.0
+        )
+
+        delta_beats = np.where(
+            delta_beats > self.large_mvt,
+            self.notated_mvt,
+            np.where(
+                delta_beats < self.small_mvt,
+                self.small_mvt,
+                delta_beats,
+            )
         )
 
         previous = self.x.copy()
@@ -298,16 +427,14 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         Tempo updates occur only if a score onset was crossed.
         """
 
-        onsets = self.score_model.onset_positions
-
         prev_idx = np.searchsorted(
-            onsets,
+            self.score_positions,
             previous_positions,
             side="right",
         )
 
         curr_idx = np.searchsorted(
-            onsets,
+            self.score_positions,
             self.x,
             side="right",
         )
@@ -316,6 +443,13 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
 
         if not np.any(crossed):
             return
+
+        phase = self.phase_error(
+            crossed,
+            curr_idx,
+        )
+
+        self.m[crossed] += self.phase_gain * phase
 
         self.l[crossed] = self.moving_average_tempo(
             self.l[crossed],
@@ -625,13 +759,13 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
 
         ps = self.gaussian(
             loudness,
-            -30,
+            self.sounding_prob_mu,
             8,
         )
 
         pr = self.gaussian(
             loudness,
-            -70,
+            self.resting_prob_mu,
             8,
         )
 
@@ -663,9 +797,6 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
             dtype=np.float64,
         )
 
-        #
-        # Extract common features
-        #
         loudness = observation.loudness
 
         if self.observation_type == "audio":
@@ -683,33 +814,33 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
             beat = self.x[i]
             idx = self.beat_index(beat)
 
-            #
+
             # Feature likelihood
-            #
             pf = self.feature_probability(
                 feature,
                 beat,
                 idx,
             )
 
-            #
             # Onset likelihood
-            #
             po = self.onset_probability_feature(
                 onset,
                 beat,
                 idx,
             )
 
-            #
             # Loudness likelihood
-            #
             pl = self.loudness_probability(
                 loudness,
                 i,
             )
 
-            likelihood[i] = pf * po * pl
+
+            likelihood[i] = np.exp(
+                self.feature_weight * np.log(max(pf, 1e-300))
+                + self.onset_weight * np.log(max(po, 1e-300))
+                + self.loudness_weight * np.log(max(pl, 1e-300))
+            )
 
         self.weights *= likelihood
 
@@ -765,6 +896,27 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         particle filter.
         """
 
+        if self.first_input_found is False:
+            if self.observation_type == "midi":
+                if len(observation.active_notes) == 0:
+                    # no active notes in this frame, skip update
+                    self._alignment_path.append(
+                        (self.current_perf_time, self.current_position)
+                    )
+                    return self.current_position
+                else:
+                    self.first_input_found = True
+            else:
+                if observation.loudness < -60.0:
+                    # no sound in this frame, skip update
+                    self._alignment_path.append(
+                        (self.current_perf_time, self.current_position)
+                    )
+                    return self.current_position
+                else:
+                    self.first_input_found = True
+
+
         self.predict()
 
         self.propagate_sound_state()
@@ -810,6 +962,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         )
 
         self.input_index += 1
+        self.previous_time = perf_time
 
         return beat
 

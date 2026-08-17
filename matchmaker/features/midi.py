@@ -509,6 +509,8 @@ class KorzeniowskiMidiProcessor(PianoRollProcessor):
         # Notes beginning during the current frame.
         self.current_onsets: List[int] = []
 
+        self.velocities: np.ndarray = np.zeros(128, dtype=np.float32)
+
     def __call__(
         self,
         frame: InputMIDIFrame,
@@ -531,17 +533,18 @@ class KorzeniowskiMidiProcessor(PianoRollProcessor):
         # Reset onset list for this frame.
         self.current_onsets = []
 
-        # Update active notes.
+
         for msg, m_time in data:
 
             if msg.type == "note_on" and msg.velocity > 0:
+                # new onset in this frame
+                self.current_onsets.append(msg.note)
+                self.velocities[msg.note] = msg.velocity
 
                 self.active_notes[msg.note] = (
                     msg.velocity,
                     m_time,
                 )
-
-                self.current_onsets.append(msg.note)
 
             elif (
                 msg.type == "note_off"
@@ -549,12 +552,14 @@ class KorzeniowskiMidiProcessor(PianoRollProcessor):
                     msg.type == "note_on"
                     and msg.velocity == 0
                 )
-            ):
+                ):
 
                 self.active_notes.pop(
                     msg.note,
                     None,
                 )
+
+                self.velocities[msg.note] = 0
 
         # Currently sounding pitches.
         active_notes = np.array(
@@ -567,6 +572,17 @@ class KorzeniowskiMidiProcessor(PianoRollProcessor):
             sorted(self.current_onsets),
             dtype=np.int16,
         )
+
+        # Notes that are currently active but have no onset in this frame.
+        continuing_notes = np.array(
+            sorted(
+                set(active_notes)
+                - set(onset_notes)
+            ),
+            dtype=np.int16,
+        )
+
+        self.velocities[continuing_notes] *= 0.95  # decay velocity of continuing notes
 
         observation = KorzeniowskiObservation(
             active_notes=active_notes,
@@ -589,28 +605,26 @@ class KorzeniowskiMidiProcessor(PianoRollProcessor):
             Symbolic loudness.
         """
 
-        #
         # Silence
-        #
         if not self.active_notes:
-            return 0.0
+            return -70.0
 
-        #
         # Extract normalized velocities.
-        #
-        velocities = np.asarray(
-            [velocity for velocity, _ in self.active_notes.values()],
+        velocities = np.array(
+            [self.velocities[note] / 127.0 for note in self.active_notes],
             dtype=np.float32,
-        ) / 127.0
+        )
 
-        #
+
         # Total symbolic energy.
-        #
         loudness = np.sqrt(
             np.sum(
                 velocities ** 2
             )
         )
+
+        # Convert to decibels (dB).
+        loudness = 20.0 * np.log10(loudness)
 
         return float(loudness)
 

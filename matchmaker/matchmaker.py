@@ -476,7 +476,6 @@ class Matchmaker(object):
         elif method == "pfkorz":
             return KorzeniowskiParticleFilter(
                 score_model=ref,
-                score_positions=np.unique(self.score_part.note_array()["onset_beat"]),
                 observation_type="audio",
                 notated_tempo=self.tempo,
                 hop_size=self.hop_length / self.sample_rate,
@@ -561,7 +560,6 @@ class Matchmaker(object):
         elif method == "pfkorz":
             return KorzeniowskiParticleFilter(
                 score_model=ref,
-                score_positions=np.unique(self.score_part.note_array()["onset_beat"]),
                 observation_type="midi",
                 notated_tempo=self.tempo,
                 hop_size=POLLING_PERIOD,
