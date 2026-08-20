@@ -18,7 +18,6 @@ RNG = np.random.RandomState(SEED)
 
 HOP_SIZE = 1.0 / FRAME_RATE
 
-
 class KorzeniowskiParticleFilter(OnlineAlignment):
     """
     Rao-Blackwellised Particle Filter described in
@@ -72,7 +71,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         self.rng = RNG
 
         self.initial_logtempo = np.log2(self.notated_tempo)
-
+        self.init_tempo_sigma = 0.1
 
         # Particle positions (in beats) are initialized to the first score onset.
         self.x = np.full(
@@ -81,10 +80,15 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
             dtype=np.float64,
         )
 
+        self.particle_beat_index = np.zeros(
+            num_particles,
+            dtype=np.int32,
+        )
+
         # Particle note log-tempi are initialized to the notated tempo with some Gaussian noise.
         self.m = self.initial_logtempo + self.rng.normal(
             0.0,
-            0.1,
+            self.init_tempo_sigma,
             self.num_particles,
         )
 
@@ -92,18 +96,14 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         self.l = self.m.copy()
 
         # to adjust tempo according to crossed onsets and expected tempo
-        # midi has a lower phase gain because the note onsets are more reliable than audio onsets
-        # additionally, sustained note frames in midi are identical to each other in midi, 
-        # so the phase gain should be lower to avoid overreacting to these frames
-        self.phase_gain = 0.45 if self.observation_type == "audio" else 0.05
+        self.phase_gain = 0.45
 
         # initial particle weights are uniform
         self.weights = np.ones(num_particles) / num_particles
 
 
-        # strictness of matching expected and observed notes, used in the midi feature likelihood computation
+        # strictness of matching expected and observed notes, used in the midi feature likelihood computation. Lower is stricter.
         self.note_sigma = 0.2
-
 
         # sigma value while sampling note tempo from a normal distribution around local tempo
         self.sigma_ms = 0.1
@@ -243,15 +243,21 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         bpm_local = self.log2tempo_to_bpm(local_tempo)
         bpm_note = self.log2tempo_to_bpm(note_tempo)
 
-        # For the particles in bpm_note that are 3 times faster than the local tempo, divide by 2, 
-        # and for the particles that are 3 times slower than the local tempo, multiply by 2. 
+        # For the particles in bpm_note that are 2 times faster than the notated tempo, snap them just below notated tempo with some Gaussian noise, 
+        # and for the particles that are 2 times slower than the notated tempo, snap them just above notated tempo with some Gaussian noise. 
         # This is to prevent the moving average from being skewed by extreme values from the phase gain.
         bpm_note = np.where(
-            bpm_note > 3 * bpm_local,
-            bpm_note / 2,
+            bpm_note > 2 * self.notated_tempo,
+            self.notated_tempo + self.rng.normal(
+                -5,
+                5,
+            ),
             np.where(
-                bpm_note < bpm_local / 3,
-                bpm_note * 2,
+                bpm_note < self.notated_tempo / 2,
+                self.notated_tempo + self.rng.normal(
+                    5,
+                    5,
+                ),
                 bpm_note,
             ),
         )
@@ -420,6 +426,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
 
         return previous
     
+
     def update_tempi(self, previous_positions):
         """
         Vectorized implementation of Eqs. (8), (10), (12).
@@ -916,6 +923,13 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
                 else:
                     self.first_input_found = True
 
+        if self.observation_type == "midi" and len(observation.active_notes) == 0:
+            if self.is_rest_position(self.current_position):
+                # no active notes in this frame, but we are in a rest position, so we can skip update
+                self._alignment_path.append(
+                    (self.current_perf_time, self.current_position)
+                )
+                return self.current_position
 
         self.predict()
 
@@ -959,6 +973,13 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
             time.time() - t0,
             self.latency_stats,
             self.input_index,
+        )
+
+        print(
+            f"Current Position: {beat:.3f}, ",
+            f"Tempo mean: {self.log2tempo_to_bpm(np.mean(self.m)):.2f} BPM, ",
+            f"Tempo max: {self.log2tempo_to_bpm(np.max(self.m)):.2f} BPM.",
+            f"Tempo min: {self.log2tempo_to_bpm(np.min(self.m)):.2f} BPM."
         )
 
         self.input_index += 1
