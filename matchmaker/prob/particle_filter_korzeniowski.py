@@ -979,7 +979,7 @@ class ParticleFilterKorzeniowski(OnlineAlignment):
         self.input_index += 1
         self.previous_time = perf_time
 
-        return beat
+        return float(beat)
 
 
     def run(
