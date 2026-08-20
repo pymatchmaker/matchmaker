@@ -20,7 +20,7 @@ HOP_SIZE = 1.0 / FRAME_RATE
 
 class KorzeniowskiParticleFilter(OnlineAlignment):
     """
-    Rao-Blackwellised Particle Filter described in
+    Particle Filter described in
 
     Korzeniowski et al.
     "Tracking Rests and Tempo Changes:
@@ -28,16 +28,20 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
 
     ISMIR 2014.
 
-    Hidden sampled variables
-    ------------------------
-    x : beat position
-    m : note tempo (log2 BPM)
-    l : local tempo (log2 BPM)
-
-    Analytically inferred
-    ---------------------
-    o : onset state
-    s : sounding/rest state
+    Parameters
+    ----------
+    score_model : KorzeniowskiScoreModel
+        Score model containing the score representation.
+    observation_type : str
+        Type of observation to use. Must be either "audio" or "midi".
+    notated_tempo : float, optional
+        Notated tempo of the score in BPM. Default is 120.0.
+    hop_size : float, optional
+        Hop size in seconds. Default is 1/FRAME_RATE.
+    queue : RECVQueue, optional
+        Queue to receive observations from. If None, the filter will not use a queue.
+    num_particles : int, optional
+        Number of particles to use in the filter. Default is 1000.
     """
 
     def __init__(
@@ -47,7 +51,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         notated_tempo=120.0,
         hop_size=HOP_SIZE,
         queue: Optional[RECVQueue] = None,
-        num_particles=500,
+        num_particles=1000,
     ):
         super().__init__()
 
@@ -71,6 +75,8 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         self.rng = RNG
 
         self.initial_logtempo = np.log2(self.notated_tempo)
+
+        # Variance of the initial log-tempo distribution.
         self.init_tempo_sigma = 0.1
 
         # Particle positions (in beats) are initialized to the first score onset.
@@ -78,11 +84,6 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
             num_particles,
             self.score_positions[0],
             dtype=np.float64,
-        )
-
-        self.particle_beat_index = np.zeros(
-            num_particles,
-            dtype=np.int32,
         )
 
         # Particle note log-tempi are initialized to the notated tempo with some Gaussian noise.
@@ -113,6 +114,7 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         self.weight_fast = 0.2
         self.sigma_mf = 0.4
 
+        # The spread around a known score onset for which we consider an observed onset to be a match.
         self.sigma_onset = 0.25
 
         # effective sample threshold
@@ -122,7 +124,6 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
         self.previous_position = self.score_positions[0]
 
         self.first_score_onset = self.score_positions[0]
-        self.input_features = []
 
         self.first_input_found = False
         self.input_index = 0
