@@ -976,13 +976,6 @@ class KorzeniowskiParticleFilter(OnlineAlignment):
             self.input_index,
         )
 
-        print(
-            f"Current Position: {beat:.3f}, ",
-            f"Tempo mean: {self.log2tempo_to_bpm(np.mean(self.m)):.2f} BPM, ",
-            f"Tempo max: {self.log2tempo_to_bpm(np.max(self.m)):.2f} BPM.",
-            f"Tempo min: {self.log2tempo_to_bpm(np.min(self.m)):.2f} BPM."
-        )
-
         self.input_index += 1
         self.previous_time = perf_time
 
