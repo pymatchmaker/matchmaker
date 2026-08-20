@@ -18,7 +18,7 @@ RNG = np.random.RandomState(SEED)
 
 HOP_SIZE = 1.0 / FRAME_RATE
 
-class KorzeniowskiParticleFilter(OnlineAlignment):
+class ParticleFilterKorzeniowski(OnlineAlignment):
     """
     Particle Filter described in
 
