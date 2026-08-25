@@ -15,7 +15,6 @@ from partitura.performance import PerformedPart
 from matchmaker import EXAMPLE_MATCH, EXAMPLE_PERFORMANCE, EXAMPLE_SCORE
 from matchmaker.features.midi import (
     PianoRollProcessor,
-    PitchChordProcessor,
     PitchClassPianoRollProcessor,
     PitchProcessor,
     compute_features_from_symbolic,
@@ -110,126 +109,6 @@ class TestPitchProcessor(unittest.TestCase):
                         pitch_obs, _ = out
                         self.assertEqual(len(pitch_obs), 128)
                         self.assertEqual(np.argmax(pitch_obs), non_none_outputs + 60)
-                        non_none_outputs += 1
-
-            self.assertEqual(non_none_outputs, len(note_array))
-
-
-class TestPitchChordProcessor(unittest.TestCase):
-    @patch("sys.stdout", new_callable=StringIO)
-    def test_processor(self, mock_io):
-        note_array = np.empty(
-            13,
-            dtype=[
-                ("pitch", int),
-                ("onset_sec", float),
-                ("duration_sec", float),
-                ("velocity", int),
-                ("id", str),
-            ],
-        )
-        for i, pitch in enumerate(range(60, 73)):
-            note_array[i] = (pitch, i, 0.5, 64, f"n{i}")
-
-        perf = PerformedPart.from_note_array(note_array)
-
-        feature_processor = PitchChordProcessor(
-            piano_range=False,
-            return_pitch_list=False,
-        )
-        feature_processor_pr = PitchChordProcessor(
-            piano_range=True,
-            return_pitch_list=False,
-        )
-        feature_processor_pl = PitchChordProcessor(
-            piano_range=False,
-            return_pitch_list=True,
-        )
-
-        feature_processor_pl_pr = PitchChordProcessor(
-            piano_range=True,
-            return_pitch_list=True,
-        )
-        # For coverage of the reset method, since it does not
-        # do anything in this case.
-        feature_processor.reset()
-        polling_period = 0.01
-
-        # outputs = []
-        for processor in [
-            feature_processor,
-            feature_processor_pr,
-            feature_processor_pl,
-            feature_processor_pl_pr,
-        ]:
-            output = process_midi_offline(
-                perf_info=perf,
-                processor=processor,
-                polling_period=polling_period,
-            )
-
-            non_none_outputs = 0
-            if processor.piano_range and processor.return_pitch_list:
-                for out in output:
-                    if out is not None:
-                        pitch_obs, time_obs = out
-                        self.assertEqual(len(pitch_obs), 1)
-                        self.assertEqual(pitch_obs, non_none_outputs + 60 - 21)
-
-                        self.assertTrue(
-                            np.isclose(
-                                time_obs,
-                                non_none_outputs,
-                                atol=polling_period,
-                            )
-                        )
-                        non_none_outputs += 1
-
-            elif not processor.piano_range and processor.return_pitch_list:
-                for out in output:
-                    if out is not None:
-                        pitch_obs, time_obs = out
-                        self.assertEqual(len(pitch_obs), 1)
-                        self.assertEqual(pitch_obs, non_none_outputs + 60)
-                        self.assertTrue(
-                            np.isclose(
-                                time_obs,
-                                non_none_outputs,
-                                atol=polling_period,
-                            )
-                        )
-                        non_none_outputs += 1
-
-            elif processor.piano_range and not processor.return_pitch_list:
-                for out in output:
-                    if out is not None:
-                        pitch_obs, time_obs = out
-                        self.assertEqual(len(pitch_obs), 88)
-                        self.assertEqual(
-                            np.argmax(pitch_obs), non_none_outputs + 60 - 21
-                        )
-                        self.assertTrue(
-                            np.isclose(
-                                time_obs,
-                                non_none_outputs,
-                                atol=polling_period,
-                            )
-                        )
-                        non_none_outputs += 1
-
-            elif not processor.piano_range and not processor.return_pitch_list:
-                for out in output:
-                    if out is not None:
-                        pitch_obs, time_obs = out
-                        self.assertEqual(len(pitch_obs), 128)
-                        self.assertEqual(np.argmax(pitch_obs), non_none_outputs + 60)
-                        self.assertTrue(
-                            np.isclose(
-                                time_obs,
-                                non_none_outputs,
-                                atol=polling_period,
-                            )
-                        )
                         non_none_outputs += 1
 
             self.assertEqual(non_none_outputs, len(note_array))
@@ -385,14 +264,12 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
             output_length = None
             features_list = [
                 "pitch",
-                "pitch_chord",
                 "pianoroll",
                 "pitch_class_pianoroll",
             ]
 
             feature_kwargs = [
                 dict(piano_range=True),  # PitchProcessor
-                dict(piano_range=True),  # PitchChordProcessor
                 dict(piano_range=True),  # PianoRollProcessor
                 dict(use_velocity=False),  # PitchClassPianoRollProcessor
             ]
@@ -425,7 +302,6 @@ class TestComputeFeaturesFromSymbolic(unittest.TestCase):
             output_length = None
             features_list = [
                 "pitch",
-                "pitch_chord",
                 "pianoroll",
                 "pitch_class_pianoroll",
             ]

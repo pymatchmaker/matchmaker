@@ -288,36 +288,73 @@ class OuterProductHMM(OnlineAlignment):
         self.current_index = 0
         self.input_index = 0
         self._prev_perf_time = None
+        self._is_continuation = False
         self._alignment_path = []
         self._current_chord = np.zeros(88, dtype=int)
         self.patience = patience
         self.state_probabilities = np.zeros(self.n_states)
         self.state_probabilities[0] = 1.0
+        self._pre_chord_probs = self.state_probabilities.copy()
         self.is_first_observation = True
 
     def is_still_following(self) -> bool:
-        # Viterbi can lock onto the final state mid-piece, but we still
-        # want to consume remaining events. Termination is handled by the
-        # patience counter in run() and by STREAM_END.
+        # Termination is only handled by the patience counter
+        # in run() and by STREAM_END.
         return True
 
     def __call__(
-        self, observation: tuple[np.ndarray, float], *args, **kwargs
-    ) -> Optional[float]:
-        # Chord-continuation case: merge pitches into the pending chord and
-        # signal `None` to run() so the patience counter stays put. We don't
-        # call super() because no state advance / path append should happen.
-        pitch_obs, perf_time = observation
-        ioi = (
-            perf_time - self._prev_perf_time
-            if self._prev_perf_time is not None
-            else 0.0
-        )
+        self, observation: np.ndarray, perf_time: float, *args, **kwargs
+    ) -> float:
+        """One Viterbi update per input note, accumulating chord notes.
+
+        Notation:
+          * ``V(P, obs)`` = one forward/Viterbi step (``self.viterbi_step``):
+            advance the state distribution ``P`` by a single observation ``obs``.
+          * ``P0`` = the state distribution captured just before a chord starts.
+
+        A chord's notes reach us as separate observations a few ms apart.
+        Following Nakamura et al. (Eq. 6: notes with ``t_m - t_{m-1} < dt_limit``
+        stay on the same state via a self transition), a note within
+        IOI_THRESHOLD of the previous one is folded into the chord observation
+        and the step is redone *from P0* -- one transition per chord, emission
+        over all chord pitches.
+
+        Timeline example for a C-E-G chord, and the next chord
+        (``dt`` = time since the chord's first note)::
+
+            dt (ms):    0           +8           +15             +250
+            input:      C           E            G               next note
+                        new chord   continuation continuation    (gap > 35ms)
+            chord obs:  {C}         {C,E}        {C,E,G}          reset -> {..}
+            step:     V(P0,{C})   V(P0,{C,E})  V(P0,{C,E,G})    V(state, ..)
+                      └────── all redone from the SAME P0 ──────┘
+                             -> final = V(P0, {C,E,G}) (one transition for one chord)
+
+        Edge case: if genuinely separate notes fall < 35 ms apart (a fast run,
+        tremolo, or rolled chord) they get merged into one chord observation --
+        a known limitation shared with the paper's self-transition rule.
+        """
+        if (
+            self._prev_perf_time is not None
+            and (perf_time - self._prev_perf_time) < IOI_THRESHOLD
+        ):
+            # Accumulate this note into the chord observation and re-run the
+            # Viterbi step from P0 (the pre-chord state distribution).
+            self._prev_perf_time = perf_time
+            self._is_continuation = True
+            self._current_chord = np.maximum(self._current_chord, observation)
+            self.state_probabilities = self.viterbi_step(
+                self._pre_chord_probs, self._current_chord
+            )
+            self.current_index = int(np.argmax(self.state_probabilities))
+            self.current_position = self.get_current_position()
+            return self.current_position
+
+        # New chord: remember the pre-chord state P0, then take the normal step.
+        self._is_continuation = False
         self._prev_perf_time = perf_time
-        if ioi < IOI_THRESHOLD:
-            self._current_chord = np.maximum(self._current_chord, pitch_obs)
-            return None
-        return super().__call__(observation)
+        self._pre_chord_probs = self.state_probabilities
+        return super().__call__(observation, perf_time)
 
     def step(self, features) -> None:
         self._current_chord = features
@@ -430,21 +467,20 @@ class OuterProductHMM(OnlineAlignment):
             if queue_input is STREAM_END:
                 break
             if queue_input is not None:
-                beat = self(queue_input)
-                if beat is None:
-                    # Chord continuation: no state advance, skip patience.
+                beat = self(*queue_input)
+                yield beat
+
+                if self._is_continuation:  # Within chord: no advance, skip patience.
                     continue
                 if self.current_index == prev_state:
-                    if same_state_counter < self.patience:
-                        same_state_counter += 1
-                    else:
+                    if same_state_counter >= self.patience:
                         break
+                    same_state_counter += 1
                 else:
                     same_state_counter = 0
 
                 if verbose:
                     pbar.update(int(self.current_index))
-                yield beat
 
         if verbose:
             pbar.finish()

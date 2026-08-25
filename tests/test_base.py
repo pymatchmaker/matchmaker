@@ -32,8 +32,8 @@ class TestOnlineAlignmentContract(unittest.TestCase):
         follower = OnlineAlignment(
             reference_features=ref, score_positions=score_positions
         )
-        observation = (RNG.rand(4).astype(np.float32), 0.0)
-        self.assertRaises(NotImplementedError, follower, observation)
+        features, perf_time = RNG.rand(4).astype(np.float32), 0.0
+        self.assertRaises(NotImplementedError, follower, features, perf_time)
 
     def test_call_returns_float_beat(self):
         """__call__ returns the current score beat as a Python float."""
@@ -41,22 +41,22 @@ class TestOnlineAlignmentContract(unittest.TestCase):
         # current_position starts at 0 by default; step() advances by 1.
         # Subclass starts with current_position = 0, then __call__ does step()
         # → current_position = 1. score_positions[1] = 0.5.
-        beat = tr((np.zeros(4, dtype=np.float32), 0.0))
+        beat = tr(np.zeros(4, dtype=np.float32), 0.0)
         self.assertIsInstance(beat, float)
         self.assertAlmostEqual(beat, 0.5)
 
     def test_alignment_path_shape_and_units(self):
-        """alignment_path is (2, T) with row 0 score beat, row 1 perf time (sec)."""
+        """alignment_path is (2, T) with row 0 perf time (sec), row 1 score beat."""
         tr = _make_dummy()
         for k in range(3):
-            tr((np.zeros(4, dtype=np.float32), float(k) * 0.1))
+            tr(np.zeros(4, dtype=np.float32), float(k) * 0.1)
         wp = tr.alignment_path
         self.assertEqual(wp.shape, (2, 3))
         self.assertEqual(wp.dtype, np.float64)
-        # row 0: score beats from score_positions
-        np.testing.assert_allclose(wp[0], [0.5, 1.0, 1.5])
-        # row 1: perf times we passed in
-        np.testing.assert_allclose(wp[1], [0.0, 0.1, 0.2], atol=1e-6)
+        # row 0: perf times we passed in
+        np.testing.assert_allclose(wp[0], [0.0, 0.1, 0.2], atol=1e-6)
+        # row 1: score beats from score_positions
+        np.testing.assert_allclose(wp[1], [0.5, 1.0, 1.5])
 
     def test_alignment_path_empty(self):
         """alignment_path returns (2, 0) before any step."""
@@ -69,9 +69,9 @@ class TestOnlineAlignmentContract(unittest.TestCase):
         tr = _make_dummy(n_positions=3)
         # current_position starts at 0; n_positions = 3 → still following until 2.
         self.assertTrue(tr.is_still_following())
-        tr((np.zeros(4, dtype=np.float32), 0.0))  # cp = 1
+        tr(np.zeros(4, dtype=np.float32), 0.0)  # cp = 1
         self.assertTrue(tr.is_still_following())
-        tr((np.zeros(4, dtype=np.float32), 0.1))  # cp = 2 (= len - 1)
+        tr(np.zeros(4, dtype=np.float32), 0.1)  # cp = 2 (= len - 1)
         self.assertFalse(tr.is_still_following())
 
     def test_run_yields_float_beats(self):
@@ -97,7 +97,7 @@ class TestOnlineAlignmentContract(unittest.TestCase):
     def test_current_perf_time_exposed(self):
         """The latest observation's perf time is stored on the instance."""
         tr = _make_dummy()
-        tr((np.zeros(4, dtype=np.float32), 1.234))
+        tr(np.zeros(4, dtype=np.float32), 1.234)
         self.assertEqual(tr.current_perf_time, 1.234)
 
 

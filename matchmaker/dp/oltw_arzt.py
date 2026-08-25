@@ -166,10 +166,10 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
         }
         self._init_distance_func(distance_func)
 
-    def __call__(self, observation: Tuple[Any, float]) -> float:
+    def __call__(self, observation: Any, perf_time: float) -> float:
         t0 = time.time()
-        self.input_features.append(observation[0])
-        beat = super().__call__(observation)
+        self.input_features.append(observation)
+        beat = super().__call__(observation, perf_time)
         self.latency_stats = set_latency_stats(
             time.time() - t0, self.latency_stats, self.input_index
         )

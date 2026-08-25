@@ -8,6 +8,7 @@ import numpy as np
 import partitura
 from partitura.io.exportmidi import get_ppq
 from partitura.score import Part, merge_parts
+from partitura.utils.music import performance_notearray_from_score_notearray
 
 from matchmaker.dp import (
     OnlineTimeWarpingArztEvent,
@@ -15,7 +16,6 @@ from matchmaker.dp import (
     OnlineTimeWarpingDixonEvent,
     OnlineTimeWarpingDixonFrame,
 )
-from matchmaker.external import OnlineParangonarAlignment
 from matchmaker.features.audio import (
     FRAME_RATE,
     SAMPLE_RATE,
@@ -28,30 +28,23 @@ from matchmaker.features.audio import (
     RawSpectrumProcessor,
 )
 from matchmaker.features.midi import (
-    CHORD_THRESHOLD,
-    OnsetPianoRollProcessor,
+    ChordOnsetProcessor,
     PianoRollProcessor,
-    PitchChordProcessor,
     PitchClassPianoRollProcessor,
     PitchProcessor,
     onset_pianoroll,
 )
+from matchmaker.io.midi import POLLING_PERIOD
 from matchmaker.prob import AudioOuterProductHMM, OuterProductHMM, PitchHMM, PitchIOIHMM
+from matchmaker.prob.particle_filter import ParticleFilter
 from matchmaker.prob.skf import SwitchingKalmanFilterFollower
-from matchmaker.utils.eval import (
-    TOLERANCES_IN_BEATS,
-    TOLERANCES_IN_MILLISECONDS,
-    evaluate_alignment,
-    transfer_positions,
-)
 from matchmaker.utils.misc import (
-    adjust_tempo_for_performance_file,
     generate_score_audio,
     get_tempo_from_score,
     is_audio_file,
     is_midi_file,
-    save_debug_results,
 )
+from matchmaker.utils.symbolic import framed_midi_messages_from_performance
 from matchmaker.utils.tempo_models import KalmanTempoModel
 
 PathLike = Union[str, bytes, os.PathLike]
@@ -62,13 +55,13 @@ MIDI_FRAME_RATE = 1  # dummy value for MIDI input
 OLTW_METHODS = {"arzt", "dixon"}
 PARANGONAR_METHODS = {"SLT_OLTW", "SL_OLTW", "OTM", "OPTM"}
 AVAILABLE_METHODS = {
-    "audio": sorted(OLTW_METHODS) + ["outerhmm", "skf"],
+    "audio": sorted(OLTW_METHODS) + ["outerhmm", "skf", "pf"],
     "midi": sorted(OLTW_METHODS)
-    + ["hmm", "pthmm", "outerhmm"]
+    + ["hmm", "pthmm", "outerhmm", "pf"]
     + sorted(PARANGONAR_METHODS),
 }
 DEFAULT_METHOD = {"audio": "arzt", "midi": "pthmm"}
-DEFAULT_PROCESSOR = {"audio": "chroma", "midi": "pitch_chord"}
+DEFAULT_PROCESSOR = {"audio": "chroma", "midi": "pitch"}
 DEFAULT_KWARGS = {
     "audio": {
         "arzt": {"window_size": 10, "start_window_size": 0.1, "step_size": 3},
@@ -85,31 +78,52 @@ DEFAULT_KWARGS = {
             "hop_length": 128,
             "n_fft": 512,
         },
+        "pf": {
+            "processor": "chroma",
+            "sample_rate": int(SAMPLE_RATE / 4),
+            "hop_length": int(SAMPLE_RATE / 100),
+            "n_fft": int(
+                int(SAMPLE_RATE / 4) / 21.533203125
+            ),  # converts to closest power of 2 for a 46ms window (as proposed by Duan et al.) for default sample rates.
+            "frame_rate": 100,
+            "num_particles": 1000,
+        },
     },
     "midi": {
         "arzt": {
-            "processor": "pianoroll",
+            "processor": "chord_onset",
             "piano_range": True,
+            "polling_period": 0.001,
             "window_size": 2,
             "start_window_size": 2,
             "step_size": 5,
         },
         "dixon": {
-            "processor": "pianoroll",
+            "processor": "chord_onset",
             "piano_range": True,
+            "polling_period": 0.001,
             "window_size": 0.3,
         },
         "hmm": {
-            "processor": "pitch_chord",
+            "processor": "pitch",
             "tempo_model": KalmanTempoModel,
             "piano_range": True,
         },
-        "pthmm": {"processor": "pitch_chord", "piano_range": True},
-        "outerhmm": {"processor": "pitch_chord", "piano_range": True},
-        "SLT_OLTW": {"processor": "pitch_chord", "piano_range": True},
-        "SL_OLTW": {"processor": "pitch_chord", "piano_range": True},
-        "OTM": {"processor": "pitch_chord", "piano_range": True},
-        "OPTM": {"processor": "pitch_chord", "piano_range": True},
+        "pf": {
+            "processor": "pitchclass",
+            "piano_range": True,
+            "num_particles": 1000,
+        },
+        "pthmm": {"processor": "pitch", "piano_range": True},
+        "outerhmm": {
+            "processor": "pitch",
+            "piano_range": True,
+            "polling_period": 0.001,
+        },
+        "SLT_OLTW": {"processor": "pitch", "piano_range": True},
+        "SL_OLTW": {"processor": "pitch", "piano_range": True},
+        "OTM": {"processor": "pitch", "piano_range": True},
+        "OPTM": {"processor": "pitch", "piano_range": True},
     },
 }
 
@@ -121,24 +135,26 @@ class Matchmaker(object):
     Parameters
     ----------
     score_file : Union[str, bytes, os.PathLike]
-        Path to the score file
+        Path to the score file.
     performance_file : Union[str, bytes, os.PathLike, None]
         Path to the performance file. If None, live input is used.
     input_type : str
         Type of input to use: ``"audio"`` or ``"midi"``.
     method : str
         Score following method to use.
-    processor : str
-        Feature processor type. Overrides the value in ``kwargs``.
+    stream : Stream, optional
+        Custom input stream (e.g. ``AudioStream`` / ``MidiStream`` or a
+        user subclass). If None, one is built from ``method`` defaults.
+    processor : str, optional
+        Registered processor name (looked up in the built-in processor
+        registry, overrides ``kwargs["processor"]``). If None, defaults
+        are used based on ``method``.
     device_name_or_index : Union[str, int]
         Name or index of the audio/MIDI device. Ignored if ``performance_file``
         is given.
     tempo : float, optional
         Tempo in BPM. If None, reads from score; if score has no tempo marking,
         defaults to 120 BPM.
-    auto_adjust_tempo : bool (default: False)
-        If True and performance_file is provided, adjusts tempo based on
-        performance audio analysis.
     wait : bool (default: False)
         Offline mode only. If True, simulates real-time playback speed.
     unfold_score : bool (default: True)
@@ -159,17 +175,23 @@ class Matchmaker(object):
 
         **midi keys**
 
-        - ``processor`` (str): Feature type. Default: ``"pitch_chord"``.
-          Choices: ``"pitch_chord"``, ``"pitch"``, ``"pianoroll"``,
+        - ``processor`` (str): Feature type. Default: ``"pitch"``.
+          Choices: ``"pitch"``, ``"pianoroll"``, ``"chord_onset"``,
           ``"pitchclass"``.
         - ``piano_range`` (bool): Restrict pitch to 88-key piano range
           (MIDI 21-108). Default: True.
         - ``polling_period`` (float or None): Window size in seconds for
-          frame-based MIDI accumulation. ``None`` = event-based (default).
-          When set, prefer ``"pitch"`` or ``"pianoroll"`` over
-          ``"pitch_chord"``: chord buffering is event-time semantics and
-          does not compose cleanly with fixed-window frames.
+          frame-based MIDI accumulation. ``None`` = event-based (one note
+          per frame). When set, all note-ons within each window are emitted
+          as one chord observation.
 
+    Notes
+    -----
+    ``Matchmaker`` is a convenience class for the common case of running a
+    registered method (one of ``AVAILABLE_METHODS``). For full control —
+    e.g. a novel score follower, a custom stream, or audio-to-audio
+    alignment without a score — compose ``Stream`` + ``Processor`` +
+    ``OnlineAlignment`` directly. See ``HOW_TO_MAKE_CUSTOM_SCORE_FOLLOWERS.md``.
     """
 
     def __init__(
@@ -183,7 +205,6 @@ class Matchmaker(object):
         processor: str = None,
         device_name_or_index: Union[str, int] = None,
         tempo: Optional[float] = None,
-        auto_adjust_tempo: bool = False,
         wait: bool = False,
         unfold_score=True,
         kwargs=None,
@@ -218,10 +239,12 @@ class Matchmaker(object):
             if kwargs is not None
             else DEFAULT_KWARGS[self.input_type].get(self.method, {})
         )
-        self.auto_adjust_tempo = auto_adjust_tempo
 
         if input_type == "midi":
-            self.polling_period = self.config.pop("polling_period", None)
+            # outerhmm uses event-based (single-message) mode; everything else
+            # defaults to MidiStream's POLLING_PERIOD (0.01s windowed).
+            default_polling = None if method == "outerhmm" else POLLING_PERIOD
+            self.polling_period = self.config.pop("polling_period", default_polling)
             self.frame_rate = MIDI_FRAME_RATE
         else:
             # Audio: hop_length (if given) is primary; else derive from frame_rate.
@@ -265,11 +288,9 @@ class Matchmaker(object):
         except Exception as e:
             raise ValueError(f"Invalid score file: {e}")
 
-        # Set tempo: user-provided > adjust_tempo (always 120) > score marking > default (120 BPM)
+        # Set tempo: user-provided > score marking > default (120 BPM)
         if tempo is not None:
             self.tempo = float(tempo)
-        elif auto_adjust_tempo:
-            self.tempo = DEFAULT_TEMPO
         else:
             score_tempo = get_tempo_from_score(self.score_part, self.score_file)
             self.tempo = score_tempo if score_tempo is not None else DEFAULT_TEMPO
@@ -296,6 +317,8 @@ class Matchmaker(object):
     def _build_processor(self, method, processor_type):
         if self.input_type == "audio":
             audio_kw = dict(sample_rate=self.sample_rate, hop_length=self.hop_length)
+            if method == "pf":
+                audio_kw["n_fft"] = self.config.get("n_fft", 1024)
             AUDIO_PROCESSORS = {
                 "chroma": lambda: ChromagramProcessor(**audio_kw),
                 "mfcc": lambda: MFCCProcessor(**audio_kw),
@@ -313,24 +336,11 @@ class Matchmaker(object):
                 return AUDIO_PROCESSORS[processor_type]()
             raise ValueError(f"Invalid feature type '{processor_type}'")
 
-        # MIDI OLTW needs onset-level pianoroll for event-based processing
-        if method in OLTW_METHODS:
-            return OnsetPianoRollProcessor(
-                piano_range=self.config.get("piano_range", True),
-            )
-
-        # Processor choice by mode:
-        #  - polling_period=None (single-message, default): PitchChordProcessor
-        #    groups simultaneous notes into chord observations.
-        #  - polling_period set (windowed): use PitchProcessor or PianoRollProcessor.
-        #    PitchChordProcessor's chord buffering does not interact well with
-        #    fixed-window frames and may drop observations.
+        # All MIDI processors are stateless aggregators over their input frame.
+        # Time-based grouping (e.g., chords) is the stream's job: set
+        # ``polling_period`` on ``MidiStream`` to bin events. Cross-frame
+        # chord-merging, if needed, should be inside the tracker class.
         MIDI_PROCESSORS = {
-            "pitch_chord": lambda: PitchChordProcessor(
-                piano_range=self.config["piano_range"],
-                return_pitch_list=(method == "hmm"),
-                chord_threshold=CHORD_THRESHOLD,
-            ),
             "pitch": lambda: PitchProcessor(
                 piano_range=self.config["piano_range"],
                 return_pitch_list=(method == "hmm"),
@@ -338,6 +348,9 @@ class Matchmaker(object):
             "pitchclass": lambda: PitchClassPianoRollProcessor(),
             "pianoroll": lambda: PianoRollProcessor(
                 piano_range=self.config["piano_range"],
+            ),
+            "chord_onset": lambda: ChordOnsetProcessor(
+                piano_range=self.config.get("piano_range", True),
             ),
         }
         if processor_type in MIDI_PROCESSORS:
@@ -417,6 +430,18 @@ class Matchmaker(object):
                 n_fft=self.config.get("n_fft", 512),
                 hop_length=self.hop_length,
             )
+        elif method == "pf":
+            return ParticleFilter(
+                reference_features=ref,
+                score_positions=score_positions,
+                score_boundaries=self._get_score_onsets_and_offsets_in_beats(
+                    self.score_part, score_positions
+                ),
+                notated_tempo=self.tempo,
+                hop_size=self.hop_length / self.sample_rate,
+                queue=queue,
+                num_particles=self.config.get("num_particles", 1000),
+            )
         raise ValueError(f"No audio follower for method '{method}'")
 
     def _build_symbolic_follower(self, method):
@@ -469,7 +494,22 @@ class Matchmaker(object):
                 queue=queue,
                 **self.config,
             )
+        elif method == "pf":
+            return ParticleFilter(
+                reference_features=ref,
+                score_positions=np.unique(self.score_part.note_array()["onset_beat"]),
+                score_boundaries=self._get_score_onsets_and_offsets_in_beats(
+                    self.score_part,
+                    np.unique(self.score_part.note_array()["onset_beat"]),
+                ),
+                notated_tempo=self.tempo,
+                hop_size=POLLING_PERIOD,
+                queue=queue,
+                num_particles=self.config.get("num_particles", 1000),
+            )
         elif method in PARANGONAR_METHODS:
+            from matchmaker.external import OnlineParangonarAlignment
+
             sna = self.score_part.note_array(include_grace_notes=True)
             return OnlineParangonarAlignment(
                 reference_features=sna,
@@ -482,25 +522,37 @@ class Matchmaker(object):
     def _wp_perf_to_seconds(self, wp_perf):
         """Convert alignment path performance axis to absolute seconds.
 
-        All trackers now store absolute perf time in alignment_path[1].
+        alignment_path[0] already holds absolute perf seconds, so this is a pass-through.
         """
         return wp_perf
 
     def preprocess_score(self):
         """Extract reference features from the score."""
-        if (
-            self.auto_adjust_tempo or self.method == "skf"
-        ) and self.performance_file is not None:
-            self.tempo = adjust_tempo_for_performance_file(
-                self.score_part, self.performance_file, self.tempo
-            )
-
-        if self.input_type == "audio" and self.method in OLTW_METHODS:
+        if self.input_type == "audio" and self.method in sorted(OLTW_METHODS) + ["pf"]:
             score_audio = generate_score_audio(
                 self.score_part, self.tempo, self.sample_rate
             ).astype(np.float32)
             features, _ = self.processor((score_audio, 0.0))
             self.processor.reset()
+            return features
+
+        if self.input_type == "midi" and self.method == "pf":
+            performed_notearray = performance_notearray_from_score_notearray(
+                self.score_part.note_array(),
+                bpm=self.tempo,
+            )
+
+            frames_array, frame_times = framed_midi_messages_from_performance(
+                performed_notearray,
+                polling_period=self.polling_period,
+            )
+            score_pitchclass_pianoroll_processor = PitchClassPianoRollProcessor()
+            features = []
+            for frame, frame_time in zip(frames_array, frame_times):
+                feat, _ = score_pitchclass_pianoroll_processor((frame, frame_time))
+                features.append(feat)
+
+            features = np.array(features)
             return features
 
         return self.score_part.note_array()
@@ -517,6 +569,46 @@ class Matchmaker(object):
         return np.array(
             [self._convert_frame_to_beat(i) for i in range(n_ref)],
         )
+
+    def _get_score_onsets_and_offsets_in_beats(
+        self, score_part: Part, score_positions: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Get the beat positions of note onsets and offsets in the score.
+
+        Parameters
+        ----------
+        score_part : Part
+            Partitura Part object representing the score
+
+        Returns
+        -------
+        np.ndarray
+            Array of beat positions corresponding to note onsets and offsets
+        """
+        note_array = score_part.note_array()
+        # add a column for offsets, which is onset_beat + duration_beat
+        note_array = np.lib.recfunctions.append_fields(
+            note_array,
+            "offset_beat",
+            note_array["onset_beat"] + note_array["duration_beat"],
+            usemask=False,
+        )
+        score_boundaries = np.unique(
+            np.concatenate((note_array["onset_beat"], note_array["offset_beat"]))
+        )
+
+        # for every entry in score_boundaries, find the highest beat in state_space that is smaller than or equal to it,
+        # and replace the entry with that beat (to ensure boundaries are aligned with score frames)
+        score_boundaries = np.array(
+            [
+                score_positions[
+                    np.searchsorted(score_positions, boundary, side="right") - 1
+                ]
+                for boundary in score_boundaries
+            ]
+        )
+        return score_boundaries
 
     def build_score_annotations(
         self,
@@ -589,119 +681,6 @@ class Matchmaker(object):
             ),
         }
 
-    def run_evaluation(
-        self,
-        perf_annotations: Union[PathLike, np.ndarray],
-        level: str = "note",
-        tolerances: list = None,
-        musical_beat: bool = False,
-        debug: bool = False,
-        save_dir: PathLike = None,
-        run_name: str = None,
-        domain: str = "score",
-        plot_dist_matrix: bool = True,
-    ) -> dict:
-        """
-        Evaluate the score following process.
-
-        When domain="score" (default), returns beat-based metrics as primary
-        and ms-based metrics under "ms" key. When domain="performance",
-        returns ms-based metrics only (legacy behavior).
-
-        Parameters
-        ----------
-        perf_annotations : PathLike or np.ndarray
-            Path to the performance annotations file or numpy array of onset times (seconds).
-        level : str
-            Annotation level: "beat" or "note"
-        tolerances : list or None
-            Tolerances for evaluation. If None, uses default for the domain.
-        musical_beat : bool
-            Whether to use musical beat
-        debug : bool
-            Whether to save debug outputs
-        domain : str
-            "score" (default, beat-based primary) or "performance" (ms-based, legacy)
-
-        Returns
-        -------
-        dict
-            Evaluation results. If domain="score", includes both beat and ms metrics.
-        """
-        if tolerances is None:
-            tolerances = (
-                TOLERANCES_IN_BEATS if domain == "score" else TOLERANCES_IN_MILLISECONDS
-            )
-        if not self._has_run:
-            raise ValueError("Must call run() before evaluation")
-
-        if isinstance(perf_annotations, np.ndarray):
-            perf_annots = perf_annotations
-        else:
-            perf_annots = np.loadtxt(fname=perf_annotations, delimiter="\t", usecols=0)
-
-        wp = self.score_follower.alignment_path
-        wp_score = wp[0].astype(float)
-        wp_perf_sec = self._wp_perf_to_seconds(wp[1].astype(float))
-
-        score_annots_beats = self.build_score_annotations(
-            level, musical_beat, return_type="beats"
-        )
-        min_length = min(len(score_annots_beats), len(perf_annots))
-        score_annots_beats = score_annots_beats[:min_length]
-        perf_annots = perf_annots[:min_length]
-
-        eval_results = evaluate_alignment(
-            wp_score,
-            wp_perf_sec,
-            score_annots_beats,
-            perf_annots,
-            beat_tolerances=tolerances if domain == "score" else TOLERANCES_IN_BEATS,
-            ms_tolerances=TOLERANCES_IN_MILLISECONDS,
-        )
-
-        # Real-Time Factor (domain-independent)
-        if self.alignment_duration is not None:
-            finite_perf = perf_annots[np.isfinite(perf_annots)]
-            if len(finite_perf) > 0:
-                perf_duration = float(np.max(finite_perf) - np.min(finite_perf))
-                if perf_duration > 0:
-                    eval_results["rtf"] = float(
-                        f"{self.alignment_duration / perf_duration:.4f}"
-                    )
-
-        if self.input_type == "audio":
-            latency_results = self.get_latency_stats()
-            eval_results.update(latency_results)
-
-        if debug and save_dir is not None:
-            wp_sec = np.array([wp_score, wp_perf_sec])
-            sf = self.score_follower
-            save_debug_results(
-                alignment_path=wp_sec,
-                score_annots=score_annots_beats,
-                perf_annots=perf_annots,
-                perf_annots_predicted=transfer_positions(
-                    wp_sec,
-                    score_annots_beats,
-                    frame_rate=1,
-                    domain="performance",
-                ),
-                eval_results=eval_results,
-                frame_rate=self.frame_rate,
-                save_dir=save_dir,
-                run_name=run_name or "results",
-                score_positions=sf.score_positions,
-                ref_features=sf.reference_features if plot_dist_matrix else None,
-                input_features=(
-                    getattr(sf, "input_features", None) if plot_dist_matrix else None
-                ),
-                distance_func=getattr(sf, "distance_func", None),
-                ref_frame_to_beat=getattr(sf, "_ref_frame_to_beat", None),
-            )
-
-        return eval_results
-
     def run(self, verbose: bool = True):
         """
         Run the score following process.
@@ -714,7 +693,7 @@ class Matchmaker(object):
         Returns
         -------
         np.ndarray
-            Alignment path (2, T): row 0 score beat, row 1 perf time (sec).
+            Alignment path (2, T): row 0 perf time (sec), row 1 score beat.
         """
         with self.stream:
             self.stream.stream_start.wait()
@@ -724,4 +703,4 @@ class Matchmaker(object):
         self.alignment_duration = time.time() - t0
 
         self._has_run = True
-        return self.score_follower.alignment_path
+        return self.score_follower._alignment_path

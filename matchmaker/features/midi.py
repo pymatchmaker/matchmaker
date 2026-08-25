@@ -24,20 +24,49 @@ CHORD_THRESHOLD: float = 0.035  # seconds; matches IOI_THRESHOLD in outer_produc
 
 
 class PitchProcessor(Processor):
-    """
-    A class to process pitch information from MIDI input.
+    """Aggregate ``note_on`` events in a MIDI frame into a pitch observation.
+
+    All concurrent ``note_on`` events present in the input frame are merged
+    into a single observation (i.e. a frame containing a chord emits one
+    observation covering all chord pitches). Frame-level time grouping is
+    the ``MidiStream``'s responsibility via ``polling_period``; this
+    processor itself is stateless.
 
     Parameters
     ----------
-    piano_range : bool
-        If True, the pitch range will be limited to the piano range (21-108).
+    piano_range : bool, default False
+        If True, restrict pitch range to the 88-key piano (MIDI 21-108).
+        Otherwise use the full 128-pitch range.
+    return_pitch_list : bool, default False
+        Output format selector (see "Returns" for shapes).
+        - False: one-hot binary pianoroll vector. Use this for observation
+          models that expect Bernoulli-style binary observations (e.g.
+          ``BernoulliPitchObservationModel`` used by ``PitchHMM`` /
+          ``OuterProductHMM``).
+        - True: 1-D array of MIDI pitch indices. Use this for observation
+          models that index into pitch profiles by pitch value (e.g.
+          ``ACCPitchIOIObservationModel`` used by ``PitchIOIHMM``).
 
-    return_pitch_list: bool
-        If True, it will return an array of MIDI pitch values, instead of
-        a "piano roll" slice.
+    Returns
+    -------
+    None if the frame has no note_on events. Otherwise a tuple
+    ``(pitch_obs, f_time)`` where:
+        - ``pitch_obs``: pitch observation (see ``return_pitch_list``).
+          * If ``return_pitch_list=False``: ``np.ndarray`` of shape
+            ``(88,)`` when ``piano_range=True`` else ``(128,)``, binary
+            (0/1, float32). E.g. chord (C4, E4, G4) =
+            ``[..., 1 at 60, ..., 1 at 64, ..., 1 at 67, ...]`` (or the
+            shifted piano-range equivalent).
+          * If ``return_pitch_list=True``: ``np.ndarray`` of shape
+            ``(n_notes,)`` with MIDI pitch indices (float32). E.g. chord
+            (C4, E4, G4) with ``piano_range=False`` = ``[60., 64., 67.]``,
+            and with ``piano_range=True`` = ``[39., 43., 46.]`` (=
+            pitch - 21).
+        - ``f_time``: frame timestamp from the stream (window-center
+          time in windowed mode, message arrival time in single-message
+          mode).
     """
 
-    prev_time: float
     piano_range: bool
 
     def __init__(
@@ -63,22 +92,25 @@ class PitchProcessor(Processor):
 
         # TODO: Replace the for loop with list comprehension
         pitch_obs_list = []
+        note_times = []
 
-        for msg, _ in data:
+        for msg, m_time in data:
             if (
                 getattr(msg, "type", "other") == "note_on"
                 and getattr(msg, "velocity", 0) > 0
             ):
                 pitch_obs[msg.note] = 1
                 pitch_obs_list.append(msg.note - self.piano_shift)
+                note_times.append(m_time)
 
         if pitch_obs.sum() > 0:
             if self.piano_range:
                 pitch_obs = pitch_obs[21:109]
 
+            obs_time = min(note_times)
             if self.return_pitch_list:
-                return np.array(pitch_obs_list, dtype=np.float32), f_time
-            return pitch_obs, f_time
+                return np.array(pitch_obs_list, dtype=np.float32), obs_time
+            return pitch_obs, obs_time
         else:
             return None
 
@@ -86,113 +118,46 @@ class PitchProcessor(Processor):
         pass
 
 
-class PitchChordProcessor(Processor):
-    """
-    A class to process pitch and IOI information from MIDI files
-
-    Parameters
-    ----------
-    piano_range : bool
-        If True, the pitch range will be limited to the piano range (21-108).
-
-    return_pitch_list: bool
-        If True, it will return an array of MIDI pitch values, instead of
-        a "piano roll" slice.
-
-    chord_threshold : float
-        Maximum gap (seconds) between note-ons to be considered part of
-        the same chord. Notes within this gap are accumulated and flushed
-        together. Set to 0 to disable chord grouping.
-    """
-
-    prev_time: Optional[float]
-    piano_range: bool
-
-    def __init__(
-        self,
-        piano_range: bool = False,
-        return_pitch_list: bool = False,
-        chord_threshold: float = CHORD_THRESHOLD,
-    ) -> None:
-        super().__init__()
-        self.piano_range = piano_range
-        self.return_pitch_list = return_pitch_list
-        self.piano_shift = 21 if piano_range else 0
-        self.chord_threshold = chord_threshold
-        self._pending_pitch = np.zeros(128, dtype=np.float32)
-        self._pending_list: List[int] = []
-        self._pending_time: Optional[float] = None
-
-    def _flush(self) -> Tuple[NDArrayFloat, float]:
-        chord_onset = self._pending_time
-
-        if self.return_pitch_list:
-            result = (
-                np.array(self._pending_list, dtype=np.float32),
-                chord_onset,
-            )
-        else:
-            pitch = self._pending_pitch
-            if self.piano_range:
-                pitch = pitch[21:109]
-            result = (pitch.copy(), chord_onset)
-
-        self._pending_pitch = np.zeros(128, dtype=np.float32)
-        self._pending_list = []
-        self._pending_time = None
-        return result
-
-    def __call__(
-        self,
-        frame: InputMIDIFrame,
-    ) -> Optional[Tuple[NDArrayFloat, float]]:
-        data, _ = frame
-
-        result = None
-        for msg, m_time in data:
-            if (
-                getattr(msg, "type", "other") == "note_on"
-                and getattr(msg, "velocity", 0) > 0
-            ):
-                if (
-                    self._pending_time is not None
-                    and (m_time - self._pending_time) > self.chord_threshold
-                ):
-                    result = self._flush()
-
-                self._pending_pitch[msg.note] = 1
-                self._pending_list.append(msg.note - self.piano_shift)
-                if self._pending_time is None:
-                    self._pending_time = m_time
-
-        return result
-
-    def flush_remaining(self) -> Optional[Tuple[NDArrayFloat, float]]:
-        """Flush any remaining pending notes (call at end of stream)."""
-        if self._pending_time is not None:
-            return self._flush()
-        return None
-
-    def reset(self) -> None:
-        self._pending_pitch = np.zeros(128, dtype=np.float32)
-        self._pending_list = []
-        self._pending_time = None
-
-
 class PianoRollProcessor(Processor):
-    """
-    A class to convert a MIDI file time slice to a piano roll representation.
+    """Sustained pianoroll per MIDI frame (held notes snapshot).
+
+    Tracks ``note_on`` / ``note_off`` events across frames to maintain an
+    internal "currently held" set, then emits a pianoroll vector each call
+    showing which pitches are sounding right now (including notes that
+    started in earlier frames and have not been released).
+
+    Stateful: held notes persist across calls until a matching
+    ``note_off`` (or a ``note_on`` with ``velocity == 0``). Empty frames
+    still emit a vector reflecting whatever is held; the output is never
+    ``None``.
 
     Parameters
     ----------
-    use_velocity : bool
-        If True, the velocity of the note is used as the value in the piano
-        roll. Otherwise, the value is 1.
-    piano_range : bool
-        If True, the piano roll will only contain the notes in the piano.
-        Otherwise, the piano roll will contain all 128 MIDI notes.
-    dtype : type
-        The data type of the piano roll. Default is float.
+    use_velocity : bool, default False
+        If True, each held pitch contributes its MIDI velocity (0-127).
+        If False, contributes 1.
+    piano_range : bool, default False
+        If True, restrict to 88-key piano range (MIDI 21-108).
+        Otherwise 128 pitches.
+    dtype : type, default np.float32
+        Numpy dtype of the output vector.
+
+    Returns
+    -------
+    ``(pianoroll, f_time)`` where:
+        - ``pianoroll``: ``np.ndarray`` of shape ``(88,)`` when
+          ``piano_range=True`` else ``(128,)``. Value at pitch ``p`` is
+          the velocity (if ``use_velocity``) or 1 if held, else 0.
+          Example: holding C4(60) and E4(64) with default piano range
+          → vector with 1 at indices 39 and 43 (=pitch-21), zeros elsewhere.
+        - ``f_time``: frame timestamp from the stream.
+
+    Notes
+    -----
+    Contrast with ``ChordOnsetProcessor``, which only encodes
+    onsets (note_ons) without sustain. Use this processor when the
+    downstream model needs a "what is currently sounding" snapshot
+    (e.g. matching against frame-sampled audio features).
     """
 
     def __init__(
@@ -242,21 +207,14 @@ class PianoRollProcessor(Processor):
         self.active_notes = dict()
 
 
-class OnsetPianoRollProcessor(Processor):
-    """Binary pianoroll per chord onset, with streaming chord grouping.
+class ChordOnsetProcessor(Processor):
+    """Emit one binary pitch vector per chord/onset.
 
-    Accumulates note-on events and flushes a chord vector when the time
-    gap between consecutive note-ons exceeds ``chord_threshold``.
-
-    Returns ``(pianoroll, timestamp)`` when a chord is flushed, ``None``
-    while accumulating.
-
-    Parameters
-    ----------
-    piano_range : bool
-        If True, 88 keys (21-108). Otherwise 128.
-    chord_threshold : float
-        Maximum gap (seconds) between note-ons in the same chord.
+    Note-ons within ``chord_threshold`` are merged into one chord. This
+    processor is intended to be paired with short windowed MIDI polling
+    (e.g. 1 ms): empty frames then act as a heartbeat and emit a pending
+    chord once the threshold has elapsed, without waiting for the next
+    note. The emitted timestamp is the first note-on time of the chord.
     """
 
     def __init__(
@@ -286,7 +244,7 @@ class OnsetPianoRollProcessor(Processor):
         return (vec, t)
 
     def __call__(self, frame: InputMIDIFrame) -> Optional[Tuple[np.ndarray, float]]:
-        data, _ = frame
+        data, f_time = frame
 
         result = None
         for msg, m_time in data:
@@ -302,6 +260,17 @@ class OnsetPianoRollProcessor(Processor):
                 self._pending_notes.append(msg.note)
                 if self._pending_time is None:
                     self._pending_time = m_time
+
+        # In windowed streams, empty frames still call the processor. Use
+        # their frame time as a heartbeat so a pending chord can be emitted
+        # without waiting for the next note_on.
+        if (
+            result is None
+            and self._pending_time is not None
+            and (f_time - self._pending_time) > self.chord_threshold
+            and self._pending_notes
+        ):
+            result = self._flush()
 
         return result
 
@@ -384,7 +353,6 @@ def compute_features_from_symbolic(
 ):
     processor_mapping = {
         "pitch": PitchProcessor,
-        "pitch_chord": PitchChordProcessor,
         "pianoroll": PianoRollProcessor,
         "pitch_class_pianoroll": PitchClassPianoRollProcessor,
     }

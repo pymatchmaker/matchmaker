@@ -8,7 +8,7 @@ import numbers
 import tempfile
 import threading
 import wave
-from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
+from typing import Any, Iterable, List, Optional, Tuple, Union
 
 import mido
 import numpy as np
@@ -16,6 +16,7 @@ import partitura as pt
 from partitura.io.exportaudio import save_wav_fluidsynth
 from partitura.performance import PerformanceLike
 
+from matchmaker.features.processor import Processor
 from matchmaker.io.audio import HOP_LENGTH, SAMPLE_RATE, AudioStream
 from matchmaker.io.midi import POLLING_PERIOD, MidiStream
 from matchmaker.io.queue import RECVQueue
@@ -271,7 +272,7 @@ def generate_example_sequences(
 
 def process_midi_offline(
     perf_info: Union[PerformanceLike, str],
-    processor: Callable,
+    processor: Processor,
     polling_period: Optional[float] = POLLING_PERIOD,
 ) -> List[Any]:
     """
@@ -297,7 +298,7 @@ def process_midi_offline(
 
 def process_audio_offline(
     perf_info: Union[PerformanceLike, str],
-    processor: Callable,
+    processor: Processor,
     sample_rate: int = SAMPLE_RATE,
     hop_length: int = HOP_LENGTH,
 ) -> List[Any]:

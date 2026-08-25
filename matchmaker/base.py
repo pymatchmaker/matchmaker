@@ -28,7 +28,7 @@ class OnlineAlignment(object):
     ------
     Per step: ``current_position`` (float beat).
     On completion: ``alignment_path`` — a ``(2, T)`` ``np.ndarray`` whose
-    rows are score beats and performance times in seconds.
+    rows are performance times in seconds and score beats.
 
     Subclass requirements
     ---------------------
@@ -64,12 +64,11 @@ class OnlineAlignment(object):
         self.current_perf_time: float = 0.0
         self._alignment_path: List[Tuple[float, float]] = []
 
-    def __call__(self, observation: Tuple[Any, float]) -> float:
-        features, perf_time = observation
+    def __call__(self, observation: Any, perf_time: float) -> float:
         self.current_perf_time = perf_time
-        self.step(features)
+        self.step(observation)
         self.current_position = self.get_current_position()
-        self._alignment_path.append((self.current_position, perf_time))
+        self._alignment_path.append((perf_time, self.current_position))
         return self.current_position
 
     @property
@@ -126,7 +125,7 @@ class OnlineAlignment(object):
                 break
             if item is None:
                 continue
-            beat = self(item)
+            beat = self(*item)
             if verbose:
                 pbar.update(int(np.searchsorted(self.score_positions, beat)))
             yield beat

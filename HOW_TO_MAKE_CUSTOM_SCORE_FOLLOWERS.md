@@ -1,6 +1,6 @@
 # How to implement your own score follower
 
-This guide walks you through adding a new score follower (online alignment method) along with its feature processing to the Matchmaker framework. 
+This guide walks you through adding a new score follower (online alignment method) along with its feature processing to the Matchmaker framework.
 
 You will need:
 1. a score follower class
@@ -10,7 +10,7 @@ In the following we look the requirements for each part.
 For the package architecture and pipeline overview (Stream → Processor →
 OnlineAlignment), see the [Architecture section in the README](README.md#architecture).
 
-## 1. Custom Score Followers 
+## 1. Custom Score Followers
 
 Every score follower subclasses `matchmaker.base.OnlineAlignment`.
 A new score follower class **must** inherit from `matchmaker.base.OnlineAlignment` and implement the `step(features)` and `get_current_position` methods.
@@ -32,7 +32,7 @@ class SimplestFollower(OnlineAlignment):
 
     def step(self, features) -> None:
         pass
-    
+
     def get_current_position(self):
 	    return self.current_position + np.random.rand()
 ```
@@ -42,8 +42,8 @@ The default `OnlineAlignment` already contains some useful optional logic. Very 
 from matchmaker.base import OnlineAlignment
 
 class IndexFollower(OnlineAlignment):
-     def __init__(self, 
-	     score_positions, 
+     def __init__(self,
+	     score_positions,
 	     **kwargs):
         super().__init__(
             score_positions=score_positions,
@@ -53,11 +53,11 @@ class IndexFollower(OnlineAlignment):
     def step(self, features) -> None:
 	    # this tracker just marches forward for every input
 	    self.current_idx += 1
-	    
-	    
+
+
 ```
 
-Note that we didn't have to define `self.get_current_position()` as its default behavior is given by `return float(self.score_positions[self.current_index])`, and we have all this in place in the base class. 
+Note that we didn't have to define `self.get_current_position()` as its default behavior is given by `return float(self.score_positions[self.current_index])`, and we have all this in place in the base class.
 ### Fixed internals
 
 The `matchmaker.base.OnlineAlignment` base class provides defaults for `__call__`, `run`, `alignment_path`. This enables full use of the matchmaker ecosystem including real-time tracking and offline evaluation. To this end the base class uses the following attributes and methods. They can be accessed by your custom tracking logic, but **must not be overwritten** to keep matchmaker functionality.
@@ -68,7 +68,7 @@ The `matchmaker.base.OnlineAlignment` base class provides defaults for `__call__
 | ------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `self.current_position`  | float                                  | `score_positions[current_index]` by default. Override `get_current_position()` for finer precision.                          |
 | `self.current_perf_time` | float                                  | Performance time (seconds) of the latest observation.                                                                        |
-| `self.alignment_path`    | ndarray of shape `(2, T)`, dtype float | Read-only; row 0 = score beats, row 1 = perf times. Accessible for a running or finished tracker, None for a yet unused one. |
+| `self.alignment_path`    | ndarray of shape `(2, T)`, dtype float | Read-only; row 0 = perf times (seconds), row 1 = score beats. Accessible for a running or finished tracker, None for a yet unused one. |
 #### OnlineAlignment base class methods
 
 | Method                             | Returns                                                                                                                                                       | Behavior                                                                                              |
@@ -77,13 +77,13 @@ The `matchmaker.base.OnlineAlignment` base class provides defaults for `__call__
 | `run(verbose: bool = True)`        | <ul><li>yields: <code>current_position: float</code> per step</li><li>returns: <code>alignment_path: np.ndarray</code> of shape <code>(2, T)</code></li></ul> | generator pulling items from `self.queue` until `STREAM_END`                                          |
 | `get_current_position()`           | `current_position: float`                                                                                                                                     | `score_positions[current_index]` (snaps to nearest onset)                                             |
 | `is_still_following()`             | `bool`                                                                                                                                                        | `current_index < len(score_positions) - 1`                                                            |
-| `alignment_path` (property)        | `np.ndarray` of shape `(2, T)`                                                                                                                                | accumulated from each `__call__`; row [0] = score beats, row [1] = perf times (seconds)               |
+| `alignment_path` (property)        | `np.ndarray` of shape `(2, T)`                                                                                                                                | accumulated from each `__call__`; row [0] = perf times (seconds), row [1] = score beats               |
 
 #### OnlineAlignment reference_features
 
 The default `OnlineAlignment` class has an optional `reference_features` argument. When using the `MatchMaker` top-level object, it passes a score note array as reference_feature to the score follower, i.e. a structured numpy array with field such as "onset_beat" and "duration_beat". This feature is computed with the help of the `partitura` library. Any `OnlineAlignment` subclass is responsible for converting this note array into features it can use internally.
 
-The `reference_features = score note array` is the default interface for passing reference information to `OnlineAlignment` subclasses and it is the preferred way whenever possible. Custom processing for other types of references is also possible, albeit not within the `MatchMaker` object. 
+The `reference_features = score note array` is the default interface for passing reference information to `OnlineAlignment` subclasses and it is the preferred way whenever possible. Custom processing for other types of references is also possible, albeit not within the `MatchMaker` object.
 
 ---
 
@@ -153,4 +153,3 @@ mm = Matchmaker(
 for beat in mm.run():
     print(beat)
 ```
-

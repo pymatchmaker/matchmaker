@@ -505,13 +505,15 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
         spectrum = np.abs(np.fft.rfft(frame, n=self.n_fft))
         return spectrum
 
-    def __call__(self, observation) -> float:
+    def __call__(self, observation, perf_time: float) -> float:
         """Process one audio frame.
 
         Parameters
         ----------
-        observation : np.ndarray or tuple
-            Feature vector from AudioStream (may be (features, f_time) tuple).
+        observation : np.ndarray
+            Feature vector from AudioStream.
+        perf_time : float
+            Performance time (seconds) of this frame.
 
         Returns
         -------
@@ -519,10 +521,7 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
             Current beat position (chord onset + within-chord interpolation).
         """
         t0 = time.time()
-        # AudioStream sends (features, perf_time_sec) tuples
-        if isinstance(observation, tuple):
-            self.current_perf_time = float(observation[1])
-            observation = observation[0]
+        self.current_perf_time = float(perf_time)
         y = self._extract_features(observation)
 
         # Precompute data likelihoods for all chords (Eq. 1)
@@ -618,7 +617,7 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
             position = base_beat
 
         self.current_position = position
-        self._alignment_path.append((position, self.current_perf_time))
+        self._alignment_path.append((self.current_perf_time, position))
         self.input_index += 1
         self.latency_stats = set_latency_stats(
             time.time() - t0, self.latency_stats, self.input_index
