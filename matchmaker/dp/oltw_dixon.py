@@ -178,10 +178,6 @@ class OnlineTimeWarpingDixonFrame(OnlineTimeWarpingDixon):
         return self._frame_to_beat(self.best_ref)
 
     @property
-    def warping_path(self) -> NDArray:
-        return self.wp
-
-    @property
     def alignment_path(self) -> NDArray:
         """Return one score position for every consumed performance frame."""
         if self.input_pointer == 0:
@@ -419,6 +415,7 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
         window_size: int = 30,
         max_run_count: int = MAX_RUN_COUNT,
         distance_func: str = "euclidean",
+        **kwargs,
     ) -> None:
         super().__init__(
             reference_features=reference_features,
@@ -426,6 +423,7 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
             queue=queue,
             max_run_count=max_run_count,
             distance_func=distance_func,
+            **kwargs,
         )
         self.ref = self.reference_features.astype(np.float32)
         self.w = window_size
