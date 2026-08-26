@@ -57,7 +57,6 @@ class OnlineParangonarAlignment(OnlineAlignment):
     def __init__(
         self,
         reference_features: np.ndarray,
-        performance_file: str,
         method: str,
         queue=None,
         **kwargs
