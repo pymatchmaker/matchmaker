@@ -38,6 +38,8 @@ from matchmaker.io.midi import POLLING_PERIOD
 from matchmaker.prob import AudioOuterProductHMM, OuterProductHMM, PitchHMM, PitchIOIHMM
 from matchmaker.prob.particle_filter import ParticleFilter
 from matchmaker.prob.skf import SwitchingKalmanFilterFollower
+from matchmaker.external import ParangonarProcessor, OnlineParangonarAlignment
+
 from matchmaker.utils.misc import (
     generate_score_audio,
     get_tempo_from_score,
@@ -120,10 +122,10 @@ DEFAULT_KWARGS = {
             "piano_range": True,
             "polling_period": 0.001,
         },
-        "SLT_OLTW": {"processor": "pitch", "piano_range": True},
-        "SL_OLTW": {"processor": "pitch", "piano_range": True},
-        "OTM": {"processor": "pitch", "piano_range": True},
-        "OPTM": {"processor": "pitch", "piano_range": True},
+        "SLT_OLTW": {"processor": "parangonar"},
+        "SL_OLTW": {"processor": "parangonar"},
+        "OTM": {"processor": "parangonar"},
+        "OPTM": {"processor": "parangonar"},
     },
 }
 
@@ -352,6 +354,7 @@ class Matchmaker(object):
             "chord_onset": lambda: ChordOnsetProcessor(
                 piano_range=self.config.get("piano_range", True),
             ),
+            "parangonar": lambda: ParangonarProcessor(),
         }
         if processor_type in MIDI_PROCESSORS:
             return MIDI_PROCESSORS[processor_type]()
