@@ -18,6 +18,10 @@ import parangonar as pa
 import partitura as pt
 
 from matchmaker.base import OnlineAlignment
+from matchmaker.features.processor import Processor
+from matchmaker.utils.typing import InputMIDIFrame
+from typing import Optional, Tuple
+
 
 _OLTW_MATCHERS = {"SL_OLTW", "SLT_OLTW"}
 _TRANSFORMER_MATCHERS = {"OTM", "OPTM"}
@@ -90,3 +94,59 @@ class OnlineParangonarAlignment(OnlineAlignment):
 
     def get_current_position(self):
 	    return self._private_score_position
+
+
+class ParangonarProcessor(Processor):
+    """Aggregate ``note_on`` events in a MIDI frame into a minimal 
+    partitura note array row.
+
+    All concurrent ``note_on`` events present in the input frame are merged
+    into a single observation (i.e. a frame containing a chord emits one
+    observation covering all chord pitches). Frame-level time grouping is
+    the ``MidiStream``'s responsibility via ``polling_period``; this
+    processor itself is stateless.
+
+
+    Returns
+    -------
+    None if the frame has no note_on events. Otherwise a tuple
+    ``(pitch_obs, f_time)``
+    """
+
+    def __init__(
+        self
+        ) -> None:
+        super().__init__()
+
+    def __call__(
+        self,
+        frame: InputMIDIFrame,
+    ) -> Optional[Tuple[np.ndarray, float]]:
+        data, f_time = frame
+        pitch_obs = []
+        
+        pitches = []
+        note_times = []
+
+        for msg, m_time in data:
+            if (
+                getattr(msg, "type", "other") == "note_on"
+                and getattr(msg, "velocity", 0) > 0
+            ):
+                pitches.append(msg.note)
+                note_times.append(m_time)
+        
+
+        if len(pitches) > 0:
+            arr_slice = np.core.records.fromarrays(
+                [note_times, pitches],
+                dtype=[#("id", "U20"), 
+                    ("onset_sec", "f8"), ("pitch", "i4")]
+            )
+            obs_time = min(note_times)
+            return arr_slice, obs_time
+        else:
+            return None
+
+    def reset(self) -> None:
+        pass
