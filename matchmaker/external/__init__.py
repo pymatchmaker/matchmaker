@@ -71,7 +71,6 @@ class OnlineParangonarAlignment(OnlineAlignment):
             queue=queue,
         )
         self.method = method
-        self.performance_file = performance_file
         self.score_note_array = score_note_array
         self.matcher = self._build_matcher(method, self.score_note_array, **kwargs)
         self._private_score_position = self.score_positions[0]
@@ -116,6 +115,7 @@ class ParangonarProcessor(Processor):
         self
         ) -> None:
         super().__init__()
+        self.id = 0
 
     def __call__(
         self,
@@ -137,15 +137,24 @@ class ParangonarProcessor(Processor):
         
 
         if len(pitches) > 0:
-            arr_slice = np.core.records.fromarrays(
-                [note_times, pitches],
-                dtype=[#("id", "U20"), 
-                    ("onset_sec", "f8"), ("pitch", "i4")]
-            )
+            fields = [
+                        ("onset_sec", "f4"),
+                        ("pitch", "i4"),
+                        ("id", "U256"),
+                    ]
+            note_array = []
+            for i in range(len(pitches)):
+                note_array.append((note_times[i], pitches[i], "n"+str(self.id)))
+                self.id += 1
+
+            arr_slice = np.array(note_array, dtype=fields)
+
             obs_time = min(note_times)
-            return arr_slice, obs_time
+
+            return arr_slice[0], obs_time
         else:
             return None
 
     def reset(self) -> None:
-        pass
+        self.id = 0
+        

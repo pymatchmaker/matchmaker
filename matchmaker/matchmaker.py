@@ -122,10 +122,10 @@ DEFAULT_KWARGS = {
             "piano_range": True,
             "polling_period": 0.001,
         },
-        "SLT_OLTW": {"processor": "parangonar"},
-        "SL_OLTW": {"processor": "parangonar"},
-        "OTM": {"processor": "parangonar"},
-        "OPTM": {"processor": "parangonar"},
+        "SLT_OLTW": {"processor": "parangonar", "polling_period": None},
+        "SL_OLTW": {"processor": "parangonar", "polling_period": None},
+        "OTM": {"processor": "parangonar", "polling_period": None},
+        "OPTM": {"processor": "parangonar", "polling_period": None},
     },
 }
 
