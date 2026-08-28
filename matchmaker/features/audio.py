@@ -441,7 +441,7 @@ class KorzeniowskiAudioProcessor(Processor):
         spectrum = self.compute_spectrum(frame)
 
         onset = self.compute_onset(
-            spectrum
+            frame
         )
 
         loudness = self.compute_loudness(
@@ -495,9 +495,9 @@ class KorzeniowskiAudioProcessor(Processor):
         float
             Non-negative normalized onset activation.
         """
-        windowed = frame[self.win_length] * self.window
+        windowed = frame[:self.win_length] * self.window
 
-        spectrum = np.abs(np.fft.rfft(windowed))
+        spectrum = np.abs(np.fft.rfft(windowed, n=self.n_fft))
 
         if self.previous_spectrum is None:
             self.previous_spectrum = spectrum

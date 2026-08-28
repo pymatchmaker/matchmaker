@@ -271,6 +271,7 @@ class ParticleFilterKorzeniowski(OnlineAlignment):
         self,
         crossed: np.ndarray,
         curr_idx: np.ndarray,
+        deltas: np.ndarray,
     ) -> np.ndarray:
         """
         Compute the normalized timing error for particles
@@ -286,7 +287,7 @@ class ParticleFilterKorzeniowski(OnlineAlignment):
 
         current_time = self.current_perf_time
 
-        onset_idx = curr_idx[crossed]
+        onset_idx = curr_idx[crossed] - 1
 
         phase = np.zeros(
             len(onset_idx),
@@ -302,6 +303,7 @@ class ParticleFilterKorzeniowski(OnlineAlignment):
             return phase
 
         valid_onset_idx = onset_idx[valid]
+        delta_score_positions = np.clip(valid_onset_idx - deltas[crossed][valid], 0, len(self.score_positions) - 1)
 
         crossed_indices = np.flatnonzero(crossed)
         valid_particle_indices = crossed_indices[valid]
@@ -309,7 +311,7 @@ class ParticleFilterKorzeniowski(OnlineAlignment):
         delta_beats = (
             self.score_positions[valid_onset_idx]
             -
-            self.score_positions[valid_onset_idx - 1]
+            self.score_positions[delta_score_positions]
         )
 
         bps = (
@@ -449,12 +451,15 @@ class ParticleFilterKorzeniowski(OnlineAlignment):
 
         crossed = curr_idx > prev_idx
 
+        deltas = curr_idx - prev_idx
+
         if not np.any(crossed):
             return
 
         phase = self.phase_error(
             crossed,
             curr_idx,
+            deltas,
         )
 
         self.m[crossed] += self.phase_gain * phase
@@ -890,6 +895,7 @@ class ParticleFilterKorzeniowski(OnlineAlignment):
 
         self.sound_prob = self.sound_prob[indices]
         self.rest_prob = self.rest_prob[indices]
+        self.last_onset_time = self.last_onset_time[indices]
 
         self.weights.fill(
             1.0 / self.num_particles
@@ -915,7 +921,7 @@ class ParticleFilterKorzeniowski(OnlineAlignment):
                 else:
                     self.first_input_found = True
             else:
-                if observation.loudness < -60.0:
+                if observation.loudness < -50.0:
                     # no sound in this frame, skip update
                     self._alignment_path.append(
                         (self.current_perf_time, self.current_position)
