@@ -483,7 +483,7 @@ def group_onsets(
     return features, times
 
 
-class KorzeniowskiMidiProcessor(PianoRollProcessor):
+class ParticleFilterMidiProcessor(PianoRollProcessor):
     """
     MIDI feature processor for the Korzeniowski particle filter.
 

@@ -36,7 +36,7 @@ from matchmaker.features.midi import (
     PitchClassPianoRollProcessor,
     PitchProcessor,
     onset_pianoroll,
-    KorzeniowskiMidiProcessor,
+    ParticleFilterMidiProcessor,
 )
 from matchmaker.io.midi import POLLING_PERIOD
 from matchmaker.prob import AudioOuterProductHMM, OuterProductHMM, PitchHMM, PitchIOIHMM
@@ -358,7 +358,7 @@ class Matchmaker(object):
             "chord_onset": lambda: ChordOnsetProcessor(
                 piano_range=self.config.get("piano_range", True),
             ),
-            "korzeniowski": lambda: KorzeniowskiMidiProcessor(
+            "korzeniowski": lambda: ParticleFilterMidiProcessor(
                 piano_range=self.config.get("piano_range", True),
             ),
         }
