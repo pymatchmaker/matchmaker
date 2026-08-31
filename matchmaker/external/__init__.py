@@ -142,7 +142,7 @@ class ParangonarProcessor(Processor):
                raise ValueError("ParangonarProcessor requires event-based MIDI input with polling_period=None")
                 
         if len(pitches) > 0:
-            ...
+            
             fields = [
                         ("onset_sec", "f4"),
                         ("pitch", "i4"),
