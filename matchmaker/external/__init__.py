@@ -73,9 +73,7 @@ class OnlineParangonarAlignment(OnlineAlignment):
         self.method = method
         self.score_note_array = score_note_array
         self.matcher = self._build_matcher(method, self.score_note_array, **kwargs)
-        self._private_score_index = 0
-        self._private_score_position = self.score_positions[self._private_score_index]
-
+        
     @staticmethod
     def _build_matcher(method: str, sna: np.ndarray, **kwargs):
         if method == "SLT_OLTW":
@@ -89,11 +87,7 @@ class OnlineParangonarAlignment(OnlineAlignment):
         raise ValueError(method)
 
     def step(self, performance_note) -> None:
-        self._private_score_index = self.matcher(performance_note)
-        self._private_score_position = self.score_positions[self._private_score_index]
-
-    def get_current_position(self):
-	    return float(self._private_score_position)
+        self.current_inde = self.matcher(performance_note)
 
 
 class ParangonarProcessor(Processor):
