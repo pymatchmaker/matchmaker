@@ -62,6 +62,11 @@ AVAILABLE_METHODS = {
 }
 DEFAULT_METHOD = {"audio": "arzt", "midi": "pthmm"}
 DEFAULT_PROCESSOR = {"audio": "chroma", "midi": "pitch"}
+
+#: Score followers registered at runtime by :func:`register_method`, keyed by
+#: ``(input_type, name)``. These are built by the same ``Matchmaker`` pipeline
+#: as the methods above; only the construction step differs.
+CUSTOM_METHODS = {}
 DEFAULT_KWARGS = {
     "audio": {
         "arzt": {"window_size": 10, "start_window_size": 0.1, "step_size": 3},
@@ -126,6 +131,117 @@ DEFAULT_KWARGS = {
         "OPTM": {"processor": "pitch", "piano_range": True},
     },
 }
+
+
+def register_method(
+    name: str,
+    *,
+    input_type: str,
+    build_follower,
+    build_processor=None,
+    build_reference=None,
+    default_kwargs: Optional[dict] = None,
+    overwrite: bool = False,
+) -> None:
+    """Register a score follower so ``Matchmaker(method=name)`` can build it.
+
+    This is the supported way to plug a follower that lives outside this
+    package into the Matchmaker pipeline. A registered method is built by the
+    same code as a built-in one — same score loading, same stream, same
+    ``alignment_path`` — so it also works with anything downstream that takes a
+    ``Matchmaker``, such as the benchmark's evaluation.
+
+    Parameters
+    ----------
+    name : str
+        Method name, as passed to ``Matchmaker(method=...)``. Must not collide
+        with an existing method for the same ``input_type``.
+    input_type : {"audio", "midi"}
+        Which stream the follower consumes.
+    build_follower : callable
+        ``build_follower(mm) -> OnlineAlignment``. Called once per
+        ``Matchmaker``, after the stream and reference features exist. Read
+        what you need off ``mm``: ``mm.score_part``, ``mm.tempo``,
+        ``mm.reference_features``, ``mm.frame_rate``, ``mm.config``, and
+        ``mm.stream.queue`` (pass that as the follower's ``queue``).
+    build_processor : callable, optional
+        ``build_processor(mm) -> Processor``. Omit to use the standard
+        processor named by ``default_kwargs["processor"]`` (or the default for
+        this input type), which is usually what you want.
+    build_reference : callable, optional
+        ``build_reference(mm) -> Any``, the score-side features. Omit for the
+        score note array. Audio followers that align against a synthesised
+        score rendering override this.
+    default_kwargs : dict, optional
+        Defaults for ``Matchmaker(kwargs=...)``, exactly like the entries in
+        ``DEFAULT_KWARGS``: ``processor``, ``sample_rate``, ``frame_rate`` /
+        ``hop_length`` for audio, ``polling_period`` for MIDI, plus anything
+        your follower reads from ``mm.config``.
+    overwrite : bool, optional
+        Allow replacing an already-registered method of the same name.
+
+    Examples
+    --------
+    >>> from matchmaker import Matchmaker, register_method
+    >>> from matchmaker.base import OnlineAlignment
+    >>> class MarchForward(OnlineAlignment):
+    ...     def step(self, features):
+    ...         self.current_index += 1
+    >>> register_method(
+    ...     "march-forward",
+    ...     input_type="midi",
+    ...     build_follower=lambda mm: MarchForward(
+    ...         reference_features=mm.reference_features,
+    ...         score_positions=np.unique(
+    ...             mm.score_part.note_array()["onset_beat"]
+    ...         ),
+    ...         queue=mm.stream.queue,
+    ...     ),
+    ... )
+    """
+    if input_type not in AVAILABLE_METHODS:
+        raise ValueError(
+            f"Invalid input_type '{input_type}'. Available: {sorted(AVAILABLE_METHODS)}"
+        )
+    if not callable(build_follower):
+        raise TypeError("build_follower must be callable.")
+    for label, hook in (
+        ("build_processor", build_processor),
+        ("build_reference", build_reference),
+    ):
+        if hook is not None and not callable(hook):
+            raise TypeError(f"{label} must be callable or None.")
+
+    key = (input_type, name)
+    if not overwrite:
+        if key in CUSTOM_METHODS:
+            raise ValueError(
+                f"Method '{name}' is already registered for {input_type}. "
+                "Pass overwrite=True to replace it."
+            )
+        if name in AVAILABLE_METHODS[input_type]:
+            raise ValueError(
+                f"'{name}' is a built-in {input_type} method and cannot be "
+                "replaced by registration."
+            )
+
+    CUSTOM_METHODS[key] = {
+        "build_follower": build_follower,
+        "build_processor": build_processor,
+        "build_reference": build_reference,
+    }
+    if name not in AVAILABLE_METHODS[input_type]:
+        AVAILABLE_METHODS[input_type].append(name)
+    if default_kwargs:
+        DEFAULT_KWARGS[input_type][name] = dict(default_kwargs)
+
+
+def unregister_method(name: str, input_type: str) -> None:
+    """Undo a :func:`register_method`. Mainly for tests."""
+    CUSTOM_METHODS.pop((input_type, name), None)
+    if name in AVAILABLE_METHODS.get(input_type, []):
+        AVAILABLE_METHODS[input_type].remove(name)
+    DEFAULT_KWARGS.get(input_type, {}).pop(name, None)
 
 
 class Matchmaker(object):
@@ -314,7 +430,14 @@ class Matchmaker(object):
         self.reference_features = self.preprocess_score()
         self.score_follower = self._build_score_follower(method)
 
+    def _custom_spec(self, method):
+        """The registration for ``method``, or None if it is a built-in."""
+        return CUSTOM_METHODS.get((self.input_type, method))
+
     def _build_processor(self, method, processor_type):
+        spec = self._custom_spec(method)
+        if spec is not None and spec["build_processor"] is not None:
+            return spec["build_processor"](self)
         if self.input_type == "audio":
             audio_kw = dict(sample_rate=self.sample_rate, hop_length=self.hop_length)
             if method == "pf":
@@ -388,6 +511,9 @@ class Matchmaker(object):
         raise ValueError(f"Invalid input type '{self.input_type}'")
 
     def _build_score_follower(self, method):
+        spec = self._custom_spec(method)
+        if spec is not None:
+            return spec["build_follower"](self)
         if self.input_type == "audio":
             return self._build_audio_follower(method)
         elif self.input_type == "midi":
@@ -528,6 +654,12 @@ class Matchmaker(object):
 
     def preprocess_score(self):
         """Extract reference features from the score."""
+        spec = self._custom_spec(self.method)
+        if spec is not None:
+            if spec["build_reference"] is not None:
+                return spec["build_reference"](self)
+            return self.score_part.note_array()
+
         if self.input_type == "audio" and self.method in sorted(OLTW_METHODS) + ["pf"]:
             score_audio = generate_score_audio(
                 self.score_part, self.tempo, self.sample_rate
@@ -562,6 +694,19 @@ class Matchmaker(object):
         tick = get_ppq(self.score_part)
         timeline_time = (current_frame / self.frame_rate) * tick * (self.tempo / 60)
         return float(self.score_part.beat_map(timeline_time))
+
+    @property
+    def score_positions(self) -> np.ndarray:
+        """Ascending score beat of every note onset — the follower's states."""
+        return np.unique(self.score_part.note_array()["onset_beat"])
+
+    def ref_frame_to_beat(self) -> np.ndarray:
+        """Score beat position of each reference *frame*.
+
+        Only meaningful when ``reference_features`` is a frame array, i.e. for
+        audio followers aligning against a synthesised score rendering.
+        """
+        return self._build_ref_frame_to_beat()
 
     def _build_ref_frame_to_beat(self) -> np.ndarray:
         """Precompute beat position for each reference feature frame."""

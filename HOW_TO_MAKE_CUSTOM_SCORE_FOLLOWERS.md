@@ -132,14 +132,67 @@ with MidiStream(processor = processor) as stream: # or AudioStream
 
 ## Make it accessible in `Matchmaker`
 
-Register the tracker in `matchmaker/matchmaker.py`:
+Call `register_method()`. Your follower does not have to live in this package —
+registration works from any module, so a tracker you keep in your own project
+(or submit to the benchmark) plugs into the same pipeline as a built-in one.
 
-1. Add the method name to `AVAILABLE_METHODS["audio"]` or
-   `AVAILABLE_METHODS["midi"]`.
-2. Add an entry in `DEFAULT_KWARGS` if your method needs specific kwargs.
-3. Add a branch in `_build_audio_follower` or `_build_symbolic_follower`.
+```python
+import numpy as np
+from matchmaker import register_method
 
-Then it works through the public API:
+register_method(
+    "my_score_follower",
+    input_type="audio",
+    build_follower=lambda mm: MyScoreFollower(
+        reference_features=mm.reference_features,
+        score_positions=mm.score_positions,
+        queue=mm.stream.queue,
+        frame_rate=mm.frame_rate,
+        **mm.config,
+    ),
+    default_kwargs={"processor": "chroma", "frame_rate": 30},
+)
+```
+
+`build_follower(mm)` is called once per `Matchmaker`, after the score is loaded
+and the stream exists. Read what you need off `mm`:
+
+| | |
+| --- | --- |
+| `mm.score_part` | the unfolded, merged partitura `Part` |
+| `mm.score_positions` | ascending score beat of every note onset |
+| `mm.reference_features` | the score-side features (see below) |
+| `mm.tempo` | notated tempo in BPM, or 120 if the score has no marking |
+| `mm.frame_rate`, `mm.sample_rate`, `mm.hop_length` | audio stream settings |
+| `mm.config` | whatever `default_kwargs` / `kwargs=` supplied |
+| `mm.stream.queue` | pass this as your follower's `queue` |
+
+Two optional hooks handle the cases where the defaults do not fit:
+
+- **`build_processor(mm)`** — omit it and Matchmaker builds the standard
+  processor named by `default_kwargs["processor"]`, which is usually what you
+  want. Pass one only for a processor of your own.
+- **`build_reference(mm)`** — omit it for the score note array. Audio followers
+  that align against a synthesised score rendering override it:
+
+  ```python
+  def build_reference(mm):
+      from matchmaker.utils.misc import generate_score_audio
+      audio = generate_score_audio(mm.score_part, mm.tempo, mm.sample_rate)
+      features, _ = mm.processor((audio.astype(np.float32), 0.0))
+      mm.processor.reset()   # the same processor then handles the live input
+      return features
+  ```
+
+  Frame-based audio followers usually also want `mm.ref_frame_to_beat()`, the
+  score beat of each reference frame.
+
+Registering under the name of a built-in method, or twice under the same name,
+raises — pass `overwrite=True` if replacing is what you meant.
+`unregister_method(name, input_type)` undoes it, which is mostly useful in
+tests.
+
+Either way, it then works through the public API:
 
 ```python
 from matchmaker import Matchmaker
