@@ -1,0 +1,327 @@
+# Registry of score-following methods and feature processors.
+#
+# This file is the single source of truth for *what* Matchmaker can build and
+# *which arguments* each class gets. ``matchmaker/registry.py`` interprets it;
+# no method-specific branching lives in ``matchmaker/matchmaker.py``.
+#
+# ---------------------------------------------------------------------------
+# Argument values
+# ---------------------------------------------------------------------------
+# Every entry under ``args`` (and under ``processor_args``) is either a plain
+# literal or a one-key mapping naming where the value comes from:
+#
+#   has_insertions: true              literal
+#   queue: {from: queue}              a provider (see registry.PROVIDERS)
+#   n_fft: {config: n_fft, default: 512}
+#                                     read from the user's kwargs / defaults
+#   n_fft: {config: n_fft, default: 2, pop: true}
+#                                     ...and remove it, so a later
+#                                     ``config_passthrough`` does not repeat it
+#   thing: {value: {a: 1}}            a literal that is itself a mapping
+#
+# ``config_passthrough: true`` splats whatever is left in ``mm.config`` into the
+# constructor; ``{exclude: [...]}`` holds back the listed keys.
+#
+# ``!obj pkg.module:Attribute`` imports a Python object -- used where a default
+# must stay tied to a constant or class defined in code.
+# ---------------------------------------------------------------------------
+
+version: 1
+
+input_types:
+  audio:
+    default_method: arzt
+    default_processor: chroma
+  midi:
+    default_method: pthmm
+    default_processor: pitch
+
+# ===========================================================================
+# Feature processors
+# ===========================================================================
+processors:
+
+  audio:
+    _base: &audio_base
+      sample_rate: {from: sample_rate}
+      hop_length: {from: hop_length}
+
+    chroma:
+      class: matchmaker.features.audio:ChromagramProcessor
+      args: *audio_base
+
+    mfcc:
+      class: matchmaker.features.audio:MFCCProcessor
+      args: *audio_base
+
+    cqt:
+      class: matchmaker.features.audio:CQTProcessor
+      args: *audio_base
+
+    mel:
+      class: matchmaker.features.audio:MelSpectrogramProcessor
+      args: *audio_base
+
+    cqt_spectral_flux:
+      class: matchmaker.features.audio:CQTSpectralFluxProcessor
+      args: *audio_base
+
+    lse:
+      class: matchmaker.features.audio:LogSpectralEnergyProcessor
+      args:
+        <<: *audio_base
+        # Popped: the OLTW followers take **config and would choke on it.
+        norm: {config: norm, default: 2, pop: true}
+
+    raw_spectrum:
+      class: matchmaker.features.audio:RawSpectrumProcessor
+      args:
+        <<: *audio_base
+        n_fft: {config: n_fft, default: 512}
+
+    korzeniowski:
+      class: matchmaker.features.audio:KorzeniowskiAudioProcessor
+      args:
+        <<: *audio_base
+        n_fft: {config: n_fft, default: 4096}
+        win_length: {config: win_length, default: 2048}
+
+  # All MIDI processors are stateless aggregators over their input frame.
+  # Time-based grouping (e.g. chords) is the stream's job: set ``polling_period``
+  # on ``MidiStream`` to bin events. Cross-frame chord-merging, if needed,
+  # belongs inside the tracker class.
+  midi:
+    pitch:
+      class: matchmaker.features.midi:PitchProcessor
+      args:
+        piano_range: {config: piano_range, default: true}
+        # ``hmm`` overrides this via its ``processor_args``.
+        return_pitch_list: false
+
+    pitchclass:
+      class: matchmaker.features.midi:PitchClassPianoRollProcessor
+      args: {}
+
+    pianoroll:
+      class: matchmaker.features.midi:PianoRollProcessor
+      args:
+        piano_range: {config: piano_range, default: true}
+
+    chord_onset:
+      class: matchmaker.features.midi:ChordOnsetProcessor
+      args:
+        piano_range: {config: piano_range, default: true}
+
+    korzeniowski:
+      class: matchmaker.features.midi:ParticleFilterMidiProcessor
+      args:
+        piano_range: {config: piano_range, default: true}
+
+# ===========================================================================
+# Score followers
+# ===========================================================================
+#
+# Per-method keys:
+#   class        dotted path to the OnlineAlignment subclass  (required)
+#   args         constructor arguments                        (required)
+#   reference    named reference-feature builder, default ``note_array``
+#                (see registry.REFERENCE_BUILDERS)
+#   default_kwargs   defaults for ``Matchmaker(kwargs=...)``
+#   processor_args   per-method overrides for the chosen processor
+#   config_passthrough   splat the remaining ``mm.config``
+#   family       grouping label, exposed as ``<FAMILY>_METHODS``
+#   event_based  MIDI only: stream emits one message per frame (no polling)
+#   deterministic  false if repeated runs of the same input can differ
+#
+# Declaration order is the order of ``AVAILABLE_METHODS``.
+methods:
+
+  audio:
+    # --- frame-level online time warping, aligned against synthesised score ---
+    _oltw_frame: &oltw_frame_args
+      reference_features: {from: reference_features}
+      score_positions: {from: score_positions}
+      queue: {from: queue}
+      frame_rate: {from: frame_rate}
+      ref_frame_to_beat: {from: ref_frame_to_beat}
+
+    arzt:
+      family: oltw
+      class: matchmaker.dp:OnlineTimeWarpingArztFrame
+      reference: score_audio
+      args: *oltw_frame_args
+      config_passthrough: true
+      default_kwargs:
+        window_size: 10
+        start_window_size: 0.1
+        step_size: 3
+
+    dixon:
+      family: oltw
+      class: matchmaker.dp:OnlineTimeWarpingDixonFrame
+      reference: score_audio
+      args: *oltw_frame_args
+      config_passthrough: true
+      default_kwargs:
+        processor: lse
+        window_size: 10
+        frame_rate: 50
+
+    outerhmm:
+      class: matchmaker.prob:AudioOuterProductHMM
+      args:
+        reference_features: {from: reference_features}
+        queue: {from: queue}
+        tempo: {from: tempo}
+        hop_length: {from: hop_length}
+      config_passthrough: true
+      default_kwargs:
+        processor: cqt_spectral_flux
+        sample_rate: 16000
+        frame_rate: 25
+        s_j: 0.0
+
+    skf:
+      class: matchmaker.prob.skf:SwitchingKalmanFilterFollower
+      args:
+        reference_features: {from: note_array}
+        queue: {from: queue}
+        tempo: {from: tempo}
+        sample_rate: {from: sample_rate}
+        n_fft: {config: n_fft, default: 512}
+        hop_length: {from: hop_length}
+      default_kwargs:
+        processor: raw_spectrum
+        sample_rate: 8000
+        hop_length: 128
+        n_fft: 512
+
+    pfkorz:
+      class: matchmaker.prob.particle_filter_korzeniowski:ParticleFilterKorzeniowski
+      reference: korzeniowski_score_model
+      # Sequential Monte Carlo, drawing from a module-level RNG: two runs in
+      # one process continue the same random stream and do not match.
+      deterministic: false
+      args:
+        score_model: {from: reference_features}
+        observation_type: audio
+        notated_tempo: {from: tempo}
+        hop_size: {from: audio_hop_seconds}
+        queue: {from: queue}
+        num_particles: {config: num_particles, default: 1000}
+      default_kwargs:
+        processor: korzeniowski
+        sample_rate: !obj matchmaker.features.audio:SAMPLE_RATE
+        n_fft: 4096
+        win_length: 2048
+        observation_type: audio
+        num_particles: 500
+
+  midi:
+    # --- event-level online time warping over an onset pianoroll ---
+    _oltw_event: &oltw_event_args
+      reference_features: {from: onset_pianoroll_features}
+      score_positions: {from: onset_pianoroll_positions}
+      queue: {from: queue}
+
+    arzt:
+      family: oltw
+      class: matchmaker.dp:OnlineTimeWarpingArztEvent
+      args: *oltw_event_args
+      config_passthrough:
+        # The event variant has no notion of a frame window.
+        exclude: [piano_range, window_size, start_window_size]
+      default_kwargs:
+        processor: chord_onset
+        piano_range: true
+        polling_period: 0.001
+        window_size: 2
+        start_window_size: 2
+        step_size: 5
+
+    dixon:
+      family: oltw
+      class: matchmaker.dp:OnlineTimeWarpingDixonEvent
+      args: *oltw_event_args
+      config_passthrough:
+        exclude: [piano_range]
+      default_kwargs:
+        processor: chord_onset
+        piano_range: true
+        polling_period: 0.001
+        window_size: 30
+
+    hmm:
+      class: matchmaker.prob:PitchIOIHMM
+      args:
+        reference_features: {from: reference_features}
+        queue: {from: queue}
+        has_insertions: true
+      config_passthrough: true
+      processor_args:
+        return_pitch_list: true
+      default_kwargs:
+        processor: pitch
+        tempo_model: !obj matchmaker.utils.tempo_models:KalmanTempoModel
+        piano_range: true
+
+    pthmm:
+      class: matchmaker.prob:PitchHMM
+      args:
+        reference_features: {from: reference_features}
+        queue: {from: queue}
+        has_insertions: true
+      config_passthrough: true
+      default_kwargs:
+        processor: pitch
+        piano_range: true
+
+    outerhmm:
+      class: matchmaker.prob:OuterProductHMM
+      event_based: true
+      args:
+        reference_features: {from: reference_features}
+        queue: {from: queue}
+      config_passthrough: true
+      default_kwargs:
+        processor: pitch
+        piano_range: true
+        polling_period: 0.001
+
+    pfkorz:
+      class: matchmaker.prob.particle_filter_korzeniowski:ParticleFilterKorzeniowski
+      reference: korzeniowski_score_model
+      deterministic: false
+      args:
+        score_model: {from: reference_features}
+        observation_type: midi
+        notated_tempo: {from: tempo}
+        hop_size: {from: default_polling_period}
+        queue: {from: queue}
+        num_particles: {config: num_particles, default: 1000}
+      default_kwargs:
+        processor: korzeniowski
+        sample_rate: !obj matchmaker.features.audio:SAMPLE_RATE
+        n_fft: 4096
+        win_length: 2048
+        observation_type: midi
+        num_particles: 500
+
+    # --- parangonar trackers; all four differ only by the ``method`` string ---
+    OPTM: &parangonar
+      family: parangonar
+      class: matchmaker.external:OnlineParangonarAlignment
+      args:
+        reference_features: {from: note_array_with_grace}
+        performance_file: {from: performance_file}
+        method: {from: method}
+        queue: {from: queue}
+      default_kwargs:
+        processor: pitch
+        piano_range: true
+
+    OTM: *parangonar
+
+    SLT_OLTW: *parangonar
+
+    SL_OLTW: *parangonar

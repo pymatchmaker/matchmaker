@@ -132,6 +132,81 @@ with MidiStream(processor = processor) as stream: # or AudioStream
 
 ## Make it accessible in `Matchmaker`
 
+There are two ways, and which one you want depends on where your follower lives.
+
+| | |
+| --- | --- |
+| Follower **inside** this package | declare it in [`matchmaker/methods.yaml`](matchmaker/methods.yaml) — no Python glue |
+| Follower **outside** this package | call `register_method()` from your own module |
+
+### A. Declare it in `methods.yaml`
+
+`matchmaker/methods.yaml` is the registry of everything `Matchmaker` can build:
+which class each method and processor is, and which arguments it gets.
+`matchmaker/registry.py` interprets it, so `matchmaker/matchmaker.py` contains no
+per-method branching at all. Adding a built-in follower is one YAML block:
+
+```yaml
+methods:
+  midi:
+    my_score_follower:
+      class: my_package.followers:MyScoreFollower
+      args:
+        reference_features: {from: reference_features}
+        score_positions: {from: score_positions}
+        queue: {from: queue}
+        has_insertions: true
+      config_passthrough: true
+      default_kwargs:
+        processor: pitch
+        piano_range: true
+```
+
+Every entry under `args` is either a plain literal or a one-key mapping saying
+where the value comes from:
+
+| written as | means |
+| --- | --- |
+| `has_insertions: true` | a literal |
+| `{from: queue}` | a **provider** — a value read off the live `Matchmaker` |
+| `{config: n_fft, default: 512}` | a key of the user's `kwargs`, with a fallback |
+| `{config: norm, default: 2, pop: true}` | ...and consume it, so `config_passthrough` does not repeat it |
+| `{value: {a: 1}}` | a literal that is itself a mapping |
+
+`config_passthrough: true` splats whatever is left in `mm.config` into the
+constructor, so users can tune your follower through `Matchmaker(kwargs=...)`;
+`config_passthrough: {exclude: [...]}` holds back keys your class does not take.
+
+The providers are the same values `build_follower(mm)` reads off `mm` (see the
+table below); the full list lives in `matchmaker/registry.py` as `PROVIDERS`.
+Other per-method keys:
+
+| key | meaning |
+| --- | --- |
+| `reference` | which score-side features to build — `note_array` (default), `score_audio`, or `korzeniowski_score_model`; see `REFERENCE_BUILDERS` |
+| `processor_args` | per-method overrides for the chosen processor's arguments |
+| `default_kwargs` | the defaults for `Matchmaker(kwargs=...)`, i.e. `DEFAULT_KWARGS[input_type][name]` |
+| `family` | a grouping label, exposed as `OLTW_METHODS` / `PARANGONAR_METHODS` |
+| `event_based` | MIDI only: the stream emits one message per frame instead of polling |
+
+Feature processors are declared the same way, under `processors:`.
+
+If your follower needs a value no provider names, add one to
+`matchmaker/registry.py` rather than putting Python in the YAML:
+
+```python
+from matchmaker.registry import provider
+
+@provider("audio_hop_seconds")
+def _audio_hop_seconds(mm):
+    return mm.hop_length / mm.sample_rate
+```
+
+The spec is validated at import time, so a typo in a class path, a provider
+name, or a method key raises immediately with a message naming the entry.
+
+### B. Register it from your own code
+
 Call `register_method()`. Your follower does not have to live in this package —
 registration works from any module, so a tracker you keep in your own project
 (or submit to the benchmark) plugs into the same pipeline as a built-in one.
