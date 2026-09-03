@@ -9,7 +9,7 @@ from typing import Dict, Optional, Tuple, Union
 import librosa
 import numpy as np
 
-from matchmaker.features.processor import Processor
+from matchmaker.features.processor import Processor, KorzeniowskiObservation
 
 SAMPLE_RATE = 44100
 FRAME_RATE = 30
@@ -217,73 +217,48 @@ class MelSpectrogramProcessor(Processor):
 
 class LogSpectralEnergyProcessor(Processor):
     """
-    Log Spectral Energy feature processor based on Dixon (2005).
+    Log Spectral Energy feature processor from Dixon (2005).
 
-    Computes a spectral representation using a linear-log frequency scale,
-    then applies half-wave rectified first-order difference to emphasize
-    note onsets.
-
-    The frequency axis is mapped to:
-    - Linear below 370 Hz
-    - Logarithmic spacing from 370 Hz to 12,500 Hz (49 bins)
-    - One bin above 12,500 Hz
+    A ~46 ms Hamming-windowed STFT (2048 samples at 44.1 kHz) is summed as a
+    power spectrum (the paper's "energy") into a linear-log frequency scale:
+    identity bins up to the linear-to-log crossover (where the FFT bin
+    spacing reaches one semitone), nearest-semitone bins above, capped at
+    MIDI 127 (84 elements at 44.1 kHz). A half-wave rectified first-order
+    difference emphasizes note onsets, and each difference vector is
+    normalized per frame (L2 by default; ``None`` disables normalization).
     """
 
-    LINEAR_FREQ_LIMIT = 370  # Hz (F#4)
-    LOG_FREQ_LIMIT = 12500  # Hz (G9)
-    N_LOG_BINS = 49  # paper: 84 - 34 - 1
+    WINDOW_DURATION = 2048 / 44100  # seconds (paper: "46ms (2048 points)")
+    REF_FREQ = 440.0  # Hz
 
     def __init__(
         self,
         sample_rate: int = SAMPLE_RATE,
         hop_length: int = HOP_LENGTH,
-        normalize: bool = True,
+        norm: Optional[float] = 2,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.hop_length = hop_length
-        self.n_fft = 2 * self.hop_length
-        self.normalize = normalize
-        self._prev_spectrum = None
+        self.norm = norm
+        self.n_fft = int(2 ** round(np.log2(self.WINDOW_DURATION * self.sample_rate)))
+        self.window = np.hamming(self.n_fft)
 
-        # Pre-compute frequency axis and masks
-        self._freqs = librosa.fft_frequencies(sr=self.sample_rate, n_fft=self.n_fft)
-        self._linear_mask = self._freqs <= self.LINEAR_FREQ_LIMIT
-        self._log_mask = (self._freqs > self.LINEAR_FREQ_LIMIT) & (
-            self._freqs <= self.LOG_FREQ_LIMIT
-        )
-        self._high_mask = self._freqs > self.LOG_FREQ_LIMIT
+        # Per-FFT-bin output index on the linear-log frequency scale.
+        df = self.sample_rate / self.n_fft
+        cross = int(2.0 / (2.0 ** (1.0 / 12.0) - 1.0))
+        offset = int(round(np.log2(cross * df / self.REF_FREQ) * 12.0 + 69.0))
+        n_bins = self.n_fft // 2 + 1
+        self.freq_map = np.arange(n_bins)
+        k = np.arange(cross + 1, n_bins)
+        midi = np.minimum(np.log2(k * df / self.REF_FREQ) * 12.0 + 69.0, 127.0)
+        self.freq_map[cross + 1 :] = cross + np.round(midi).astype(int) - offset
+        self.dim = int(self.freq_map[-1] + 1)
 
-        # Create N+1 edges for N log-spaced bins
-        self._log_bin_edges = np.logspace(
-            np.log10(self.LINEAR_FREQ_LIMIT),
-            np.log10(self.LOG_FREQ_LIMIT),
-            num=self.N_LOG_BINS + 1,
-        )
-
-        # Pre-compute bin assignments for log frequencies
-        log_freqs = self._freqs[self._log_mask]
-        bin_idx = np.digitize(log_freqs, self._log_bin_edges) - 1
-        self._log_bin_idx = np.clip(bin_idx, 0, self.N_LOG_BINS - 1)
+        self.prev_spectrum = None
 
     def reset(self):
-        self._prev_spectrum = None
-
-    def _map_frequencies(self, magnitude):
-        """Map FFT magnitude spectrum to linear-log frequency scale."""
-        linear_bins = magnitude[self._linear_mask]
-
-        log_bins = magnitude[self._log_mask]
-        n_frames = magnitude.shape[1]
-        log_mapped = np.zeros((self.N_LOG_BINS, n_frames), dtype=np.float32)
-        for b in range(self.N_LOG_BINS):
-            mask = self._log_bin_idx == b
-            if np.any(mask):
-                log_mapped[b] = np.sum(log_bins[mask], axis=0)
-
-        high_freq = np.sum(magnitude[self._high_mask], axis=0, keepdims=True)
-
-        return np.vstack((linear_bins, log_mapped, high_freq)).astype(np.float32)
+        self.prev_spectrum = None
 
     def __call__(
         self,
@@ -295,31 +270,30 @@ class LogSpectralEnergyProcessor(Processor):
             n_fft=self.n_fft,
             win_length=self.n_fft,
             hop_length=self.hop_length,
+            window=self.window,
             center=False,
-            dtype=np.float32,
         )
-        magnitude = np.abs(stft_result)
 
-        # Map to linear-log frequency scale
-        feature_vector = self._map_frequencies(magnitude)
+        spectrum = stft_result.real**2 + stft_result.imag**2
+
+        # Sum FFT bins into the linear-log frequency scale
+        feature_vector = np.zeros((self.dim, spectrum.shape[1]), dtype=np.float32)
+        np.add.at(feature_vector, self.freq_map, spectrum)
 
         # Half-wave rectified first-order difference (stateful for streaming)
-        if self._prev_spectrum is not None:
-            combined = np.hstack((self._prev_spectrum, feature_vector))
+        if self.prev_spectrum is not None:
+            combined = np.hstack((self.prev_spectrum, feature_vector))
             diff = np.diff(combined, axis=1)
         else:
             diff = np.diff(
                 feature_vector, axis=1, prepend=np.zeros_like(feature_vector[:, :1])
             )
 
-        self._prev_spectrum = feature_vector[:, -1:]
+        self.prev_spectrum = feature_vector[:, -1:]
 
         result = np.maximum(diff, 0).T
-
-        if self.normalize:
-            norms = np.linalg.norm(result, axis=1, keepdims=True)
-            norms = np.maximum(norms, 1e-10)
-            result = result / norms
+        if self.norm is not None:
+            result = librosa.util.normalize(result, norm=self.norm, axis=1)
 
         return result, f_time
 
@@ -386,3 +360,160 @@ def compute_features_from_audio(
     features, _ = feature_processor((score_y, 0.0))
 
     return features
+
+
+class KorzeniowskiAudioProcessor(Processor):
+    """
+    Audio feature processor for the Korzeniowski score follower.
+
+    Produces
+
+        • spectral template observation
+        • onset strength
+        • loudness
+
+    for every incoming audio frame.
+    """
+
+    def __init__(
+        self,
+        sample_rate: int = 44100,
+        hop_length: int = 512,
+        win_length: int = 2048,
+        n_fft: int = 4096,
+    ):
+
+        super().__init__()
+
+        self.sample_rate = sample_rate
+        self.hop_length = hop_length
+        self.win_length = win_length
+        self.n_fft = n_fft
+
+        self.window = librosa.filters.get_window(
+            "hann",
+            self.win_length,
+            fftbins=True,
+        )
+
+        self.previous_spectrum = None
+
+        self.frame_index = 0
+
+    def reset(self):
+
+        self.previous_spectrum = None
+
+        self.frame_index = 0
+
+    def __call__(
+        self,
+        data: InputAudioFrame,
+    ):
+
+        frame, f_time = data
+        spectrum = self.compute_spectrum(frame)
+
+        onset = self.compute_onset(
+            frame
+        )
+
+        loudness = self.compute_loudness(
+            frame
+        )
+
+        observation = KorzeniowskiObservation(
+            spectrum=spectrum,
+            onset=onset,
+            loudness=loudness,
+        )
+
+        return observation, f_time
+    
+    def compute_spectrum(
+        self,
+        frame: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Compute the normalized magnitude spectrum.
+        """
+
+        frame = frame[:self.win_length] * self.window
+
+        magnitude = np.abs(
+            np.fft.rfft(
+                frame,
+                n=self.n_fft,
+            )
+        )
+
+        norm = np.linalg.norm(magnitude)
+
+        if norm > 0:
+            magnitude /= norm
+
+        return magnitude
+
+
+    def compute_onset(self, frame: np.ndarray) -> float:
+        """
+        Compute normalized causal spectral-flux onset activation.
+
+        Parameters
+        ----------
+        frame : np.ndarray
+            Raw audio samples for the current frame.
+
+        Returns
+        -------
+        float
+            Non-negative normalized onset activation.
+        """
+        windowed = frame[:self.win_length] * self.window
+
+        spectrum = np.abs(np.fft.rfft(windowed, n=self.n_fft))
+
+        if self.previous_spectrum is None:
+            self.previous_spectrum = spectrum
+            return 0.0
+
+        # Spectral flux: only count increases.
+        flux = np.maximum(
+            0.0,
+            spectrum - self.previous_spectrum,
+        ).sum()
+
+        # Normalize by current spectral energy.
+        energy = spectrum.sum()
+
+        self.previous_spectrum = spectrum
+
+        return float(flux / (energy + 1e-8))
+
+
+    def compute_loudness(
+        self,
+        frame: np.ndarray,
+    ) -> float:
+        """
+        Compute frame loudness (dBFS).
+
+        Returns
+        -------
+        float
+            Loudness in decibels.
+        """
+
+        rms = librosa.feature.rms(
+            y=frame,
+            frame_length=self.win_length,
+            hop_length=len(frame),
+            center=False,
+        )[0, 0]
+
+        loudness = librosa.amplitude_to_db(
+            np.array([[rms]]),
+            ref=1.0,
+        )[0, 0]
+
+        return float(loudness)
