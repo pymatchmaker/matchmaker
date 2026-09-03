@@ -87,7 +87,7 @@ class OnlineParangonarAlignment(OnlineAlignment):
         raise ValueError(method)
 
     def step(self, performance_note) -> None:
-        self.current_inde = self.matcher(performance_note)
+        self.current_index = self.matcher(performance_note)
 
 
 class ParangonarProcessor(Processor):
