@@ -117,6 +117,13 @@ processors:
       args:
         piano_range: {config: piano_range, default: true}
 
+    # Emits one partitura note-array row per MIDI note. It refuses a frame
+    # holding more than one note, so the methods using it must run event-based
+    # (``event_based: true`` below, which leaves polling_period unset).
+    parangonar:
+      class: matchmaker.external:ParangonarProcessor
+      args: {}
+
 # ===========================================================================
 # Score followers
 # ===========================================================================
@@ -308,17 +315,24 @@ methods:
         num_particles: 500
 
     # --- parangonar trackers; all four differ only by the ``method`` string ---
+    #
+    # They read the live stream themselves rather than being fed frames, so
+    # they take no performance file and consume one note at a time:
+    # ParangonarProcessor raises on a frame holding a chord, which is what
+    # ``event_based`` and the null polling period below prevent.
     OPTM: &parangonar
       family: parangonar
       class: matchmaker.external:OnlineParangonarAlignment
+      event_based: true
       args:
         reference_features: {from: note_array_with_grace}
-        performance_file: {from: performance_file}
         method: {from: method}
         queue: {from: queue}
+      # Whatever the user passes reaches the parangonar matcher's constructor.
+      config_passthrough: true
       default_kwargs:
-        processor: pitch
-        piano_range: true
+        processor: parangonar
+        polling_period: null
 
     OTM: *parangonar
 
