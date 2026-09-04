@@ -320,22 +320,44 @@ methods:
     # they take no performance file and consume one note at a time:
     # ParangonarProcessor raises on a frame holding a chord, which is what
     # ``event_based`` and the null polling period below prevent.
-    OPTM: &parangonar
+    # ``method`` is written out rather than taken from the registry key: the
+    # key is a name the method is registered under, and a follower re-registered
+    # under a different one (verify_equivalence.py clones as `clone-OPTM`) must
+    # still build the matcher it actually is.
+    _parangonar_args: &parangonar_args
+      reference_features: {from: note_array_with_grace}
+      queue: {from: queue}
+
+    _parangonar: &parangonar
       family: parangonar
       class: matchmaker.external:OnlineParangonarAlignment
       event_based: true
-      args:
-        reference_features: {from: note_array_with_grace}
-        method: {from: method}
-        queue: {from: queue}
       # Whatever the user passes reaches the parangonar matcher's constructor.
       config_passthrough: true
       default_kwargs:
         processor: parangonar
         polling_period: null
 
-    OTM: *parangonar
+    OPTM:
+      <<: *parangonar
+      args:
+        <<: *parangonar_args
+        method: OPTM
 
-    SLT_OLTW: *parangonar
+    OTM:
+      <<: *parangonar
+      args:
+        <<: *parangonar_args
+        method: OTM
 
-    SL_OLTW: *parangonar
+    SLT_OLTW:
+      <<: *parangonar
+      args:
+        <<: *parangonar_args
+        method: SLT_OLTW
+
+    SL_OLTW:
+      <<: *parangonar
+      args:
+        <<: *parangonar_args
+        method: SL_OLTW
