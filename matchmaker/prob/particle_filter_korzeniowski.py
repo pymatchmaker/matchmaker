@@ -72,7 +72,11 @@ class ParticleFilterKorzeniowski(OnlineAlignment):
         self.queue_timeout = QUEUE_TIMEOUT
 
         self.num_particles = num_particles
-        self.rng = RNG
+        # Per instance, not the module-level RNG. Sharing one stream makes a
+        # piece's result depend on how many draws the pieces before it happened
+        # to make, so the same piece scores differently depending on its
+        # position in the run -- and changing --num-shards changes the numbers.
+        self.rng = np.random.RandomState(SEED)
 
         self.initial_logtempo = np.log2(self.notated_tempo)
 

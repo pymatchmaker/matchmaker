@@ -206,9 +206,6 @@ methods:
     pfkorz:
       class: matchmaker.prob.particle_filter_korzeniowski:ParticleFilterKorzeniowski
       reference: korzeniowski_score_model
-      # Sequential Monte Carlo, drawing from a module-level RNG: two runs in
-      # one process continue the same random stream and do not match.
-      deterministic: false
       args:
         score_model: {from: reference_features}
         observation_type: audio
@@ -298,7 +295,6 @@ methods:
     pfkorz:
       class: matchmaker.prob.particle_filter_korzeniowski:ParticleFilterKorzeniowski
       reference: korzeniowski_score_model
-      deterministic: false
       args:
         score_model: {from: reference_features}
         observation_type: midi

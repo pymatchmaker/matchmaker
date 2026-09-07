@@ -301,8 +301,16 @@ class Matchmaker(object):
         try:
             ext = Path(self.score_file).suffix.lower()
             if ext in (".musicxml", ".xml", ".mxl"):
+                # force_note_ids="keep" is what partitura's own load_score
+                # passes. Without it load_musicxml leaves the file's ids as
+                # they are, and a score that reuses one (many do) ends up with
+                # a note array whose ids are not unique -- which breaks
+                # note_array(include_grace_notes=True) inside partitura, and
+                # any downstream matching that joins on the id.
                 score = partitura.load_musicxml(
-                    self.score_file, ignore_invisible_objects=True
+                    self.score_file,
+                    ignore_invisible_objects=True,
+                    force_note_ids="keep",
                 )
             else:
                 score = partitura.load_score(self.score_file)
