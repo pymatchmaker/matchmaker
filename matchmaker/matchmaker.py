@@ -140,11 +140,6 @@ def register_method(
                 f"Method '{name}' is already registered for {input_type}. "
                 "Pass overwrite=True to replace it."
             )
-        if name in AVAILABLE_METHODS[input_type]:
-            raise ValueError(
-                f"'{name}' is a built-in {input_type} method and cannot be "
-                "replaced by registration."
-            )
 
     CUSTOM_METHODS[key] = {
         "build_follower": build_follower,
