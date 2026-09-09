@@ -1,5 +1,6 @@
 """Tests for the declarative method/processor registry (``methods.yaml``)."""
 
+import inspect
 import unittest
 import warnings
 
@@ -15,6 +16,7 @@ from matchmaker.matchmaker import (
 )
 from matchmaker.registry import (
     PROVIDERS,
+    _rejected_kwargs,
     REFERENCE_BUILDERS,
     REGISTRY,
     SPEC_FILE,
@@ -53,6 +55,23 @@ class TestSpecFile(unittest.TestCase):
             for name, spec in methods.items():
                 with self.subTest(method=name):
                     self.assertIn(spec.reference, REFERENCE_BUILDERS)
+
+    def test_processor_args_are_accepted_by_the_default_processor(self):
+        """A method must at least be buildable the way it ships."""
+        for input_type, methods in REGISTRY.methods.items():
+            for name, spec in methods.items():
+                if not spec.processor_args:
+                    continue
+                processor = REGISTRY.default_processor_of(input_type, name)
+                cls = load_object(REGISTRY.processor(input_type, processor).cls_path)
+                with self.subTest(method=f"{input_type}.{name}"):
+                    self.assertEqual(
+                        _rejected_kwargs(cls, spec.processor_args),
+                        [],
+                        f"methods.{input_type}.{name}.processor_args names "
+                        f"arguments its default processor '{processor}' "
+                        f"({cls.__name__}) does not accept",
+                    )
 
 
 class TestPublicTables(unittest.TestCase):
@@ -192,6 +211,58 @@ class TestValidation(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "more than one of"):
             self._load(text)
+
+
+class TestProcessorArgs(unittest.TestCase):
+    """``processor_args`` is a requirement, so an incompatible pairing fails."""
+
+    class FakeMM:
+        input_type = "midi"
+        method = "hmm"
+
+        def __init__(self):
+            self.config = {"piano_range": True}
+
+    def test_the_declared_override_is_applied(self):
+        self.assertTrue(REGISTRY.build_processor(self.FakeMM(), "pitch").return_pitch_list)
+
+    def test_a_processor_that_cannot_take_it_is_refused(self):
+        with self.assertRaises(ValueError) as caught:
+            REGISTRY.build_processor(self.FakeMM(), "pianoroll")
+        message = str(caught.exception)
+        # The reader must learn which method, which argument, which processor,
+        # and what to use instead -- the bare TypeError named only the last.
+        for expected in ("hmm", "return_pitch_list", "pianoroll", "'pitch'"):
+            self.assertIn(expected, message)
+
+    def test_a_method_without_processor_args_is_unaffected(self):
+        mm = self.FakeMM()
+        mm.method = "pthmm"
+        self.assertFalse(REGISTRY.build_processor(mm, "pitch").return_pitch_list)
+        REGISTRY.build_processor(mm, "pianoroll")  # no override, no complaint
+
+    def test_the_check_follows_the_method_argument(self):
+        """Building another method's processor is checked against that method."""
+        mm = self.FakeMM()
+        mm.method = "pthmm"
+        with self.assertRaisesRegex(ValueError, "hmm"):
+            REGISTRY.build_processor(mm, "pianoroll", method="hmm")
+
+
+class TestRejectedKwargs(unittest.TestCase):
+    def test_names_only_what_the_signature_refuses(self):
+        class Strict:
+            def __init__(self, a=1, b=2):
+                pass
+
+        self.assertEqual(_rejected_kwargs(Strict, {"a": 1, "c": 3, "d": 4}), ["c", "d"])
+
+    def test_a_constructor_taking_kwargs_refuses_nothing(self):
+        class Open:
+            def __init__(self, a=1, **kwargs):
+                pass
+
+        self.assertEqual(_rejected_kwargs(Open, {"a": 1, "anything": 2}), [])
 
 
 class TestLookupErrors(unittest.TestCase):

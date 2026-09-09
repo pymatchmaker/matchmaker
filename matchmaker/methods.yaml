@@ -95,7 +95,9 @@ processors:
       class: matchmaker.features.midi:PitchProcessor
       args:
         piano_range: {config: piano_range, default: true}
-        # ``hmm`` overrides this via its ``processor_args``.
+        # return_pitch_list=false for pthmm/outerhmm, whose observation models want the binary
+        # vector; ``hmm`` needs the pitch list and flips this via its
+        # ``processor_args``, which is why it only runs on this processor.
         return_pitch_list: false
 
     pitchclass:
@@ -134,7 +136,11 @@ processors:
 #   reference    named reference-feature builder, default ``note_array``
 #                (see registry.REFERENCE_BUILDERS)
 #   default_kwargs   defaults for ``Matchmaker(kwargs=...)``
-#   processor_args   per-method overrides for the chosen processor
+#   processor_args   arguments the method's processor *must* take, applied on
+#                    top of that processor's own ``args``. A requirement, not a
+#                    preference: a processor whose constructor does not accept
+#                    them is refused at build time rather than silently fed the
+#                    wrong observation format.
 #   config_passthrough   splat the remaining ``mm.config``
 #   family       grouping label, exposed as ``<FAMILY>_METHODS``
 #   event_based  MIDI only: stream emits one message per frame (no polling)

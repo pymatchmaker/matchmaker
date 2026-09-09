@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import functools
 import importlib
+import inspect
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
@@ -336,6 +337,19 @@ def _resolve_args(args: Dict[str, _ArgSpec], mm) -> Dict[str, Any]:
     return {name: spec.resolve(mm) for name, spec in args.items()}
 
 
+def _rejected_kwargs(cls: Callable, names) -> List[str]:
+    """Which of ``names`` ``cls`` would refuse as constructor keywords.
+
+    Checked against the signature rather than by catching the ``TypeError``:
+    a constructor can raise ``TypeError`` for its own reasons, and blaming
+    that on the spec would send the reader to the wrong file.
+    """
+    params = inspect.signature(cls).parameters
+    if any(p.kind is p.VAR_KEYWORD for p in params.values()):
+        return []
+    return sorted(set(names) - set(params))
+
+
 # ---------------------------------------------------------------------------
 # Specs
 # ---------------------------------------------------------------------------
@@ -621,6 +635,25 @@ class Registry:
             if method_spec is not None and method_spec.processor_args
             else None
         )
+        if overrides:
+            # ``processor_args`` is a requirement the method places on its
+            # processor, not a preference: PitchIOIHMM's observation model
+            # indexes pitch profiles by pitch value, so a processor that
+            # cannot emit them produces silently wrong alignments rather than
+            # no alignment. Refuse the pairing instead of letting the
+            # constructor raise a TypeError that names neither side.
+            name = mm.method if method is None else method
+            rejected = _rejected_kwargs(load_object(spec.cls_path), overrides)
+            if rejected:
+                default = self.default_processor_of(mm.input_type, name)
+                raise ValueError(
+                    f"Method '{name}' requires {rejected} on its feature "
+                    f"processor (methods.{mm.input_type}.{name}.processor_args "
+                    f"in {self.source}), but processor '{processor_type}' does "
+                    f"not accept {'them' if len(rejected) > 1 else 'it'}. "
+                    f"Run '{name}' with '{default}', or pick another processor "
+                    f"whose constructor takes {rejected}."
+                )
         return spec.build(mm, overrides)
 
     def build_follower(self, mm, method: str):
