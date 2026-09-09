@@ -8,9 +8,12 @@ TODO
 * Adapt models from ACCompanion
 """
 
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
+from scipy.interpolate import interp1d
+
+from matchmaker.utils.errors import MatchmakerInvalidParameterTypeError
 
 
 class TempoModel(object):
@@ -388,13 +391,193 @@ class LinearTempoModel(TempoModel):
         self.prev_perf_onset = performed_onset
         self.prev_score_onset = score_onset
 
-        if tempo_correction_term < 0:
-            beat_period = self.beat_period - self.eta_t * tempo_correction_term
-        else:
-            beat_period = self.beat_period - 2 * self.eta_t * tempo_correction_term
+        beat_period = self._next_beat_period(tempo_correction_term, score_onset)
 
         if beat_period >= self.min_beat_period and beat_period <= self.max_beat_period:
             self.beat_period = beat_period
+
+    def _next_beat_period(
+        self,
+        tempo_correction_term: float,
+        score_onset: float,
+    ) -> float:
+        """
+        Candidate beat period, before it is clamped to the allowed range.
+
+        Subclasses override this method to change the tempo update rule.
+        """
+        if tempo_correction_term < 0:
+            return self.beat_period - self.eta_t * tempo_correction_term
+
+        return self.beat_period - 2 * self.eta_t * tempo_correction_term
+
+
+class LinearTempoExpectationsModel(LinearTempoModel):
+    """
+    Linear synchronization model with tempo expectations.
+
+    Like `LinearTempoModel`, but the asynchrony correction is applied to the beat
+    period *expected* at the current score onset, rather than to the previously
+    estimated one. This lets the model follow a known tempo curve (e.g., one
+    predicted by a basis mixer) while still adapting to the performer.
+
+    The expectations are anchored to `init_beat_period`: they are scaled by
+    `init_beat_period / tempo_expectations_func(first_score_onset)`, so only the
+    *shape* of the expected tempo curve is used, not its absolute tempo.
+
+    Parameters
+    ----------
+    init_beat_period : float
+        Initial beat period in seconds.
+    init_score_onset : float
+        Initial score onset in beats (can be negative).
+    eta_t : float
+        Learning rate for the tempo.
+    eta_p : float
+        Learning rate for the onset.
+    min_beat_period : float
+        Smallest beat period (in seconds) the model is allowed to take.
+    max_beat_period : float
+        Largest beat period (in seconds) the model is allowed to take.
+    tempo_expectations_func : callable, np.ndarray or None
+        The expected beat period as a function of score onset. Either a callable
+        mapping a score onset (in beats) to a beat period (in seconds), or a
+        2D array whose first column holds score onsets and whose second column
+        holds the corresponding beat periods (linearly interpolated). If None,
+        the expectations are constant at `init_beat_period`, so the model simply
+        corrects the initial tempo. The expectations can also be set after
+        initialization, which is useful when the tempo curve only becomes
+        available once the score has been processed.
+    first_score_onset : float or None
+        Score onset the expectations are anchored to. If None, `init_score_onset`
+        is used.
+    """
+
+    scale_factor: float
+
+    def __init__(
+        self,
+        init_beat_period: float = 0.5,
+        init_score_onset: float = 0,
+        eta_t: float = 0.2,
+        eta_p: float = 0.6,
+        min_beat_period: float = 0.25,
+        max_beat_period: float = 3,
+        tempo_expectations_func: Optional[
+            Union[Callable[[float], float], np.ndarray]
+        ] = None,
+        first_score_onset: Optional[float] = None,
+    ) -> None:
+        super().__init__(
+            init_beat_period=init_beat_period,
+            init_score_onset=init_score_onset,
+            eta_t=eta_t,
+            eta_p=eta_p,
+            min_beat_period=min_beat_period,
+            max_beat_period=max_beat_period,
+        )
+        self.has_tempo_expectations = True
+        # Set the private attributes directly, since the scale factor can only be
+        # computed once the anchor, the initial tempo and the expectations are known.
+        self._fiso = first_score_onset
+        self._init_beat_period = init_beat_period
+        self.scale_factor = 1.0
+        self.tempo_expectations_func = tempo_expectations_func
+
+    @property
+    def tempo_expectations_func(self) -> Callable[[float], float]:
+        return self._tempo_expectations_func
+
+    @tempo_expectations_func.setter
+    def tempo_expectations_func(
+        self,
+        value: Optional[Union[Callable[[float], float], np.ndarray]],
+    ) -> None:
+        if value is None:
+            # Constant expectations, so that the model is usable before the
+            # tempo curve is known.
+            init_beat_period = self.init_beat_period
+            self._tempo_expectations_func = lambda score_onset: init_beat_period
+        elif isinstance(value, np.ndarray):
+            self._tempo_expectations_func = interp1d(
+                x=value[:, 0],
+                y=value[:, 1],
+                kind="linear",
+                fill_value="extrapolate",
+            )
+        elif callable(value):
+            self._tempo_expectations_func = value
+        else:
+            raise MatchmakerInvalidParameterTypeError(
+                parameter_name="tempo_expectations_func",
+                required_parameter_type=(Callable, np.ndarray),
+                actual_parameter_type=type(value),
+            )
+
+        self._update_scale_factor()
+
+    @property
+    def init_beat_period(self) -> float:
+        return self._init_beat_period
+
+    @init_beat_period.setter
+    def init_beat_period(self, value: float) -> None:
+        self._init_beat_period = value
+        self._update_scale_factor()
+
+    @property
+    def first_score_onset(self) -> float:
+        if self._fiso is None:
+            self._fiso = self.prev_score_onset
+
+        return self._fiso
+
+    @first_score_onset.setter
+    def first_score_onset(self, value: Optional[float]) -> None:
+        self._fiso = value
+        self._update_scale_factor()
+
+    def _update_scale_factor(self) -> None:
+        """
+        Re-anchor the expectations to the initial beat period. Called whenever
+        one of the three quantities it depends on changes.
+        """
+        expected_init_bp = float(self._tempo_expectations_func(self.first_score_onset))
+
+        if expected_init_bp > 0 and np.isfinite(expected_init_bp):
+            self.scale_factor = self.init_beat_period / expected_init_bp
+        else:
+            # An unusable anchor would scale every expectation to zero, nan or
+            # inf, so take the expectations at face value instead.
+            self.scale_factor = 1.0
+
+    def tempo_expectations(self, score_onset: float) -> float:
+        """
+        Expected beat period at a score onset, relative to the beat period
+        expected at the first score onset.
+
+        Parameters
+        ----------
+        score_onset : float
+            Score onset in beats.
+
+        Returns
+        -------
+        float
+            Expected beat period in seconds.
+        """
+        return float(self.tempo_expectations_func(score_onset) * self.scale_factor)
+
+    def _next_beat_period(
+        self,
+        tempo_correction_term: float,
+        score_onset: float,
+    ) -> float:
+        """
+        See documentation in LinearTempoModel above. Here the asynchrony corrects
+        the expected beat period instead of the previously estimated one.
+        """
+        return self.tempo_expectations(score_onset) - self.eta_t * tempo_correction_term
 
 
 class JointAdaptationAnticipationModel(TempoModel):
