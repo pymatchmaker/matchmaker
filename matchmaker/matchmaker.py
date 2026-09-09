@@ -128,7 +128,7 @@ def register_method(
             raise TypeError(f"{label} must be callable or None.")
 
     key = (input_type, name)
-    
+
     if name in REGISTRY.methods[input_type]:
         raise ValueError(
             f"'{name}' is a built-in {input_type} method "
