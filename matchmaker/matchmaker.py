@@ -128,6 +128,12 @@ def register_method(
             raise TypeError(f"{label} must be callable or None.")
 
     key = (input_type, name)
+    
+    if name in REGISTRY.methods[input_type]:
+        raise ValueError(
+            f"'{name}' is a built-in {input_type} method "
+            "and cannot be replaced by registration."
+        )
     if not overwrite:
         if key in CUSTOM_METHODS:
             raise ValueError(
