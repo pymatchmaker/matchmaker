@@ -28,7 +28,7 @@ class OnlineAlignment(object):
     ------
     Per step: ``current_position`` (float beat).
     On completion: ``alignment_path`` — a ``(2, T)`` ``np.ndarray`` whose
-    rows are score beats and performance times in seconds.
+    rows are performance times in seconds and score beats.
 
     Subclass requirements
     ---------------------
@@ -68,7 +68,7 @@ class OnlineAlignment(object):
         self.current_perf_time = perf_time
         self.step(observation)
         self.current_position = self.get_current_position()
-        self._alignment_path.append((self.current_position, perf_time))
+        self._alignment_path.append((perf_time, self.current_position))
         return self.current_position
 
     @property

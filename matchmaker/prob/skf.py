@@ -617,7 +617,7 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
             position = base_beat
 
         self.current_position = position
-        self._alignment_path.append((position, self.current_perf_time))
+        self._alignment_path.append((self.current_perf_time, position))
         self.input_index += 1
         self.latency_stats = set_latency_stats(
             time.time() - t0, self.latency_stats, self.input_index

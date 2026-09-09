@@ -376,7 +376,7 @@ Matchmaker has the following pipeline:
   observations from the queue (or directly via `__call__`), updates its
   score position per step, and yields the current beat. On stream end it
   returns the final `alignment_path` — a `(2, T)` `np.ndarray` of
-  `(score_beat, perf_time)` pairs.
+  `(perf_time, score_beat)` pairs.
 
 `STREAM_END` is a module-level sentinel (not a tuple); `OnlineAlignment.run()`
 checks for it and exits the read loop.
@@ -411,6 +411,11 @@ follower.current_position # 0.5  (= score_positions[2])
 ```
 
 ## Alignment Methods
+
+Methods and processors are declared in
+[`matchmaker/methods.yaml`](matchmaker/methods.yaml) — the authoritative list is
+`matchmaker.AVAILABLE_METHODS`. Adding one is described in
+[HOW_TO_MAKE_CUSTOM_SCORE_FOLLOWERS.md](HOW_TO_MAKE_CUSTOM_SCORE_FOLLOWERS.md).
 
 ### Audio (`input_type="audio"`)
 

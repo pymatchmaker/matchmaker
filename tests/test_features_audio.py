@@ -134,6 +134,23 @@ class TestAudioProcessors(unittest.TestCase):
         self.assertGreater(log_spectral_output.shape[1], 0)
         self.assertEqual(log_spectral_output.shape[0], 30 - 1)
 
+        nonzero = np.linalg.norm(log_spectral_output, axis=1) > 0
+        np.testing.assert_allclose(
+            np.linalg.norm(log_spectral_output[nonzero], axis=1),
+            1.0,
+            atol=1e-6,
+        )
+
+    def test_log_spectral_energy_processor_without_normalization(self):
+        processor = LogSpectralEnergyProcessor(norm=None)
+        sample_audio = create_sample_audio_waveform(440)
+        output, _ = processor((sample_audio, 0.0))
+
+        nonzero_norms = np.linalg.norm(output, axis=1)
+        nonzero_norms = nonzero_norms[nonzero_norms > 0]
+        self.assertGreater(nonzero_norms.size, 0)
+        self.assertFalse(np.allclose(nonzero_norms, 1.0))
+
 
 class TestComputeFeaturesFromAudio(unittest.TestCase):
     def test_compute_features_from_audio_input_str(self):
