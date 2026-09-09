@@ -147,8 +147,7 @@ def register_method(
     }
     if name not in AVAILABLE_METHODS[input_type]:
         AVAILABLE_METHODS[input_type].append(name)
-    if default_kwargs:
-        DEFAULT_KWARGS[input_type][name] = dict(default_kwargs)
+    DEFAULT_KWARGS[input_type][name] = dict(default_kwargs or {})
 
 
 def unregister_method(name: str, input_type: str) -> None:
