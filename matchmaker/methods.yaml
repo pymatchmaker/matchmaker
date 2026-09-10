@@ -230,6 +230,20 @@ methods:
     # --- several followers at once, arbitrated by a meta-policy ---
     # Composite: `members` are built by matchmaker.ensemble.build (each through
     # its own sub-Matchmaker) and fed by one merged, modality-tagged stream.
+    # Any method listed in this file can be a member, including the parangonar
+    # trackers below, and the same method may appear several times: a member's
+    # own ``kwargs`` are merged over that method's ``default_kwargs``, so
+    # repeats configured differently are simply different members.
+    #
+    # Besides the arguments below, the ensemble reads these keys straight off
+    # ``kwargs`` (see matchmaker.ensemble.build):
+    #   members               [{method, input_type, processor, name, kwargs}, ...]
+    #   midi_polling_period   frame window of the merged MIDI stream; by default
+    #                         the finest one any member asked for, which is
+    #                         event-based as soon as one member is
+    #   audio_performance_file / midi_performance_file / device
+    # ``policy`` also accepts a mapping naming a policy and its parameters:
+    #   policy: {name: agreement, tolerance: 2.0, stickiness: 0.3}
     _ensemble: &ensemble
       class: matchmaker.ensemble:EnsembleFollower
       stream: merged
@@ -343,10 +357,11 @@ methods:
 
     # --- parangonar trackers; all four differ only by the ``method`` string ---
     #
-    # They read the live stream themselves rather than being fed frames, so
-    # they take no performance file and consume one note at a time:
+    # They consume one note at a time rather than a frame of them:
     # ParangonarProcessor raises on a frame holding a chord, which is what
-    # ``event_based`` and the null polling period below prevent.
+    # ``event_based`` and the null polling period below prevent. In an
+    # ensemble the same requirement pulls the whole merged MIDI stream to
+    # event-based framing.
     # ``method`` is written out rather than taken from the registry key: the
     # key is a name the method is registered under, and a follower re-registered
     # under a different one (verify_equivalence.py clones as `clone-OPTM`) must

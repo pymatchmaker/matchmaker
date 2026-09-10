@@ -42,12 +42,17 @@ class EnsembleMember:
         frame before stepping the follower.
     modality : str
         ``"audio"`` or ``"midi"`` — selects which raw frames feed this member.
+    polling_period : float or None
+        MIDI members only: the frame window this member asks for, as resolved
+        by its own ``Matchmaker`` (``None`` = one message per frame). The
+        merged stream runs at the finest period across the members.
     """
 
     name: str
     follower: OnlineAlignment
     processor: Processor
     modality: str
+    polling_period: Optional[float] = None
     _stepped: bool = field(default=False, repr=False)
     _last_perf_time: Optional[float] = field(default=None, repr=False)
 
@@ -161,7 +166,7 @@ class EnsembleFollower(OnlineAlignment):
             return self.current_position
         record_time = self._decide(observation[0], perf_time)
         self.current_position = self.get_current_position()
-        self._alignment_path.append((self.current_position, record_time))
+        self._alignment_path.append((record_time, self.current_position))
         return self.current_position
 
     def step(self, observation: Any) -> None:

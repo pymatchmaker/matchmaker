@@ -298,6 +298,27 @@ for beat in mm.run():
     print(beat)
 ```
 
+**Any method can be a member**, including the parangonar trackers
+(`SL_OLTW`, `SLT_OLTW`, `OTM`, `OPTM`) and methods added at runtime with
+`register_method`. A member's `kwargs` are merged over that method's defaults
+(rather than replacing them, as at the top level), so the same tracker can
+appear several times under different configurations — a cheap way to cover a
+tracker's failure modes with itself:
+
+```python
+kwargs={
+    "members": [
+        {"method": "SLT_OLTW", "name": "slt-narrow", "kwargs": {"window_size": 10}},
+        {"method": "SLT_OLTW", "name": "slt-wide",   "kwargs": {"window_size": 80}},
+        {"method": "OTM"},
+        {"method": "pthmm"},
+    ],
+}
+```
+
+Repeated names are suffixed (`pthmm`, `pthmm_2`, ...); pass `name` to label a
+member yourself.
+
 **Mixing modalities.** Members may have different modalities. Give each member
 an `input_type` and supply a performance file per modality (one audio + one MIDI
 stream are merged into a single tagged input; for live use, pass
@@ -328,6 +349,12 @@ mm = Matchmaker(
 | `"confidence_median"` | Confidence-weighted median of the member positions (robust blend). |
 | `"rl"` | Reinforcement-learning selection over members. The policy is trained *offline* (reward = alignment error vs. ground-truth annotations); until a trained policy is supplied it falls back to the agreement policy. See `matchmaker/ensemble/policy.py`. |
 
+A policy's own parameters are set by passing a mapping instead of a name:
+
+```python
+"policy": {"name": "agreement", "tolerance": 2.0, "stickiness": 0.3},
+```
+
 **Ensemble `kwargs`:**
 
 | Key | Default | Description |
@@ -337,13 +364,19 @@ mm = Matchmaker(
 | `feedback` | `True` | Feed the chosen position back into drifted members. |
 | `feedback_strength` | `0.5` | Correction strength `[0, 1]` (hard snap for OLTW, soft belief-nudge for HMM/PF/SKF). |
 | `feedback_threshold` | `2.0` | Only members farther than this many beats from the chosen position are corrected, preserving member diversity. |
+| `feedback_exclude_selected` | `False` | Never correct the member the policy currently trusts. |
 | `audio` | `{}` | Shared audio framing for all audio members, e.g. `{"sample_rate": 22050, "frame_rate": 50}`. |
+| `midi_polling_period` | derived | Frame window of the merged MIDI stream. By default the finest one any member asks for — which is event-based (`None`) as soon as one member is, as the parangonar trackers are. |
 | `audio_performance_file` / `midi_performance_file` | `None` | Per-modality performance files (simulation). |
 | `device` | `{}` | Per-modality live devices, e.g. `{"audio": ..., "midi": ...}`. |
 
 > **Note:** all audio members share a single capture, so they run at one common
 > `sample_rate`/`hop_length` (set via the `audio` key) rather than each method's
-> individually tuned rate; likewise all MIDI members share one `polling_period`.
+> individually tuned rate; likewise all MIDI members share one frame window.
+> Sharing costs nothing to a member framed *finer* than it asked for — the extra
+> frames hold no notes and its processor skips them — but a member tuned for
+> longer windows (`pthmm`) does behave slightly differently when another member
+> pulls the stream down to one note per frame.
 
 
 ## Package Overview

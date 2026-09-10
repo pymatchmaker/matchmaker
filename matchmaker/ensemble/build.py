@@ -17,7 +17,6 @@ would as a top-level method -- including methods added via ``methods.yaml`` or
 from typing import TYPE_CHECKING, Any, List, Tuple
 
 from matchmaker.features.audio import FRAME_RATE, SAMPLE_RATE
-from matchmaker.io.midi import POLLING_PERIOD
 from matchmaker.io.queue import RECVQueue
 
 from .follower import EnsembleMember
@@ -26,7 +25,7 @@ from .merged_stream import MergedStream, RawProcessor
 if TYPE_CHECKING:  # pragma: no cover
     from matchmaker.matchmaker import Matchmaker
 
-__all__ = ["build_members", "build_merged_stream"]
+__all__ = ["build_members", "build_merged_stream", "midi_polling_period"]
 
 MIDI_FRAME_RATE = 1  # dummy value for MIDI input
 
@@ -75,7 +74,11 @@ def build_members(mm: "Matchmaker") -> List[EnsembleMember]:
     """Build the ensemble's members from ``mm.config['members']``.
 
     Each entry is ``{"method": ..., "input_type": ..., "processor": ...,
-    "name": ..., "kwargs": {...}}``; only ``method`` is required.
+    "name": ..., "kwargs": {...}}``; only ``method`` is required. A member's
+    ``kwargs`` are merged over that method's ``default_kwargs`` rather than
+    replacing them (the top-level ``Matchmaker`` semantics), so listing a
+    method several times with different ``kwargs`` gives several differently
+    configured members. Repeated names are suffixed ``_2``, ``_3``, ...
     """
     from matchmaker.matchmaker import DEFAULT_KWARGS, Matchmaker
 
@@ -131,9 +134,44 @@ def build_members(mm: "Matchmaker") -> List[EnsembleMember]:
                 follower=sub.score_follower,
                 processor=sub.processor,
                 modality=modality,
+                polling_period=(
+                    sub.polling_period if modality == "midi" else None
+                ),
             )
         )
     return members
+
+
+def midi_polling_period(mm: "Matchmaker", members: List[EnsembleMember]):
+    """The frame window the merged MIDI stream runs at.
+
+    Every MIDI member reads the same capture, so the stream runs at the finest
+    period any of them asked for (``None`` -- one message per frame -- being
+    the finest of all). Finer than requested costs a member nothing: extra
+    frames carry no note-ons and its processor returns ``None`` for them.
+    Coarser merges messages a member needed apart, and
+    ``ParangonarProcessor`` refuses such a frame outright.
+
+    ``kwargs['midi_polling_period']`` overrides the derivation, including with
+    ``None`` to force event-based framing. An override that would starve a
+    member is refused here rather than at the first chord of the performance.
+    """
+    periods = [m.polling_period for m in members if m.modality == "midi"]
+    event_based = [
+        m.name for m in members if m.modality == "midi" and m.polling_period is None
+    ]
+    if "midi_polling_period" in mm.config:
+        override = mm.config["midi_polling_period"]
+        if override is not None and event_based:
+            raise ValueError(
+                f"midi_polling_period={override!r} frames several MIDI messages "
+                f"together, but member(s) {event_based} consume one message at a "
+                "time. Leave it unset (the members decide) or pass None."
+            )
+        return override
+    if not periods or event_based:
+        return None
+    return min(periods)
 
 
 def build_merged_stream(mm: "Matchmaker", wait: bool) -> MergedStream:
@@ -186,10 +224,7 @@ def build_merged_stream(mm: "Matchmaker", wait: bool) -> MergedStream:
                     processor=RawProcessor(),
                     port=devices.get("midi", mm.device_name_or_index),
                     file_path=midi_perf,
-                    polling_period=mm.config.get(
-                        "polling_period",
-                        getattr(mm, "polling_period", POLLING_PERIOD),
-                    ),
+                    polling_period=midi_polling_period(mm, members),
                 ),
             )
         )

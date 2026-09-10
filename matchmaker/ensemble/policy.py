@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Mapping, Optional
 
 import numpy as np
 
@@ -272,22 +272,37 @@ POLICIES: Dict[str, Callable[..., MetaPolicy]] = {
 
 
 def build_policy(spec, member_names: List[str]) -> MetaPolicy:
-    """Resolve a policy spec (name, instance, or ``None``) to a ``MetaPolicy``.
+    """Resolve a policy spec (name, mapping, instance, or ``None``).
 
     ``None`` -> default :class:`AgreementGatedPolicy`. A string is looked up in
-    :data:`POLICIES` (``"rl"`` is given ``member_names``). A ``MetaPolicy``
-    instance is returned unchanged.
+    :data:`POLICIES`. A mapping is that same lookup on its ``name`` key with
+    the remaining keys passed to the constructor, so a tuned policy stays
+    expressible in ``kwargs`` (and therefore in ``methods.yaml``)::
+
+        policy: {name: agreement, tolerance: 2.0, stickiness: 0.3}
+
+    ``"rl"`` is given ``member_names`` either way. A ``MetaPolicy`` instance is
+    returned unchanged.
     """
     if spec is None:
         return AgreementGatedPolicy()
     if isinstance(spec, MetaPolicy):
         return spec
+    if isinstance(spec, Mapping):
+        params = dict(spec)
+        name = params.pop("name", None)
+        if name is None:
+            raise ValueError(f"Policy mapping {spec} is missing its 'name' key.")
+        return _build_named_policy(name, member_names, **params)
     if isinstance(spec, str):
-        if spec not in POLICIES:
-            raise ValueError(
-                f"Unknown policy '{spec}'. Available: {sorted(POLICIES)}"
-            )
-        if spec == "rl":
-            return RLMetaPolicy(member_names=member_names)
-        return POLICIES[spec]()
+        return _build_named_policy(spec, member_names)
     raise TypeError(f"Invalid policy spec of type {type(spec)}")
+
+
+def _build_named_policy(name: str, member_names: List[str], **params) -> MetaPolicy:
+    """Instantiate the registered policy ``name`` with ``params``."""
+    if name not in POLICIES:
+        raise ValueError(f"Unknown policy '{name}'. Available: {sorted(POLICIES)}")
+    if name == "rl":
+        params.setdefault("member_names", member_names)
+    return POLICIES[name](**params)

@@ -5,7 +5,11 @@ import numpy as np
 
 from matchmaker import EXAMPLE_PIECES, Matchmaker
 from matchmaker.ensemble import EnsembleFollower, MergedStream
-from matchmaker.matchmaker import AVAILABLE_METHODS, DEFAULT_KWARGS
+from matchmaker.matchmaker import (
+    AVAILABLE_METHODS,
+    DEFAULT_KWARGS,
+    PARANGONAR_METHODS,
+)
 from matchmaker.registry import REGISTRY, STREAM_BUILDERS
 
 warnings.filterwarnings("ignore", module="partitura")
@@ -128,6 +132,19 @@ class TestEnsembleBuild(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._build(kwargs={"policy": "agreement"})
 
+    def test_alignment_path_rows_follow_the_convention(self):
+        """Row 0 is performance seconds, row 1 score beats — as everywhere else."""
+        mm = self._build(kwargs={"members": [{"method": "pthmm"}]})
+        list(mm.run(verbose=False))
+        wp = mm.score_follower.alignment_path
+
+        self.assertEqual(wp.shape[0], 2)
+        # The performance runs longer in seconds than the excerpt does in
+        # beats, and only the score axis is quantized to score positions.
+        score_positions = set(np.unique(mm.score_part.note_array()["onset_beat"]))
+        self.assertTrue(set(wp[1]).issubset(score_positions))
+        self.assertTrue(all(b >= a for a, b in zip(wp[0], wp[0][1:])))
+
     def test_run_yields_monotonic_positions(self):
         mm = self._build(kwargs={"members": [{"method": "pthmm"}]})
         positions = list(mm.run(verbose=False))
@@ -140,6 +157,105 @@ class TestEnsembleBuild(unittest.TestCase):
             "ensemble positions should not go backwards",
         )
         self.assertIsInstance(mm.score_follower.alignment_path, np.ndarray)
+
+
+class TestEnsembleMidiFraming(unittest.TestCase):
+    """The merged MIDI stream is framed for the hungriest member."""
+
+    def setUp(self):
+        piece = EXAMPLE_PIECES["simple_mozart"]
+        self.score_file = piece["score"]
+        self.perf_midi = piece["midi"]
+
+    def _stream_polling_period(self, members, **kwargs):
+        mm = Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.perf_midi,
+            input_type="midi",
+            method="ensemble",
+            kwargs={"members": members, **kwargs},
+        )
+        return dict(mm.stream.children)["midi"].polling_period
+
+    def test_finest_member_period_wins(self):
+        # pthmm asks for 0.01, arzt for 0.001
+        self.assertEqual(
+            self._stream_polling_period([{"method": "pthmm"}, {"method": "arzt"}]),
+            0.001,
+        )
+
+    def test_event_based_member_makes_the_stream_event_based(self):
+        """A parangonar member is fed one note per frame, so all members are."""
+        self.assertIsNone(
+            self._stream_polling_period([{"method": "pthmm"}, {"method": "SL_OLTW"}])
+        )
+
+    def test_override_that_would_starve_a_member_is_refused(self):
+        with self.assertRaises(ValueError) as ctx:
+            self._stream_polling_period(
+                [{"method": "pthmm"}, {"method": "SL_OLTW"}],
+                midi_polling_period=0.01,
+            )
+        self.assertIn("SL_OLTW", str(ctx.exception))
+
+    def test_period_can_be_overridden(self):
+        self.assertEqual(
+            self._stream_polling_period(
+                [{"method": "pthmm"}], midi_polling_period=0.05
+            ),
+            0.05,
+        )
+        self.assertIsNone(
+            self._stream_polling_period(
+                [{"method": "pthmm"}], midi_polling_period=None
+            )
+        )
+
+
+class TestParangonarMembers(unittest.TestCase):
+    """The parangonar trackers work as ensemble members like any other method."""
+
+    def setUp(self):
+        piece = EXAMPLE_PIECES["simple_mozart"]
+        self.score_file = piece["score"]
+        self.perf_midi = piece["midi"]
+
+    def _build(self, members, **kwargs):
+        return Matchmaker(
+            score_file=self.score_file,
+            performance_file=self.perf_midi,
+            input_type="midi",
+            method="ensemble",
+            kwargs={"members": members, **kwargs},
+        )
+
+    def test_every_parangonar_method_can_be_a_member(self):
+        mm = self._build([{"method": m} for m in PARANGONAR_METHODS])
+        self.assertEqual(
+            [member.name for member in mm.score_follower.members],
+            list(PARANGONAR_METHODS),
+        )
+
+    def test_mixed_ensemble_runs(self):
+        mm = self._build([{"method": "pthmm"}, {"method": "SL_OLTW"}])
+        positions = list(mm.run(verbose=False))
+
+        self.assertGreater(len(positions), 0)
+        self.assertGreater(mm.score_follower.alignment_path.shape[1], 0)
+
+    def test_repeated_method_takes_its_own_kwargs(self):
+        """The same tracker twice, configured differently, is two members."""
+        mm = self._build(
+            [
+                {"method": "SL_OLTW", "name": "narrow", "kwargs": {"window_size": 5}},
+                {"method": "SL_OLTW", "name": "wide", "kwargs": {"window_size": 50}},
+            ]
+        )
+        widths = [
+            member.follower.matcher.tracker.window_size
+            for member in mm.score_follower.members
+        ]
+        self.assertEqual(widths, [5, 50])
 
 
 if __name__ == "__main__":
