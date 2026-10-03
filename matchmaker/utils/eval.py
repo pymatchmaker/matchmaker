@@ -234,7 +234,14 @@ def gt_from_match(match_path, score_notes):
             )
             for n in match_notes
         }
-    onset_at = {str(n["id"]): float(n["onset_sec"]) for n in perf.note_array()}
+    # note_on, not note_array()'s float32 onset_sec: a MIDI follower stamps its
+    # updates with the float64 onset, and a GT time rounded below it would hide
+    # the update made at that very onset from the perf -> score lookup.
+    onset_at = {
+        str(n["id"]): float(n["note_on"])
+        for part in perf.performedparts
+        for n in part.notes
+    }
 
     beats, secs = [], []
     for a in alignment:
