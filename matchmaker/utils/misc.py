@@ -15,6 +15,7 @@ import mido
 import numpy as np
 import partitura
 from partitura.score import ScoreLike
+from partitura.utils.music import to_quarter_tempo
 
 # Tempo marking to BPM mapping
 # Reference: https://en.wikipedia.org/wiki/Tempo#Basic_tempo_markings
@@ -262,7 +263,8 @@ def get_tempo_from_score(
         try:
             for tempo_obj in score_part.iter_all(partitura.score.Tempo):
                 if hasattr(tempo_obj, "bpm") and tempo_obj.bpm is not None:
-                    return float(tempo_obj.bpm)
+                    # the marking's unit ("h" = 100 is 200 quarters per minute)
+                    return float(to_quarter_tempo(tempo_obj.unit or "q", tempo_obj.bpm))
         except Exception:
             pass
 
