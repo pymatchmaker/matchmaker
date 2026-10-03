@@ -116,11 +116,11 @@ class CQTProcessor(Processor):
             sr=self.sample_rate,
             hop_length=self.hop_length,
             norm=self.norm,
-            dtype=np.float32,
             fmin=librosa.note_to_hz("A0"),
             n_bins=88,
         )
-        return np.abs(cqt).T[1:-1], f_time
+        # the modulus of the complex CQT (a real dtype would make librosa drop the imaginary part)
+        return np.abs(cqt).T.astype(np.float32)[1:-1], f_time
 
 
 class CQTSpectralFluxProcessor(Processor):
@@ -162,9 +162,9 @@ class CQTSpectralFluxProcessor(Processor):
             n_bins=self.n_bins,
             bins_per_octave=self.bins_per_octave,
             norm=self.norm,
-            dtype=np.float32,
         )
-        cqt_features = np.abs(cqt).T
+        # the modulus of the complex CQT (a real dtype would make librosa drop the imaginary part)
+        cqt_features = np.abs(cqt).T.astype(np.float32)
 
         if self.include_spectral_flux:
             if self.prev_magnitude is None:
@@ -323,9 +323,9 @@ class RawSpectrumProcessor(Processor):
             win_length=self.n_fft,
             hop_length=self.hop_length,
             center=False,
-            dtype=np.float32,
         )
-        return np.abs(stft).T, f_time  # (n_frames, n_bins)
+        # the modulus of the complex STFT (a real dtype would make librosa drop the imaginary part)
+        return np.abs(stft).T.astype(np.float32), f_time  # (n_frames, n_bins)
 
 
 def compute_features_from_audio(
