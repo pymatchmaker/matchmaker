@@ -84,7 +84,6 @@ class OnlineTimeWarpingArzt(OnlineAlignment):
         )
         self.N_ref: int = self.reference_features.shape[0]
         self.step_size: int = step_size
-        self.reset()
 
     def reset(self) -> None:
         self.current_index = 0
@@ -165,6 +164,7 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
             "min_latency": float("inf"),
         }
         self._init_distance_func(distance_func)
+        self.reset()
 
     def __call__(self, observation: Any, perf_time: float) -> float:
         t0 = time.time()
@@ -278,6 +278,307 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
         self.input_index += 1
 
 
+class OnlineTimeWarpingArztTempoFrame(OnlineTimeWarpingArztFrame):
+    """Frame-level OLTW with Arzt & Widmer (2010) Simple Tempo Model.
+
+    Dynamically tracks relative tempo via rectified backward path
+    and stretches/compresses reference score features on the fly.
+    """
+
+    def __init__(
+        self,
+        reference_features: NDArray[np.float32],
+        score_positions: NDArray[np.float32],
+        window_size: int = WINDOW_SIZE,
+        step_size: int = STEP_SIZE,
+        distance_func: Union[
+            str, Callable, Tuple[str, Dict[str, Any]]
+        ] = OnlineTimeWarpingArztFrame.DEFAULT_DISTANCE_FUNC,
+        start_window_size: Union[float, int] = START_WINDOW_SIZE,
+        frame_rate: int = FRAME_RATE,
+        ref_frame_to_beat: NDArray = None,
+        queue: Optional[RECVQueue] = None,
+        tempo_window_size: float = 3.0,
+        tempo_min_past: float = 1.0,
+        tempo_n_onsets: int = 20,
+        random_seed: Optional[int] = 1984,
+        use_tempo_model: bool = True,
+        **kwargs,
+    ) -> None:
+        if ref_frame_to_beat is None:
+            raise ValueError(
+                "Frame-level Arzt requires `ref_frame_to_beat` (per-frame beat mapping)."
+            )
+        self.use_tempo_model = use_tempo_model
+        self.tempo_window_size = tempo_window_size
+        self.tempo_min_past = tempo_min_past
+        self.tempo_n_onsets = tempo_n_onsets
+        self.random_seed = random_seed
+        self._original_reference_features = reference_features.copy()
+        self._original_ref_frame_to_beat = ref_frame_to_beat.copy()
+        super().__init__(
+            reference_features=reference_features,
+            score_positions=score_positions,
+            window_size=window_size,
+            step_size=step_size,
+            distance_func=distance_func,
+            start_window_size=start_window_size,
+            frame_rate=frame_rate,
+            ref_frame_to_beat=ref_frame_to_beat,
+            queue=queue,
+            **kwargs,
+        )
+        self.reset()
+
+    def reset(self) -> None:
+        super().reset()
+        self.current_relative_tempo: float = 1.0
+        self._consecutive_alterations: int = 0
+        self._backpointers: list = []
+        self._rng = np.random.RandomState(self.random_seed)
+        # The tempo model stretches the reference on the fly; restore the
+        # pristine copy so each run starts from the notated score.
+        self.reference_features = self._original_reference_features.copy()
+        self._ref_frame_to_beat = self._original_ref_frame_to_beat.copy()
+        self.N_ref = self.reference_features.shape[0]
+        self.global_cost_matrix = np.full(
+            (self.N_ref + 1, 2), np.inf, dtype=np.float32
+        )
+        self._init_onset_mask()
+
+    def _init_onset_mask(self) -> None:
+        self.is_onset_frame = np.zeros(self.N_ref, dtype=bool)
+        onset_frames = np.searchsorted(self._ref_frame_to_beat, self.score_positions)
+        valid = onset_frames < self.N_ref
+        self.is_onset_frame[onset_frames[valid]] = True
+
+    def _get_backward_path(self, max_history_frames: int = 500) -> list:
+        """Trace backward path from current position using recorded backpointers."""
+        if not self._backpointers or self.input_index <= 0:
+            return [(self._current_frame, 0)]
+
+        path = []
+        s = self._current_frame
+        i = self.input_index - 1
+        min_i = max(0, i - max_history_frames)
+        while i >= min_i and s >= 0:
+            path.append((s, i))
+            if i >= len(self._backpointers):
+                i -= 1
+                s = max(0, s - 1)
+                continue
+            w_start, w_end, bp = self._backpointers[i]
+            if bp is not None and w_start <= s < w_end:
+                code = bp[s - w_start]
+                if code == 1:
+                    s -= 1
+                elif code == 2:
+                    i -= 1
+                elif code == 3:
+                    s -= 1
+                    i -= 1
+                else:
+                    break
+            else:
+                s = max(0, s - 1)
+                i -= 1
+        path.reverse()
+        return path
+
+    def _compute_relative_tempo(self) -> float:
+        """Estimate current relative tempo via rectified backward path (Arzt 2010 Sec. 4.1)."""
+        if self.input_index < int(self.frame_rate * 1.5):
+            return 1.0
+
+        cur_perf_time = self.input_index / self.frame_rate
+        max_history = int(self.frame_rate * 10)
+        path = self._get_backward_path(max_history_frames=max_history)
+        if len(path) < 2:
+            return 1.0
+
+        score_frames = np.array([p[0] for p in path])
+        perf_frames = np.array([p[1] for p in path])
+
+        s_min, s_max = int(score_frames[0]), int(score_frames[-1])
+        if s_max <= s_min:
+            return 1.0
+
+        local_onsets = np.where(self.is_onset_frame[s_min : s_max + 1])[0] + s_min
+        if len(local_onsets) < 2:
+            return 1.0
+
+        t_s_list = []
+        t_p_list = []
+        for sf in local_onsets:
+            idx = int(np.searchsorted(score_frames, sf))
+            if idx < len(score_frames):
+                t_s_list.append(sf / self.frame_rate)
+                t_p_list.append(perf_frames[idx] / self.frame_rate)
+
+        if len(t_s_list) < 2:
+            return 1.0
+
+        t_s_arr = np.array(t_s_list)
+        t_p_arr = np.array(t_p_list)
+
+        # Onsets at least tempo_min_past seconds in the past
+        valid_mask = t_p_arr <= (cur_perf_time - self.tempo_min_past)
+        valid_indices = np.where(valid_mask)[0]
+        if len(valid_indices) == 0:
+            return 1.0
+
+        if len(valid_indices) > self.tempo_n_onsets:
+            valid_indices = valid_indices[-self.tempo_n_onsets:]
+
+        half_win = self.tempo_window_size / 2.0
+        tempi = []
+        for idx in valid_indices:
+            ts = t_s_arr[idx]
+            w_start = ts - half_win
+            w_end = ts + half_win
+            if w_start >= t_s_arr[0] and w_end <= t_s_arr[-1]:
+                tp_start = float(np.interp(w_start, t_s_arr, t_p_arr))
+                tp_end = float(np.interp(w_end, t_s_arr, t_p_arr))
+                delta_p = tp_end - tp_start
+                delta_s = w_end - w_start
+                if delta_p > 1e-4:
+                    tempi.append(delta_s / delta_p)
+                else:
+                    tempi.append(1.0)
+
+        if not tempi:
+            return 1.0
+
+        m = len(tempi)
+        weights = np.arange(1, m + 1)
+        t_est = float(np.sum(np.array(tempi) * weights) / np.sum(weights))
+        return float(np.clip(t_est, 0.33, 3.0))
+
+    def _alter_score_representation(self, t: float) -> None:
+        """Alter score representation on the fly according to relative tempo (Arzt 2010 Sec. 4.2)."""
+        ps = self._current_frame
+        if ps + 2 >= self.N_ref:
+            return
+
+        if self._consecutive_alterations >= 3:
+            self._consecutive_alterations = 0
+            return
+
+        r = self._rng.uniform(0.0, 1.0)
+
+        if t > 1.0:
+            threshold = 1.0 / t
+            if r > threshold:
+                if self.is_onset_frame[ps + 1] or self.is_onset_frame[ps + 2]:
+                    self._consecutive_alterations = 0
+                    return
+
+                mean_feat = 0.5 * (
+                    self.reference_features[ps + 1] + self.reference_features[ps + 2]
+                )
+                self.reference_features[ps + 1] = mean_feat
+                self.reference_features = np.delete(
+                    self.reference_features, ps + 2, axis=0
+                )
+
+                mean_beat = 0.5 * (
+                    self._ref_frame_to_beat[ps + 1] + self._ref_frame_to_beat[ps + 2]
+                )
+                self._ref_frame_to_beat[ps + 1] = mean_beat
+                self._ref_frame_to_beat = np.delete(self._ref_frame_to_beat, ps + 2)
+
+                self.is_onset_frame = np.delete(self.is_onset_frame, ps + 2)
+                self.global_cost_matrix = np.delete(
+                    self.global_cost_matrix, ps + 3, axis=0
+                )
+                self.N_ref = self.reference_features.shape[0]
+                self._consecutive_alterations += 1
+            else:
+                self._consecutive_alterations = 0
+
+        elif t < 1.0:
+            threshold = t
+            if r > threshold:
+                if self.is_onset_frame[ps] or self.is_onset_frame[ps + 1]:
+                    self._consecutive_alterations = 0
+                    return
+
+                mean_feat = 0.5 * (
+                    self.reference_features[ps] + self.reference_features[ps + 1]
+                )
+                self.reference_features = np.insert(
+                    self.reference_features, ps + 1, mean_feat, axis=0
+                )
+
+                mean_beat = 0.5 * (
+                    self._ref_frame_to_beat[ps] + self._ref_frame_to_beat[ps + 1]
+                )
+                self._ref_frame_to_beat = np.insert(
+                    self._ref_frame_to_beat, ps + 1, mean_beat
+                )
+
+                self.is_onset_frame = np.insert(self.is_onset_frame, ps + 1, False)
+                row1 = np.asarray(self.global_cost_matrix[ps + 1])
+                row2 = np.asarray(self.global_cost_matrix[ps + 2])
+                new_cost_row = 0.5 * (row1 + row2)
+                new_cost_row[1] = np.inf
+                self.global_cost_matrix = np.insert(
+                    self.global_cost_matrix, ps + 2, new_cost_row, axis=0
+                )
+                self.N_ref = self.reference_features.shape[0]
+                self._consecutive_alterations += 1
+            else:
+                self._consecutive_alterations = 0
+        else:
+            self._consecutive_alterations = 0
+
+    def step(self, input_features: NDArray[np.float32]) -> None:
+        if self.use_tempo_model and self.input_index > 0:
+            self.current_relative_tempo = self._compute_relative_tempo()
+            self._alter_score_representation(self.current_relative_tempo)
+
+        min_costs = np.inf
+        min_index = max(self.window_index - self.step_size, 0)
+
+        window_start, window_end = self.get_window()
+        window_cost = self.vdist(
+            self.reference_features[window_start:window_end],
+            input_features.squeeze(),
+            self.distance_func,
+        )
+
+        bp = None
+        if self.use_tempo_model:
+            bp = np.zeros(window_end - window_start, dtype=np.int8)
+
+        self.global_cost_matrix, min_index, min_costs = oltw_arzt_loop(
+            global_cost_matrix=self.global_cost_matrix,
+            window_cost=window_cost,
+            window_start=window_start,
+            window_end=window_end,
+            input_index=self.input_index,
+            min_costs=min_costs,
+            min_index=min_index,
+            backpointers=bp,
+        )
+
+        if self.use_tempo_model:
+            self._backpointers.append((window_start, window_end, bp))
+
+        if self.input_index > 0:
+            self._current_frame = int(
+                np.clip(
+                    min_index,
+                    self._current_frame,
+                    self._current_frame + self.step_size,
+                )
+            )
+        else:
+            self._current_frame = min_index
+        self.current_index = self._frame_to_score_idx(self._current_frame)
+        self.input_index += 1
+
+
 # ---------------------------------------------------------------------------
 # Event-level subclass (MIDI)
 # ---------------------------------------------------------------------------
@@ -313,6 +614,7 @@ class OnlineTimeWarpingArztEvent(OnlineTimeWarpingArzt):
         self._window_size = window_size
         self._start_window_size = start_window_size
         self._scipy_metric = distance_func
+        self.reset()
 
     def get_window(self) -> Tuple[int, int]:
         w = self._window_size

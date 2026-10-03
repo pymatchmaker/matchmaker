@@ -169,6 +169,37 @@ methods:
         start_window_size: 0.1
         step_size: 3
 
+    arzt_tempo:
+      family: oltw
+      class: matchmaker.dp:OnlineTimeWarpingArztTempoFrame
+      reference: score_audio
+      args: *oltw_frame_args
+      config_passthrough: true
+      default_kwargs:
+        window_size: 10
+        start_window_size: 0.1
+        step_size: 3
+        use_tempo_model: true
+        random_seed: 1984
+
+    arzt_multi_fold:
+      family: oltw
+      class: matchmaker.dp:OnlineTimeWarpingArztMultiFold
+      reference: score_audio
+      args:
+        <<: *oltw_frame_args
+        score_part: {from: score_part}
+        tempo: {from: tempo}
+        sample_rate: {from: sample_rate}
+        processor: {from: processor}
+      config_passthrough: true
+      default_kwargs:
+        window_size: 10
+        start_window_size: 0.1
+        step_size: 3
+        selection_window: 50
+        switch_margin: 0.05
+
     dixon:
       family: oltw
       class: matchmaker.dp:OnlineTimeWarpingDixonFrame
