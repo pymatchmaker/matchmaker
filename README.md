@@ -334,6 +334,11 @@ follower.current_position # 0.5  (= score_positions[2])
 
 ## Alignment Methods
 
+Methods and processors are declared in
+[`matchmaker/methods.yaml`](matchmaker/methods.yaml) — the authoritative list is
+`matchmaker.AVAILABLE_METHODS`. Adding one is described in
+[HOW_TO_MAKE_CUSTOM_SCORE_FOLLOWERS.md](HOW_TO_MAKE_CUSTOM_SCORE_FOLLOWERS.md).
+
 ### Audio (`input_type="audio"`)
 
 Default method: `"arzt"`

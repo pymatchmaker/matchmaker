@@ -132,14 +132,142 @@ with MidiStream(processor = processor) as stream: # or AudioStream
 
 ## Make it accessible in `Matchmaker`
 
-Register the tracker in `matchmaker/matchmaker.py`:
+There are two ways, and which one you want depends on where your follower lives.
 
-1. Add the method name to `AVAILABLE_METHODS["audio"]` or
-   `AVAILABLE_METHODS["midi"]`.
-2. Add an entry in `DEFAULT_KWARGS` if your method needs specific kwargs.
-3. Add a branch in `_build_audio_follower` or `_build_symbolic_follower`.
+| | |
+| --- | --- |
+| Follower **inside** this package | declare it in [`matchmaker/methods.yaml`](matchmaker/methods.yaml) — no Python glue |
+| Follower **outside** this package | call `register_method()` from your own module |
 
-Then it works through the public API:
+### A. Declare it in `methods.yaml`
+
+`matchmaker/methods.yaml` is the registry of everything `Matchmaker` can build:
+which class each method and processor is, and which arguments it gets.
+`matchmaker/registry.py` interprets it, so `matchmaker/matchmaker.py` contains no
+per-method branching at all. Adding a built-in follower is one YAML block:
+
+```yaml
+methods:
+  midi:
+    my_score_follower:
+      class: my_package.followers:MyScoreFollower
+      args:
+        reference_features: {from: reference_features}
+        score_positions: {from: score_positions}
+        queue: {from: queue}
+        has_insertions: true
+      config_passthrough: true
+      default_kwargs:
+        processor: pitch
+        piano_range: true
+```
+
+Every entry under `args` is either a plain literal or a one-key mapping saying
+where the value comes from:
+
+| written as | means |
+| --- | --- |
+| `has_insertions: true` | a literal |
+| `{from: queue}` | a **provider** — a value read off the live `Matchmaker` |
+| `{config: n_fft, default: 512}` | a key of the user's `kwargs`, with a fallback |
+| `{config: norm, default: 2, pop: true}` | ...and consume it, so `config_passthrough` does not repeat it |
+| `{value: {a: 1}}` | a literal that is itself a mapping |
+
+`config_passthrough: true` splats whatever is left in `mm.config` into the
+constructor, so users can tune your follower through `Matchmaker(kwargs=...)`;
+`config_passthrough: {exclude: [...]}` holds back keys your class does not take.
+
+The providers are the same values `build_follower(mm)` reads off `mm` (see the
+table below); the full list lives in `matchmaker/registry.py` as `PROVIDERS`.
+Other per-method keys:
+
+| key | meaning |
+| --- | --- |
+| `reference` | which score-side features to build — `note_array` (default), `score_audio`, or `korzeniowski_score_model`; see `REFERENCE_BUILDERS` |
+| `processor_args` | per-method overrides for the chosen processor's arguments |
+| `default_kwargs` | the defaults for `Matchmaker(kwargs=...)`, i.e. `DEFAULT_KWARGS[input_type][name]` |
+| `family` | a grouping label, exposed as `OLTW_METHODS` / `PARANGONAR_METHODS` |
+| `event_based` | MIDI only: the stream emits one message per frame instead of polling |
+
+Feature processors are declared the same way, under `processors:`.
+
+If your follower needs a value no provider names, add one to
+`matchmaker/registry.py` rather than putting Python in the YAML:
+
+```python
+from matchmaker.registry import provider
+
+@provider("audio_hop_seconds")
+def _audio_hop_seconds(mm):
+    return mm.hop_length / mm.sample_rate
+```
+
+The spec is validated at import time, so a typo in a class path, a provider
+name, or a method key raises immediately with a message naming the entry.
+
+### B. Register it from your own code
+
+Call `register_method()`. Your follower does not have to live in this package —
+registration works from any module, so a tracker you keep in your own project
+(or submit to the benchmark) plugs into the same pipeline as a built-in one.
+
+```python
+import numpy as np
+from matchmaker import register_method
+
+register_method(
+    "my_score_follower",
+    input_type="audio",
+    build_follower=lambda mm: MyScoreFollower(
+        reference_features=mm.reference_features,
+        score_positions=mm.score_positions,
+        queue=mm.stream.queue,
+        frame_rate=mm.frame_rate,
+        **mm.config,
+    ),
+    default_kwargs={"processor": "chroma", "frame_rate": 30},
+)
+```
+
+`build_follower(mm)` is called once per `Matchmaker`, after the score is loaded
+and the stream exists. Read what you need off `mm`:
+
+| | |
+| --- | --- |
+| `mm.score_part` | the unfolded, merged partitura `Part` |
+| `mm.score_positions` | ascending score beat of every note onset |
+| `mm.reference_features` | the score-side features (see below) |
+| `mm.tempo` | notated tempo in BPM, or 120 if the score has no marking |
+| `mm.frame_rate`, `mm.sample_rate`, `mm.hop_length` | audio stream settings |
+| `mm.config` | whatever `default_kwargs` / `kwargs=` supplied |
+| `mm.stream.queue` | pass this as your follower's `queue` |
+
+Two optional hooks handle the cases where the defaults do not fit:
+
+- **`build_processor(mm)`** — omit it and Matchmaker builds the standard
+  processor named by `default_kwargs["processor"]`, which is usually what you
+  want. Pass one only for a processor of your own.
+- **`build_reference(mm)`** — omit it for the score note array. Audio followers
+  that align against a synthesised score rendering override it:
+
+  ```python
+  def build_reference(mm):
+      from matchmaker.utils.misc import generate_score_audio
+      audio = generate_score_audio(mm.score_part, mm.tempo, mm.sample_rate)
+      features, _ = mm.processor((audio.astype(np.float32), 0.0))
+      mm.processor.reset()   # the same processor then handles the live input
+      return features
+  ```
+
+  Frame-based audio followers usually also want `mm.ref_frame_to_beat()`, the
+  score beat of each reference frame.
+
+Registering under the name of a built-in method, or twice under the same name,
+raises — pass `overwrite=True` if replacing is what you meant.
+`unregister_method(name, input_type)` undoes it, which is mostly useful in
+tests.
+
+Either way, it then works through the public API:
 
 ```python
 from matchmaker import Matchmaker
