@@ -306,8 +306,16 @@ class AudioOuterProductHMM(OnlineAlignment):
         }
         # Bottom transitions a_{l',l}^{(i)} and exit probs e_l^{(i)} (Eq.(5))
         frame_rate = float(self.sample_rate) / float(self.hop_length)
+        # chord durations in quarter notes: `tempo` is quarter-note BPM, while
+        # score beats follow the time signature (an eighth in 6/8, a half in 2/2)
+        notes = (
+            self.reference_features
+            if isinstance(self.reference_features, np.ndarray)
+            else self.reference_features.note_array()
+        )
+        quarter_at = dict(zip(notes["onset_beat"].tolist(), notes["onset_quarter"].tolist()))
         self.a00 = self._compute_chord_self_transition_probs(
-            unique_onsets=unique_onsets,
+            onset_quarters=np.array([quarter_at[b] for b in unique_onsets.tolist()]),
             tempo=tempo,
             frame_rate=frame_rate,
         )
@@ -346,20 +354,21 @@ class AudioOuterProductHMM(OnlineAlignment):
 
     @staticmethod
     def _compute_chord_self_transition_probs(
-        unique_onsets: np.ndarray,
+        onset_quarters: np.ndarray,
         tempo: float,
         frame_rate: float,
     ) -> np.ndarray:
         """
         Compute self-transition probabilities from chord durations (Eq.5).
 
-        a_i = 1 - 1/d_i, where d_i = duration_sec / frame_time.
+        a_i = 1 - 1/d_i, where d_i = duration_sec / frame_time. ``onset_quarters``
+        are the chord onsets in quarter notes and ``tempo`` is quarter-note BPM.
         """
-        N = len(unique_onsets)
+        N = len(onset_quarters)
         frame_time = 1.0 / max(frame_rate, 1e-6)
 
-        # Convert onset beats to seconds, then compute inter-onset durations
-        onset_sec = unique_onsets * (60.0 / tempo)
+        # Convert onset quarters to seconds, then compute inter-onset durations
+        onset_sec = np.asarray(onset_quarters, dtype=float) * (60.0 / tempo)
         dur_sec = np.zeros(N, dtype=float)
         if N >= 2:
             dur_sec[:-1] = np.diff(onset_sec)
