@@ -214,7 +214,39 @@ def evaluate_alignment(
     return {"beat": beat_results, "ms": ms_results}
 
 
-def gt_from_match(match_path, score_notes):
+def _streamed_onsets(performance, match_perf, performance_ids):
+    """Onset times of ``performance`` by note id, if it holds the match's notes.
+
+    A .match file and the MIDI file a follower streams can store the same notes
+    with different tick resolutions (e.g. (n)ASAP: 480 vs 384 ppq), so their
+    times differ by up to half a tick. The follower stamps its updates with the
+    times it receives, so GT must use them: a GT time a fraction of a
+    millisecond early would be scored against the position before that update.
+    Returns None unless every matched note has the same id and pitch in both.
+    """
+    if performance is None:
+        return None
+    if isinstance(performance, (str, Path)):
+        performance = pt.load_performance(str(performance))
+    parts = getattr(performance, "performedparts", [performance])
+    streamed = {str(n["id"]): n for part in parts for n in part.notes}
+    pitch_in_match = {
+        str(n["id"]): int(n["pitch"]) for part in match_perf.performedparts for n in part.notes
+    }
+    for pid in performance_ids:
+        note = streamed.get(pid)
+        if note is None or int(note["pitch"]) != pitch_in_match[pid]:
+            return None
+    return {pid: float(note["note_on"]) for pid, note in streamed.items()}
+
+
+def gt_from_match(match_path, score_notes, performance=None):
+    """GT (perf_sec, score_beat) from a .match file.
+
+    ``performance`` is the performance the follower receives (a MIDI path or a
+    partitura performance); when its notes are those of the match file, their
+    onset times are used instead of the match file's own.
+    """
     perf, alignment, match_score = pt.load_match(str(match_path), create_score=True)
     match_notes = match_score.note_array()
     shared_ids = {str(n["id"]) for n in score_notes} & {
@@ -242,6 +274,14 @@ def gt_from_match(match_path, score_notes):
         for part in perf.performedparts
         for n in part.notes
     }
+    matched_ids = [
+        str(a["performance_id"])
+        for a in alignment
+        if a.get("label") == "match" and str(a["performance_id"]) in onset_at
+    ]
+    streamed = _streamed_onsets(performance, perf, matched_ids)
+    if streamed is not None:
+        onset_at = streamed
 
     beats, secs = [], []
     for a in alignment:
@@ -261,14 +301,17 @@ def gt_from_match(match_path, score_notes):
     return secs[keep], beats[keep]
 
 
-def resolve_gt(gt, score_notes):
-    """Return GT as (perf_sec, score_beat) arrays, from an ndarray, .match, or .tsv."""
+def resolve_gt(gt, score_notes, performance=None):
+    """Return GT as (perf_sec, score_beat) arrays, from an ndarray, .match, or .tsv.
+
+    ``performance``: the performance the follower receives; see gt_from_match.
+    """
     if isinstance(gt, np.ndarray):
         # gt array columns: [perf_sec, score_beat]
         arr = np.asarray(gt, dtype=float)
         return arr[:, 0], arr[:, 1]
     if Path(gt).suffix.lower() == ".match":
-        return gt_from_match(gt, score_notes)
+        return gt_from_match(gt, score_notes, performance)
     with open(gt) as f:
         header = f.readline().rstrip("\n").split("\t")
     data = np.loadtxt(gt, delimiter="\t", skiprows=1, ndmin=2)
