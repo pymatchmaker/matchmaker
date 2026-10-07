@@ -525,13 +525,19 @@ class ParticleFilterMidiProcessor(PianoRollProcessor):
 
         Returns
         -------
-        (KorzeniowskiObservation, frame_time)
+        (KorzeniowskiObservation, time)
+            ``time`` is the first onset in the frame, or the frame time when
+            the frame has none. The frame time is the middle of the polling
+            window, which lies before the onsets in its second half and after
+            those in its first half; the other MIDI processors also stamp an
+            observation with its first note.
         """
 
         data, f_time = frame
 
         # Reset onset list for this frame.
         self.current_onsets = []
+        onset_time = None
 
 
         for msg, m_time in data:
@@ -540,6 +546,7 @@ class ParticleFilterMidiProcessor(PianoRollProcessor):
                 # new onset in this frame
                 self.current_onsets.append(msg.note)
                 self.velocities[msg.note] = msg.velocity
+                onset_time = m_time if onset_time is None else min(onset_time, m_time)
 
                 self.active_notes[msg.note] = (
                     msg.velocity,
@@ -590,7 +597,7 @@ class ParticleFilterMidiProcessor(PianoRollProcessor):
             loudness=self.compute_loudness(),
         )
 
-        return observation, f_time
+        return observation, (f_time if onset_time is None else onset_time)
     
     def compute_loudness(self) -> float:
         """
