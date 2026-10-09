@@ -5,6 +5,7 @@ Tests for Arzt (2010) Simple Tempo Model and Raphael/Jiang (2020) SKF.
 """
 
 import unittest
+
 import numpy as np
 
 from matchmaker.dp.oltw_arzt import (
@@ -23,87 +24,92 @@ RNG = np.random.RandomState(1984)
 
 
 class TestArztTempoModel(unittest.TestCase):
-    """Tests for Arzt & Widmer (2010 SMC) Simple Tempo Model."""
+    """Tests for Arzt, Widmer & Dixon (2008) OLTW with the Arzt & Widmer (2010) tempo model."""
 
     def setUp(self):
         # Generate synthetic reference and performance sequences
         self.frame_rate = 50
-        # 10 seconds of score audio -> 500 frames
-        n_frames = 500
+        # 20 seconds of score audio -> 1000 frames
+        n_frames = 1000
         n_features = 12
         self.X = RNG.randn(n_frames, n_features).astype(np.float32)
-        # 1 beat per second -> 10 beats total
-        # Every 50 frames is 1 beat
-        self.ref_frame_to_beat = (np.arange(n_frames, dtype=np.float32) / self.frame_rate)
-        # Score positions at beats 0.0, 1.0, 2.0, ..., 9.0
-        self.score_positions = np.arange(10, dtype=np.float32)
+        # 1 beat per second; every 50 frames is 1 beat
+        self.ref_frame_to_beat = np.arange(n_frames, dtype=np.float32) / self.frame_rate
+        # Score positions at beats 0.0, 1.0, 2.0, ..., 19.0
+        self.score_positions = np.arange(20, dtype=np.float32)
+
+    def _tracker(self, **kwargs):
+        return OnlineTimeWarpingArztTempoFrame(
+            reference_features=self.X,
+            score_positions=self.score_positions,
+            ref_frame_to_beat=self.ref_frame_to_beat,
+            frame_rate=self.frame_rate,
+            **kwargs,
+        )
+
+    def _perform(self, tracker, speed, n_steps):
+        """Feed the reference played at ``speed`` times the score tempo."""
+        beats = []
+        for i in range(n_steps):
+            idx = min(int(i * speed), len(self.X) - 1)
+            obs = self.X[idx] + RNG.randn(12).astype(np.float32) * 0.01
+            beats.append(tracker(obs, i / self.frame_rate))
+        return np.array(beats)
 
     def test_initialization(self):
-        tracker = OnlineTimeWarpingArztTempoFrame(
-            reference_features=self.X,
-            score_positions=self.score_positions,
-            ref_frame_to_beat=self.ref_frame_to_beat,
-            frame_rate=self.frame_rate,
-            window_size=5,
-            step_size=3,
-        )
+        tracker = self._tracker(window_size=5)
         self.assertTrue(tracker.use_tempo_model)
+        self.assertEqual(tracker.c, 250)
         self.assertEqual(tracker.current_relative_tempo, 1.0)
-        self.assertEqual(tracker._consecutive_alterations, 0)
-        self.assertEqual(len(tracker._backpointers), 0)
-        self.assertTrue(tracker.is_onset_frame[0])
-        self.assertTrue(tracker.is_onset_frame[50])
+        self.assertEqual(tracker.N, len(self.X))
+        self.assertTrue(tracker.is_onset[0])
+        self.assertTrue(tracker.is_onset[50])
+        self.assertFalse(tracker.is_onset[25])
 
     def test_run_steps(self):
-        tracker = OnlineTimeWarpingArztTempoFrame(
-            reference_features=self.X,
-            score_positions=self.score_positions,
-            ref_frame_to_beat=self.ref_frame_to_beat,
-            frame_rate=self.frame_rate,
-            window_size=5,
-            step_size=3,
-        )
-
-        # Feed 100 frames of observations
-        for i in range(100):
-            obs = self.X[min(i, len(self.X) - 1)] + RNG.randn(12).astype(np.float32) * 0.01
-            perf_time = i / self.frame_rate
-            beat = tracker(obs, perf_time)
-            self.assertIsInstance(beat, float)
-            self.assertGreaterEqual(beat, 0.0)
-
-        # Check that backpointers were recorded
-        self.assertEqual(len(tracker._backpointers), 100)
+        tracker = self._tracker()
+        beats = self._perform(tracker, 1.0, 200)
+        self.assertTrue(all(isinstance(b, float) for b in beats))
+        # Played at the score tempo: the position follows the input closely
+        expected = np.arange(200) / self.frame_rate
+        self.assertLess(np.abs(beats[100:] - expected[100:]).max(), 0.2)
         path = tracker.alignment_path
-        self.assertEqual(path.shape[0], 2)
-        self.assertEqual(path.shape[1], 100)
+        self.assertEqual(path.shape, (2, 200))
+
+    def test_tempo_model_follows_faster_performance(self):
+        tracker = self._tracker()
+        beats = self._perform(tracker, 1.5, 400)
+        self.assertGreater(tracker.current_relative_tempo, 1.2)
+        self.assertGreater(tracker.n_deleted, 0)
+        self.assertEqual(tracker.n_inserted, 0)
+        self.assertLess(tracker.N, len(self.X))
+        expected = 1.5 * np.arange(400) / self.frame_rate
+        self.assertLess(np.abs(beats[200:] - expected[200:]).max(), 0.5)
+
+    def test_without_tempo_model(self):
+        tracker = self._tracker(use_tempo_model=False)
+        self._perform(tracker, 1.5, 200)
+        self.assertEqual(tracker.n_deleted + tracker.n_inserted, 0)
+        self.assertEqual(tracker.N, len(self.X))
+        self.assertEqual(tracker.current_relative_tempo, 1.0)
 
     def test_reset(self):
-        tracker = OnlineTimeWarpingArztTempoFrame(
-            reference_features=self.X,
-            score_positions=self.score_positions,
-            ref_frame_to_beat=self.ref_frame_to_beat,
-            frame_rate=self.frame_rate,
-        )
-        orig_len = tracker.N_ref
+        tracker = self._tracker()
+        self._perform(tracker, 1.5, 300)
+        self.assertLess(tracker.N, len(self.X))
 
-        # Run 50 frames
-        for i in range(50):
-            obs = self.X[i]
-            tracker(obs, i / self.frame_rate)
-
-        # Reset
         tracker.reset()
         self.assertEqual(tracker.current_index, 0)
-        self.assertEqual(tracker._current_frame, 0)
         self.assertEqual(tracker.current_relative_tempo, 1.0)
-        self.assertEqual(len(tracker._backpointers), 0)
-        self.assertEqual(tracker.N_ref, orig_len)
+        self.assertEqual(tracker.N, len(self.X))
+        self.assertEqual(tracker.alignment_path.shape, (2, 0))
+        np.testing.assert_array_equal(tracker.V, self.X)
 
     def test_registry_lookup(self):
         spec = REGISTRY.method("audio", "arzt_tempo")
         self.assertEqual(spec.cls_path, "matchmaker.dp:OnlineTimeWarpingArztTempoFrame")
         self.assertTrue(spec.default_kwargs.get("use_tempo_model"))
+        self.assertEqual(spec.default_kwargs.get("processor"), "onset2008")
 
 
 class TestRaphaelSwitchingStateSpace(unittest.TestCase):
@@ -194,7 +200,9 @@ class TestRaphaelSwitchingStateSpace(unittest.TestCase):
 
     def test_registry_lookup(self):
         spec = REGISTRY.method("audio", "skf")
-        self.assertEqual(spec.cls_path, "matchmaker.prob.skf:SwitchingKalmanFilterFollower")
+        self.assertEqual(
+            spec.cls_path, "matchmaker.prob.skf:SwitchingKalmanFilterFollower"
+        )
 
 
 if __name__ == "__main__":

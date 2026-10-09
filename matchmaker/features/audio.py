@@ -9,7 +9,7 @@ from typing import Dict, Optional, Tuple, Union
 import librosa
 import numpy as np
 
-from matchmaker.features.processor import Processor, KorzeniowskiObservation
+from matchmaker.features.processor import KorzeniowskiObservation, Processor
 
 SAMPLE_RATE = 44100
 FRAME_RATE = 30
@@ -298,6 +298,68 @@ class LogSpectralEnergyProcessor(Processor):
         return result, f_time
 
 
+class Onset2008Processor(LogSpectralEnergyProcessor):
+    """
+    Onset features of Arzt, Widmer & Dixon (2008), Sec. 3.1, for
+    ``OnlineTimeWarpingArztTempoFrame``.
+
+    A 46 ms Hamming-windowed power spectrum is mapped to 84 bins: FFT bins as
+    they are up to 370 Hz, nearest semitone above (semitones past the 84th
+    bin are summed into the last one); only the increase in each bin
+    relative to the previous frame is kept. The paper normalises each frame
+    to sum 1 before the difference; that loses the onset energy on
+    synthesised score audio, so here the difference is L2-normalised instead.
+    Differs from ``LogSpectralEnergyProcessor`` (Dixon 2005) in the crossover
+    frequency and the normalisation.
+    """
+
+    N_BINS = 84
+    LINEAR_UP_TO_HZ = 370.0
+
+    def __init__(
+        self,
+        sample_rate: int = SAMPLE_RATE,
+        hop_length: int = HOP_LENGTH,
+    ):
+        super().__init__(sample_rate=sample_rate, hop_length=hop_length, norm=2)
+        df = self.sample_rate / self.n_fft
+        n_bins = self.n_fft // 2 + 1
+        cross = int(np.floor(self.LINEAR_UP_TO_HZ / df))
+        self.freq_map = np.arange(n_bins)
+        k = np.arange(cross + 1, n_bins)
+        midi = np.round(12 * np.log2(k * df / self.REF_FREQ) + 69).astype(int)
+        self.freq_map[cross + 1 :] = cross + 1 + midi - midi[0]
+        self.freq_map = np.minimum(self.freq_map, self.N_BINS - 1)
+        self.dim = self.N_BINS
+
+    def __call__(
+        self,
+        data: InputAudioFrame,
+    ):
+        y, f_time = data
+        stft_result = librosa.stft(
+            y=y,
+            n_fft=self.n_fft,
+            win_length=self.n_fft,
+            hop_length=self.hop_length,
+            window=self.window,
+            center=False,
+        )
+        spectrum = stft_result.real**2 + stft_result.imag**2
+        feature_vector = np.zeros((self.dim, spectrum.shape[1]), dtype=np.float64)
+        np.add.at(feature_vector, self.freq_map, spectrum)
+
+        prev = (
+            self.prev_spectrum
+            if self.prev_spectrum is not None
+            else np.zeros_like(feature_vector[:, :1])
+        )
+        diff = np.maximum(np.diff(np.hstack((prev, feature_vector)), axis=1), 0.0).T
+        self.prev_spectrum = feature_vector[:, -1:]
+        diff = librosa.util.normalize(diff, norm=self.norm, axis=1)
+        return diff.astype(np.float32), f_time
+
+
 class RawSpectrumProcessor(Processor):
     """Magnitude FFT spectrum, as used in Jiang & Raphael (ISMIR 2020).
 
@@ -382,7 +444,6 @@ class KorzeniowskiAudioProcessor(Processor):
         win_length: int = 2048,
         n_fft: int = 4096,
     ):
-
         super().__init__()
 
         self.sample_rate = sample_rate
@@ -401,7 +462,6 @@ class KorzeniowskiAudioProcessor(Processor):
         self.frame_index = 0
 
     def reset(self):
-
         self.previous_spectrum = None
 
         self.frame_index = 0
@@ -410,17 +470,12 @@ class KorzeniowskiAudioProcessor(Processor):
         self,
         data: InputAudioFrame,
     ):
-
         frame, f_time = data
         spectrum = self.compute_spectrum(frame)
 
-        onset = self.compute_onset(
-            frame
-        )
+        onset = self.compute_onset(frame)
 
-        loudness = self.compute_loudness(
-            frame
-        )
+        loudness = self.compute_loudness(frame)
 
         observation = KorzeniowskiObservation(
             spectrum=spectrum,
@@ -429,7 +484,7 @@ class KorzeniowskiAudioProcessor(Processor):
         )
 
         return observation, f_time
-    
+
     def compute_spectrum(
         self,
         frame: np.ndarray,
@@ -438,7 +493,7 @@ class KorzeniowskiAudioProcessor(Processor):
         Compute the normalized magnitude spectrum.
         """
 
-        frame = frame[:self.win_length] * self.window
+        frame = frame[: self.win_length] * self.window
 
         magnitude = np.abs(
             np.fft.rfft(
@@ -454,7 +509,6 @@ class KorzeniowskiAudioProcessor(Processor):
 
         return magnitude
 
-
     def compute_onset(self, frame: np.ndarray) -> float:
         """
         Compute normalized causal spectral-flux onset activation.
@@ -469,7 +523,7 @@ class KorzeniowskiAudioProcessor(Processor):
         float
             Non-negative normalized onset activation.
         """
-        windowed = frame[:self.win_length] * self.window
+        windowed = frame[: self.win_length] * self.window
 
         spectrum = np.abs(np.fft.rfft(windowed, n=self.n_fft))
 
@@ -489,7 +543,6 @@ class KorzeniowskiAudioProcessor(Processor):
         self.previous_spectrum = spectrum
 
         return float(flux / (energy + 1e-8))
-
 
     def compute_loudness(
         self,

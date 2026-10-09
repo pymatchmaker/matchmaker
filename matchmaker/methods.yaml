@@ -73,6 +73,10 @@ processors:
         # Popped: the OLTW followers take **config and would choke on it.
         norm: {config: norm, default: 2, pop: true}
 
+    onset2008:
+      class: matchmaker.features.audio:Onset2008Processor
+      args: *audio_base
+
     raw_spectrum:
       class: matchmaker.features.audio:RawSpectrumProcessor
       args:
@@ -176,9 +180,9 @@ methods:
       args: *oltw_frame_args
       config_passthrough: true
       default_kwargs:
+        processor: onset2008
+        frame_rate: 50
         window_size: 10
-        start_window_size: 0.1
-        step_size: 3
         use_tempo_model: true
         random_seed: 1984
 

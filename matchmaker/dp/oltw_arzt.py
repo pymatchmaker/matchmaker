@@ -11,9 +11,12 @@ OLTW with step-size constraint and adaptive window, based on:
 Classes:
   OnlineTimeWarpingArzt      — base class (common properties, step-size clamp, run loop)
   OnlineTimeWarpingArztFrame — frame-level variant for audio (Cython-accelerated)
+  OnlineTimeWarpingArztTempoFrame — Arzt, Widmer & Dixon (2008) OLTW with the
+                                    Arzt & Widmer (2010) tempo model (audio)
   OnlineTimeWarpingArztEvent — event-level variant for MIDI (onset-by-onset)
 """
 
+import math
 import time
 from typing import Any, Callable, Dict, Generator, Optional, Tuple, Union
 
@@ -278,305 +281,559 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
         self.input_index += 1
 
 
-class OnlineTimeWarpingArztTempoFrame(OnlineTimeWarpingArztFrame):
-    """Frame-level OLTW with Arzt & Widmer (2010) Simple Tempo Model.
+_ADV_IN, _ADV_SC, _BOTH = 0, 1, 2  # Dixon (2005) GetInc: Row, Column, Both
+_DIAG, _HORIZ, _VERT = 0, 1, 2  # predecessor: (x-1, y-1), (x-1, y), (x, y-1)
+_TILE = 256
 
-    Dynamically tracks relative tempo via rectified backward path
-    and stretches/compresses reference score features on the fly.
+
+def _scan(
+    diag, straight, d, wa, wb, first_along, straight_code, along_code, along_first
+):
+    """DTW recursion along one new line (a column or a row) of the cost matrix.
+
+    ``diag[k]`` and ``straight[k]`` are the accumulated costs of the diagonal
+    predecessor and of the predecessor on the previous line; the predecessor
+    along this line is cell ``k - 1`` (``first_along`` for ``k = 0``). Ties go
+    to the diagonal, then to the horizontal, then to the vertical predecessor.
     """
+    n = d.shape[0]
+    dg, st, dd = diag.tolist(), straight.tolist(), d.tolist()
+    out = [0.0] * n
+    codes = [0] * n
+    prev = first_along
+    for k in range(n):
+        dk = dd[k]
+        cd = dg[k] + wb * dk
+        cs = st[k] + wa * dk
+        ca = prev + wa * dk
+        best, bc = cd, _DIAG
+        if along_first:
+            if ca < best:
+                best, bc = ca, along_code
+            if cs < best:
+                best, bc = cs, straight_code
+        else:
+            if cs < best:
+                best, bc = cs, straight_code
+            if ca < best:
+                best, bc = ca, along_code
+        if not math.isfinite(best):
+            bc = -1
+        out[k] = best
+        codes[k] = bc
+        prev = best
+    return np.array(out, dtype=np.float64), np.array(codes, dtype=np.int8)
+
+
+class _CostGrid:
+    """Sparse cost matrix in tiles: accumulated cost D (inf = not computed) and backpointers."""
+
+    def __init__(self):
+        self.D = {}
+        self.B = {}
+
+    def _tile(self, tx, ty):
+        key = (tx, ty)
+        if key not in self.D:
+            self.D[key] = np.full((_TILE, _TILE), np.inf)
+            self.B[key] = np.full((_TILE, _TILE), -1, dtype=np.int8)
+
+    def get(self, x, y):
+        if x < 0 or y < 0:
+            return np.inf
+        t = self.D.get((x // _TILE, y // _TILE))
+        return np.inf if t is None else t[x % _TILE, y % _TILE]
+
+    def get_bp(self, x, y):
+        b = self.B.get((x // _TILE, y // _TILE))
+        return -1 if b is None else b[x % _TILE, y % _TILE]
+
+    def set(self, x, y, v, c):
+        self._tile(x // _TILE, y // _TILE)
+        self.D[(x // _TILE, y // _TILE)][x % _TILE, y % _TILE] = v
+        self.B[(x // _TILE, y // _TILE)][x % _TILE, y % _TILE] = c
+
+    def col(self, x, y0, y1):
+        """D(x, y) for y in [y0, y1]."""
+        out = np.full(y1 - y0 + 1, np.inf)
+        if x < 0 or y1 < 0:
+            return out
+        y = max(y0, 0)
+        while y <= y1:
+            ty = y // _TILE
+            hi = min(y1, ty * _TILE + _TILE - 1)
+            t = self.D.get((x // _TILE, ty))
+            if t is not None:
+                out[y - y0 : hi - y0 + 1] = t[x % _TILE, y % _TILE : hi % _TILE + 1]
+            y = hi + 1
+        return out
+
+    def row(self, y, x0, x1):
+        """D(x, y) for x in [x0, x1]."""
+        out = np.full(x1 - x0 + 1, np.inf)
+        if y < 0 or x1 < 0:
+            return out
+        x = max(x0, 0)
+        while x <= x1:
+            tx = x // _TILE
+            hi = min(x1, tx * _TILE + _TILE - 1)
+            t = self.D.get((tx, y // _TILE))
+            if t is not None:
+                out[x - x0 : hi - x0 + 1] = t[x % _TILE : hi % _TILE + 1, y % _TILE]
+            x = hi + 1
+        return out
+
+    def set_col(self, x, y0, vals, codes):
+        y, y1 = y0, y0 + len(vals) - 1
+        while y <= y1:
+            ty = y // _TILE
+            hi = min(y1, ty * _TILE + _TILE - 1)
+            self._tile(x // _TILE, ty)
+            self.D[(x // _TILE, ty)][x % _TILE, y % _TILE : hi % _TILE + 1] = vals[
+                y - y0 : hi - y0 + 1
+            ]
+            self.B[(x // _TILE, ty)][x % _TILE, y % _TILE : hi % _TILE + 1] = codes[
+                y - y0 : hi - y0 + 1
+            ]
+            y = hi + 1
+
+    def set_row(self, y, x0, vals, codes):
+        x, x1 = x0, x0 + len(vals) - 1
+        while x <= x1:
+            tx = x // _TILE
+            hi = min(x1, tx * _TILE + _TILE - 1)
+            self._tile(tx, y // _TILE)
+            self.D[(tx, y // _TILE)][x % _TILE : hi % _TILE + 1, y % _TILE] = vals[
+                x - x0 : hi - x0 + 1
+            ]
+            self.B[(tx, y // _TILE)][x % _TILE : hi % _TILE + 1, y % _TILE] = codes[
+                x - x0 : hi - x0 + 1
+            ]
+            x = hi + 1
+
+    def prune_below(self, y_min):
+        for key in [k for k in self.D if (k[1] + 1) * _TILE <= y_min]:
+            del self.D[key]
+            del self.B[key]
+
+
+class OnlineTimeWarpingArztTempoFrame(OnlineAlignment):
+    """Arzt, Widmer & Dixon (2008) on-line time warping with the simple tempo
+    model of Arzt & Widmer (2010).
+
+    References
+    ----------
+    - S. Dixon (2005), "An On-Line Time Warping Algorithm for Tracking
+      Musical Performances", IJCAI -- the OLTW algorithm (Fig. 1: GetInc,
+      MaxRunCount, search width c).
+    - A. Arzt, G. Widmer & S. Dixon (2008), "Automatic Page Turning for
+      Musicians via Real-Time Machine Listening", ECAI, Sec. 3 -- the tracker:
+      straight steps weighted 1.3 and diagonal steps 2 (Eq. 1), MaxRunCount 6,
+      c = 500 frames (10 s at 50 fps), a 1 s initial diagonal phase, and
+      Strategy 1 (backward-forward: every 2 input frames go back b = 10 score
+      frames on the backward path, every fifth time b = 50, and compute a new
+      forward path from there).
+    - A. Arzt & G. Widmer (2010), "Simple Tempo Models for Real-Time Music
+      Tracking", SMC, Sec. 4 -- the tempo model: after every input frame, the
+      relative tempo t is the Eq. 1-weighted mean of the local tempi at the 20
+      most recent score onsets at least 1 s in the past, each over a 3 s
+      window of the rectified backward path (as in Mueller et al. (2009), ISMIR,
+      Sec. 3.1 / 3.3: path rectified at onsets, extended with slope 1 past its
+      ends). The score representation is then altered at the last processed
+      score frame ps: with probability 1 - 1/t (t > 1) frames ps+1 and ps+2
+      are merged into their mean, with probability 1 - t (t < 1) the mean of
+      ps and ps+1 is inserted; onset frames are not duplicated (the insertion
+      is postponed), and at most 3 alterations are made in a row.
+
+    Use the ``onset2008`` features (see ``Onset2008Processor``).
+
+    Differences from the papers
+    ---------------------------
+    - Features: the 2008 paper normalises each frame to sum 1 and then keeps
+      the positive difference; on synthesised score audio against recordings
+      this loses the onset energy and the tracker fails (eval146: 6/146 pieces
+      tracked). Here the positive difference is L2-normalised instead
+      (crossover at 370 Hz kept).
+    - Strategy 2 (onset-based) needs details only given in a thesis, and
+      Strategy 3 (multiple instances for structural changes) does not apply
+      to unfolded scores; neither is implemented.
+    - Where the papers are silent: the weights multiply the local cost d and
+      GetInc compares D / (i + j); the tempo window is taken on the (altered)
+      score representation; the reported position is the end of the forward
+      path; the backward path used for the tempo is not limited in length.
+
+    Parameters
+    ----------
+    reference_features : np.ndarray
+        Score features, one row per frame.
+    score_positions : np.ndarray
+        Score beat positions of the onsets.
+    ref_frame_to_beat : np.ndarray
+        Beat position of each reference frame.
+    frame_rate : int
+        Frames per second (50 in the papers).
+    window_size : float
+        Search width c in seconds.
+    max_run_count : int
+        MaxRunCount.
+    init_seconds : float
+        Length of the initial diagonal phase in seconds.
+    use_tempo_model : bool
+        Apply the 2010 tempo model; False gives the 2008 tracker alone.
+    tempo_window_size : float
+        Window around an onset for its local tempo, in seconds.
+    tempo_min_past : float
+        Onsets used must be at least this many seconds in the past.
+    tempo_n_onsets : int
+        Number of recent onsets averaged.
+    random_seed : int or None
+        Seed for the random score alterations.
+    queue : RECVQueue or None
+        Input queue for streaming.
+    """
+
+    WA = 1.3  # straight steps (2008, Sec. 3.2)
+    WB = 2.0  # diagonal steps (2008, Eq. 1)
 
     def __init__(
         self,
         reference_features: NDArray[np.float32],
         score_positions: NDArray[np.float32],
-        window_size: int = WINDOW_SIZE,
-        step_size: int = STEP_SIZE,
-        distance_func: Union[
-            str, Callable, Tuple[str, Dict[str, Any]]
-        ] = OnlineTimeWarpingArztFrame.DEFAULT_DISTANCE_FUNC,
-        start_window_size: Union[float, int] = START_WINDOW_SIZE,
-        frame_rate: int = FRAME_RATE,
         ref_frame_to_beat: NDArray = None,
-        queue: Optional[RECVQueue] = None,
+        frame_rate: int = 50,
+        window_size: float = 10.0,
+        max_run_count: int = 6,
+        init_seconds: float = 1.0,
+        use_tempo_model: bool = True,
         tempo_window_size: float = 3.0,
         tempo_min_past: float = 1.0,
         tempo_n_onsets: int = 20,
         random_seed: Optional[int] = 1984,
-        use_tempo_model: bool = True,
+        queue: Optional[RECVQueue] = None,
         **kwargs,
     ) -> None:
+        super().__init__(
+            reference_features=reference_features,
+            score_positions=score_positions,
+            queue=queue,
+        )
         if ref_frame_to_beat is None:
             raise ValueError(
                 "Frame-level Arzt requires `ref_frame_to_beat` (per-frame beat mapping)."
             )
+        self.frame_rate = frame_rate
+        self.c = int(round(window_size * frame_rate))
+        self.max_run_count = max_run_count
+        self.init_frames = int(round(init_seconds * frame_rate))
         self.use_tempo_model = use_tempo_model
-        self.tempo_window_size = tempo_window_size
-        self.tempo_min_past = tempo_min_past
+        self.tempo_w = int(round(tempo_window_size * frame_rate))
+        self.tempo_min_past = int(round(tempo_min_past * frame_rate))
         self.tempo_n_onsets = tempo_n_onsets
         self.random_seed = random_seed
-        self._original_reference_features = reference_features.copy()
-        self._original_ref_frame_to_beat = ref_frame_to_beat.copy()
-        super().__init__(
-            reference_features=reference_features,
-            score_positions=score_positions,
-            window_size=window_size,
-            step_size=step_size,
-            distance_func=distance_func,
-            start_window_size=start_window_size,
-            frame_rate=frame_rate,
-            ref_frame_to_beat=ref_frame_to_beat,
-            queue=queue,
-            **kwargs,
-        )
+        self._orig_V = np.asarray(reference_features, dtype=np.float64).copy()
+        self._orig_f2b = np.asarray(ref_frame_to_beat, dtype=np.float64).copy()
+        self.queue_timeout = 1
         self.reset()
 
     def reset(self) -> None:
-        super().reset()
-        self.current_relative_tempo: float = 1.0
-        self._consecutive_alterations: int = 0
-        self._backpointers: list = []
+        # The tempo model alters the score representation on the fly; each run
+        # starts again from the notated score.
+        self.V = self._orig_V.copy()
+        self.f2b = self._orig_f2b.copy()
+        self.N = len(self.V)
+        on = np.searchsorted(self.f2b, self.score_positions)
+        self.is_onset = np.zeros(self.N, dtype=bool)
+        self.is_onset[on[on < self.N]] = True
+        self.grid = _CostGrid()
+        self.U = []
+        self.T = self.J = self.x = self.y = -1
+        self.run_count = 0
+        self.previous = None
+        self.pending = []
+        self.n_received = 0
+        self.n_bf = 0
+        self.finished = False
         self._rng = np.random.RandomState(self.random_seed)
-        # The tempo model stretches the reference on the fly; restore the
-        # pristine copy so each run starts from the notated score.
-        self.reference_features = self._original_reference_features.copy()
-        self._ref_frame_to_beat = self._original_ref_frame_to_beat.copy()
-        self.N_ref = self.reference_features.shape[0]
-        self.global_cost_matrix = np.full(
-            (self.N_ref + 1, 2), np.inf, dtype=np.float32
+        self._consecutive = 0
+        self._insert_pending = False
+        self.current_relative_tempo = 1.0
+        self.n_inserted = self.n_deleted = self.n_postponed = 0
+        self._min_y_needed = 0
+        self._alignment_path = []
+        self.current_index = 0
+
+    def is_still_following(self) -> bool:
+        return not self.finished
+
+    def get_current_position(self) -> float:
+        return float(self.f2b[max(self.y, 0)])
+
+    def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
+        self.reset()
+        return (yield from super().run(verbose=verbose))
+
+    # Axes: x = live input frame (columns), y = score representation frame (rows).
+
+    def _dist(self, A, b):
+        return np.sqrt(((A - b) ** 2).sum(axis=-1))
+
+    def _new_column(self):
+        """INPUT u(t): t := t+1, EvaluatePathCost(t, k) for k = j-c+1 .. j."""
+        self.U.append(np.asarray(self.pending.pop(0), dtype=np.float64).reshape(-1))
+        self.T += 1
+        x = self.T
+        y0, y1 = max(0, self.J - self.c + 1), self.J
+        d = self._dist(self.V[y0 : y1 + 1], self.U[x])
+        straight = self.grid.col(x - 1, y0, y1)
+        diag = self.grid.col(x - 1, y0 - 1, y1 - 1)
+        first = self.grid.get(x, y0 - 1)
+        vals, codes = _scan(
+            diag, straight, d, self.WA, self.WB, first, _HORIZ, _VERT, False
         )
-        self._init_onset_mask()
+        self.grid.set_col(x, y0, vals, codes)
 
-    def _init_onset_mask(self) -> None:
-        self.is_onset_frame = np.zeros(self.N_ref, dtype=bool)
-        onset_frames = np.searchsorted(self._ref_frame_to_beat, self.score_positions)
-        valid = onset_frames < self.N_ref
-        self.is_onset_frame[onset_frames[valid]] = True
+    def _new_row(self):
+        """j := j+1, EvaluatePathCost(k, j) for k = t-c+1 .. t."""
+        self.J += 1
+        y = self.J
+        x0, x1 = max(0, self.T - self.c + 1), self.T
+        d = self._dist(np.asarray(self.U[x0 : x1 + 1]), self.V[y])
+        straight = self.grid.row(y - 1, x0, x1)
+        diag = self.grid.row(y - 1, x0 - 1, x1 - 1)
+        first = self.grid.get(x0 - 1, y)
+        vals, codes = _scan(
+            diag, straight, d, self.WA, self.WB, first, _VERT, _HORIZ, True
+        )
+        self.grid.set_row(y, x0, vals, codes)
 
-    def _get_backward_path(self, max_history_frames: int = 500) -> list:
-        """Trace backward path from current position using recorded backpointers."""
-        if not self._backpointers or self.input_index <= 0:
-            return [(self._current_frame, 0)]
+    def _norm(self, xs, ys, D):
+        # path cost normalised by the path length i + j (1-based indices)
+        return D / (xs + ys + 2.0)
 
-        path = []
-        s = self._current_frame
-        i = self.input_index - 1
-        min_i = max(0, i - max_history_frames)
-        while i >= min_i and s >= 0:
-            path.append((s, i))
-            if i >= len(self._backpointers):
-                i -= 1
-                s = max(0, s - 1)
-                continue
-            w_start, w_end, bp = self._backpointers[i]
-            if bp is not None and w_start <= s < w_end:
-                code = bp[s - w_start]
-                if code == 1:
-                    s -= 1
-                elif code == 2:
-                    i -= 1
-                elif code == 3:
-                    s -= 1
-                    i -= 1
-                else:
-                    break
-            else:
-                s = max(0, s - 1)
-                i -= 1
-        path.reverse()
-        return path
+    def _get_inc(self):
+        x, y = self.x, self.y
+        if x + 1 < self.init_frames:
+            return _BOTH
+        if self.run_count > self.max_run_count:
+            return _ADV_SC if self.previous == _ADV_IN else _ADV_IN
+        best = self._norm(x, y, self.grid.get(x, y))
+        bx, by = x, y
+        x0, y0 = max(0, x - self.c + 1), max(0, y - self.c + 1)
+        r = self._norm(np.arange(x0, x + 1), y, self.grid.row(y, x0, x))
+        k = int(np.argmin(r))
+        if r[k] < best:
+            best, bx, by = r[k], x0 + k, y
+        cl = self._norm(x, np.arange(y0, y + 1), self.grid.col(x, y0, y))
+        k = int(np.argmin(cl))
+        if cl[k] < best:
+            best, bx, by = cl[k], x, y0 + k
+        # 2008, Sec. 3.1: "If this occurs elsewhere in row j a new row is
+        # calculated and if this occurs elsewhere in column i a new column is
+        # calculated" (rows = score frames, columns = input frames)
+        if bx < x:
+            return _ADV_SC
+        if by < y:
+            return _ADV_IN
+        return _BOTH
 
-    def _compute_relative_tempo(self) -> float:
-        """Estimate current relative tempo via rectified backward path (Arzt 2010 Sec. 4.1)."""
-        if self.input_index < int(self.frame_rate * 1.5):
-            return 1.0
-
-        cur_perf_time = self.input_index / self.frame_rate
-        max_history = int(self.frame_rate * 10)
-        path = self._get_backward_path(max_history_frames=max_history)
-        if len(path) < 2:
-            return 1.0
-
-        score_frames = np.array([p[0] for p in path])
-        perf_frames = np.array([p[1] for p in path])
-
-        s_min, s_max = int(score_frames[0]), int(score_frames[-1])
-        if s_max <= s_min:
-            return 1.0
-
-        local_onsets = np.where(self.is_onset_frame[s_min : s_max + 1])[0] + s_min
-        if len(local_onsets) < 2:
-            return 1.0
-
-        t_s_list = []
-        t_p_list = []
-        for sf in local_onsets:
-            idx = int(np.searchsorted(score_frames, sf))
-            if idx < len(score_frames):
-                t_s_list.append(sf / self.frame_rate)
-                t_p_list.append(perf_frames[idx] / self.frame_rate)
-
-        if len(t_s_list) < 2:
-            return 1.0
-
-        t_s_arr = np.array(t_s_list)
-        t_p_arr = np.array(t_p_list)
-
-        # Onsets at least tempo_min_past seconds in the past
-        valid_mask = t_p_arr <= (cur_perf_time - self.tempo_min_past)
-        valid_indices = np.where(valid_mask)[0]
-        if len(valid_indices) == 0:
-            return 1.0
-
-        if len(valid_indices) > self.tempo_n_onsets:
-            valid_indices = valid_indices[-self.tempo_n_onsets:]
-
-        half_win = self.tempo_window_size / 2.0
-        tempi = []
-        for idx in valid_indices:
-            ts = t_s_arr[idx]
-            w_start = ts - half_win
-            w_end = ts + half_win
-            if w_start >= t_s_arr[0] and w_end <= t_s_arr[-1]:
-                tp_start = float(np.interp(w_start, t_s_arr, t_p_arr))
-                tp_end = float(np.interp(w_end, t_s_arr, t_p_arr))
-                delta_p = tp_end - tp_start
-                delta_s = w_end - w_start
-                if delta_p > 1e-4:
-                    tempi.append(delta_s / delta_p)
-                else:
-                    tempi.append(1.0)
-
-        if not tempi:
-            return 1.0
-
-        m = len(tempi)
-        weights = np.arange(1, m + 1)
-        t_est = float(np.sum(np.array(tempi) * weights) / np.sum(weights))
-        return float(np.clip(t_est, 0.33, 3.0))
-
-    def _alter_score_representation(self, t: float) -> None:
-        """Alter score representation on the fly according to relative tempo (Arzt 2010 Sec. 4.2)."""
-        ps = self._current_frame
-        if ps + 2 >= self.N_ref:
-            return
-
-        if self._consecutive_alterations >= 3:
-            self._consecutive_alterations = 0
-            return
-
-        r = self._rng.uniform(0.0, 1.0)
-
-        if t > 1.0:
-            threshold = 1.0 / t
-            if r > threshold:
-                if self.is_onset_frame[ps + 1] or self.is_onset_frame[ps + 2]:
-                    self._consecutive_alterations = 0
-                    return
-
-                mean_feat = 0.5 * (
-                    self.reference_features[ps + 1] + self.reference_features[ps + 2]
-                )
-                self.reference_features[ps + 1] = mean_feat
-                self.reference_features = np.delete(
-                    self.reference_features, ps + 2, axis=0
-                )
-
-                mean_beat = 0.5 * (
-                    self._ref_frame_to_beat[ps + 1] + self._ref_frame_to_beat[ps + 2]
-                )
-                self._ref_frame_to_beat[ps + 1] = mean_beat
-                self._ref_frame_to_beat = np.delete(self._ref_frame_to_beat, ps + 2)
-
-                self.is_onset_frame = np.delete(self.is_onset_frame, ps + 2)
-                self.global_cost_matrix = np.delete(
-                    self.global_cost_matrix, ps + 3, axis=0
-                )
-                self.N_ref = self.reference_features.shape[0]
-                self._consecutive_alterations += 1
-            else:
-                self._consecutive_alterations = 0
-
-        elif t < 1.0:
-            threshold = t
-            if r > threshold:
-                if self.is_onset_frame[ps] or self.is_onset_frame[ps + 1]:
-                    self._consecutive_alterations = 0
-                    return
-
-                mean_feat = 0.5 * (
-                    self.reference_features[ps] + self.reference_features[ps + 1]
-                )
-                self.reference_features = np.insert(
-                    self.reference_features, ps + 1, mean_feat, axis=0
-                )
-
-                mean_beat = 0.5 * (
-                    self._ref_frame_to_beat[ps] + self._ref_frame_to_beat[ps + 1]
-                )
-                self._ref_frame_to_beat = np.insert(
-                    self._ref_frame_to_beat, ps + 1, mean_beat
-                )
-
-                self.is_onset_frame = np.insert(self.is_onset_frame, ps + 1, False)
-                row1 = np.asarray(self.global_cost_matrix[ps + 1])
-                row2 = np.asarray(self.global_cost_matrix[ps + 2])
-                new_cost_row = 0.5 * (row1 + row2)
-                new_cost_row[1] = np.inf
-                self.global_cost_matrix = np.insert(
-                    self.global_cost_matrix, ps + 2, new_cost_row, axis=0
-                )
-                self.N_ref = self.reference_features.shape[0]
-                self._consecutive_alterations += 1
-            else:
-                self._consecutive_alterations = 0
+    def _update_run_count(self):
+        inc = self._get_inc()
+        if inc == self.previous:
+            self.run_count += 1
         else:
-            self._consecutive_alterations = 0
+            self.run_count = 1
+        if inc != _BOTH:
+            self.previous = inc
+
+    def _loop(self):
+        """The LOOP of Dixon (2005), Fig. 1, run until it needs the next input frame."""
+        while not self.finished:
+            if self._get_inc() != _ADV_SC:
+                if self.x == self.T:
+                    if not self.pending:
+                        return
+                    self._new_column()
+                self.x += 1
+            if self._get_inc() != _ADV_IN:
+                if self.y == self.J:
+                    if self.J + 1 >= self.N:
+                        self.finished = True
+                        return
+                    self._new_row()
+                self.y += 1
+            self._update_run_count()
+
+    def _backward_forward(self):
+        """2008, Sec. 3.2, Strategy 1."""
+        b = 50 if self.n_bf % 5 == 4 else 10
+        self.n_bf += 1
+        x, y = self.x, self.y
+        target = y - b
+        while y > target:
+            code = self.grid.get_bp(x, y)
+            if code < 0:
+                break
+            if code == _DIAG:
+                x, y = x - 1, y - 1
+            elif code == _HORIZ:
+                x -= 1
+            else:
+                y -= 1
+        self._min_y_needed = min(self._min_y_needed, y) if self._min_y_needed else y
+        # a new forward path from (x, y) until column T or row J is reached
+        self.x, self.y = x, y
+        self.run_count, self.previous = 0, None
+        while self.x < self.T and self.y < self.J:
+            if self._get_inc() != _ADV_SC:
+                if not np.isfinite(
+                    self.grid.get(self.x + 1, self.y)
+                ) and not np.isfinite(self.grid.get(self.x + 1, self.y + 1)):
+                    break
+                self.x += 1
+            if self.x <= self.T and self.y < self.J and self._get_inc() != _ADV_IN:
+                self.y += 1
+            if not np.isfinite(self.grid.get(self.x, self.y)):
+                break
+            self._update_run_count()
+
+    def _relative_tempo(self):
+        """2010, Sec. 4.1: relative tempo from the rectified backward path."""
+        half = (self.tempo_w - 1) // 2
+        limit = self.T - self.tempo_min_past
+        x, y = self.x, self.y
+        phi = {}  # row -> min input index on the backward path
+        onsets = []  # onset rows on the path, most recent first
+        last_row = y
+        phi[y] = x
+        need_below = None
+        while True:
+            code = self.grid.get_bp(x, y)
+            if code < 0:
+                break
+            if code == _DIAG:
+                x, y = x - 1, y - 1
+            elif code == _HORIZ:
+                x -= 1
+            else:
+                y -= 1
+            phi[y] = x
+            if y != last_row:
+                if self.is_onset[last_row] and phi[last_row] <= limit:
+                    onsets.append(last_row)
+                last_row = y
+                if need_below is None and len(onsets) >= self.tempo_n_onsets:
+                    need_below = float(onsets[self.tempo_n_onsets - 1]) - half
+                if (
+                    need_below is not None
+                    and float(y) < need_below
+                    and self.is_onset[y]
+                ):
+                    break
+        if (
+            self.is_onset[last_row]
+            and phi[last_row] <= limit
+            and last_row not in onsets
+        ):
+            onsets.append(last_row)
+        self._min_y_needed = y if not self._min_y_needed else min(self._min_y_needed, y)
+        if not onsets:
+            return None
+        # anchors: onsets on the path plus both ends (Mueller et al. 2009, Sec. 3.3)
+        rows = sorted(set([y, self.y] + [r for r in phi if self.is_onset[r]]))
+        g = np.array(rows, dtype=np.float64)
+        p = np.array([phi[r] for r in rows], dtype=np.float64)
+
+        def phi_r(n):
+            if n <= g[0]:
+                return p[0] - (g[0] - n)  # extended with slope 1
+            if n >= g[-1]:
+                return p[-1] + (n - g[-1])
+            return float(np.interp(n, g, p))
+
+        sel = onsets[: self.tempo_n_onsets][::-1]  # oldest first (Eq. 1 weights 1..n)
+        tempi = []
+        for o in sel:
+            go = float(o)
+            n1, n2 = go - half, go + half
+            tempi.append((n2 - n1 + 1) / (phi_r(n2) - phi_r(n1) + 1))
+        w = np.arange(1, len(tempi) + 1)
+        return float(np.sum(np.array(tempi) * w) / np.sum(w))
+
+    def _alter(self, t):
+        """2010, Sec. 4.2: alter the score representation at the last processed frame."""
+        ps = self.J
+        if t is None:
+            self._consecutive = 0
+            return
+        if t >= 1.0:
+            self._insert_pending = False
+        if ps < 0 or ps + 2 >= self.N:
+            return
+        if self._consecutive >= 3:  # at most 3 alterations in a row
+            self._consecutive = 0
+            return
+        r = self._rng.uniform(0.0, 1.0)
+        if t > 1.0 and r > 1.0 / t:
+            V, f2b, on = self.V, self.f2b, self.is_onset
+            V[ps + 1] = 0.5 * (V[ps + 1] + V[ps + 2])
+            if on[ps + 2] and not on[ps + 1]:
+                f2b[ps + 1] = f2b[ps + 2]
+            elif not on[ps + 1]:
+                f2b[ps + 1] = 0.5 * (f2b[ps + 1] + f2b[ps + 2])
+            on[ps + 1] |= on[ps + 2]
+            self.V = np.delete(V, ps + 2, axis=0)
+            self.f2b = np.delete(f2b, ps + 2)
+            self.is_onset = np.delete(on, ps + 2)
+            self.N -= 1
+            self.n_deleted += 1
+            self._consecutive += 1
+        elif t < 1.0 and (self._insert_pending or r > t):
+            if (
+                self.is_onset[ps] or self.is_onset[ps + 1]
+            ):  # onset vectors are not duplicated
+                self._insert_pending = True
+                self.n_postponed += 1
+                self._consecutive = 0
+                return
+            self._insert_pending = False
+            self.V = np.insert(
+                self.V, ps + 1, 0.5 * (self.V[ps] + self.V[ps + 1]), axis=0
+            )
+            self.f2b = np.insert(
+                self.f2b, ps + 1, 0.5 * (self.f2b[ps] + self.f2b[ps + 1])
+            )
+            self.is_onset = np.insert(self.is_onset, ps + 1, False)
+            self.N += 1
+            self.n_inserted += 1
+            self._consecutive += 1
+        else:
+            self._consecutive = 0
 
     def step(self, input_features: NDArray[np.float32]) -> None:
-        if self.use_tempo_model and self.input_index > 0:
-            self.current_relative_tempo = self._compute_relative_tempo()
-            self._alter_score_representation(self.current_relative_tempo)
-
-        min_costs = np.inf
-        min_index = max(self.window_index - self.step_size, 0)
-
-        window_start, window_end = self.get_window()
-        window_cost = self.vdist(
-            self.reference_features[window_start:window_end],
-            input_features.squeeze(),
-            self.distance_func,
-        )
-
-        bp = None
-        if self.use_tempo_model:
-            bp = np.zeros(window_end - window_start, dtype=np.int8)
-
-        self.global_cost_matrix, min_index, min_costs = oltw_arzt_loop(
-            global_cost_matrix=self.global_cost_matrix,
-            window_cost=window_cost,
-            window_start=window_start,
-            window_end=window_end,
-            input_index=self.input_index,
-            min_costs=min_costs,
-            min_index=min_index,
-            backpointers=bp,
-        )
-
-        if self.use_tempo_model:
-            self._backpointers.append((window_start, window_end, bp))
-
-        if self.input_index > 0:
-            self._current_frame = int(
-                np.clip(
-                    min_index,
-                    self._current_frame,
-                    self._current_frame + self.step_size,
-                )
-            )
-        else:
-            self._current_frame = min_index
-        self.current_index = self._frame_to_score_idx(self._current_frame)
-        self.input_index += 1
+        self.pending.append(input_features)
+        self.n_received += 1
+        if self.T < 0:  # t := 1; j := 1; INPUT u(1); EvaluatePathCost(1, 1)
+            self.J = 0
+            self.U.append(np.asarray(self.pending.pop(0), dtype=np.float64).reshape(-1))
+            self.T = 0
+            self.grid.set(0, 0, float(self._dist(self.V[0], self.U[0])), -1)
+            self.x = self.y = 0
+            return
+        if self.use_tempo_model:  # after every input frame, before the path computation
+            t = self._relative_tempo()
+            if t is not None:
+                self.current_relative_tempo = t
+            self._alter(t)
+        self._loop()
+        if self.n_received % 2 == 0:  # Strategy 1, after every 2 input frames
+            self._backward_forward()
+            self._loop()
+        if self.n_received % self.c == 0:
+            keep = min(self.J - 2 * self.c, self._min_y_needed) - 1
+            if keep > 0:
+                self.grid.prune_below(keep)
+            self._min_y_needed = 0
+        self.current_index = 0
 
 
 # ---------------------------------------------------------------------------
