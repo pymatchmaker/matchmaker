@@ -37,6 +37,19 @@ def _ensure_unique_ids(note_array: np.ndarray, prefix: str) -> np.ndarray:
     return out
 
 
+def _initial_beat_period(note_array: np.ndarray) -> float:
+    """TOLTWMatcher's own starting tempo, 90 quarters per minute, in s/beat.
+
+    TOLTWMatcher reads beats-per-quarter off the first note by onset, which is
+    0/0 when that note is a grace note, and a NaN starting tempo never tracks.
+    This takes the same reading from the first note that has a duration.
+    """
+    notes = np.sort(note_array, order="onset_beat")
+    notes = notes[notes["duration_quarter"] > 0]
+    beat_per_quarter = notes["duration_beat"][0] / notes["duration_quarter"][0]
+    return 60 / 90 / beat_per_quarter
+
+
 class OnlineParangonarAlignment(OnlineAlignment):
     """
     Adapter that exposes a parangonar online matcher through the
@@ -77,7 +90,8 @@ class OnlineParangonarAlignment(OnlineAlignment):
     @staticmethod
     def _build_matcher(method: str, sna: np.ndarray, **kwargs):
         if method == "SLT_OLTW":
-            return pa.TOLTWMatcher(sna, tracker_type=method, **kwargs) 
+            kwargs.setdefault("init_tempo", _initial_beat_period(sna))
+            return pa.TOLTWMatcher(sna, tracker_type=method, **kwargs)
         if method == "SL_OLTW":
             return pa.OLTWMatcher(sna,tracker_type=method, **kwargs)
         if method == "OTM":
@@ -87,7 +101,9 @@ class OnlineParangonarAlignment(OnlineAlignment):
         raise ValueError(method)
 
     def step(self, performance_note) -> None:
-        self.current_index = self.matcher(performance_note)
+        # The transformer matchers can step past the last score onset.
+        index = int(self.matcher(performance_note))
+        self.current_index = min(max(index, 0), len(self.score_positions) - 1)
 
 
 class ParangonarProcessor(Processor):
