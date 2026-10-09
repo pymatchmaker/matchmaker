@@ -169,6 +169,8 @@ methods:
         start_window_size: 0.1
         step_size: 3
 
+    # Arzt, Widmer & Dixon (2008) tracker + Arzt & Widmer (2010) tempo model,
+    # on Dixon's (2005) onset features; window_size is the search width c in s.
     arzt_tempo:
       family: oltw
       class: matchmaker.dp:OnlineTimeWarpingArztTempoFrame
@@ -176,9 +178,11 @@ methods:
       args: *oltw_frame_args
       config_passthrough: true
       default_kwargs:
+        processor: lse
+        frame_rate: 50
         window_size: 10
-        start_window_size: 0.1
-        step_size: 3
+        distance_func: euclidean
+        max_run_count: 6
         use_tempo_model: true
         random_seed: 1984
 
