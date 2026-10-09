@@ -349,7 +349,7 @@ Default method: `"arzt"`
 | `"dixon"` | On-line time warping by Dixon (2005) |
 | `"outerhmm"` | Outer-product HMM score follower by Nakamura (2014) |
 | `"skf"` | Switching Kalman Filter with hidden tempo by Jiang and Raphael (2020) |
-| `"arzt_tempo"` | On-line time warping by Arzt, Widmer and Dixon (2008) with the tempo model of Arzt and Widmer (2010) |
+| `"arzt_tempo"` | On-line time warping by Arzt with a tempo model (Arzt and Widmer, 2010) |
 | `"arzt_multi_fold"` | Arzt OLTW tracking several unfolded score variants in parallel |
 
 ### MIDI (`input_type="midi"`)

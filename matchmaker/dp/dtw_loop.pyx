@@ -23,7 +23,8 @@ def oltw_arzt_loop(
     int window_end,
     int input_index,
     float min_costs,
-    int min_index
+    int min_index,
+    signed char[:] backpointers = None
 ):
     """
     Cythonized main loop for online time warping.
@@ -46,6 +47,8 @@ def oltw_arzt_loop(
         Minimum costs of current window.
     min_index: int
         Index of minimum costs of current window.
+    backpointers: numpy.ndarray, optional
+        1D array of shape (window_end - window_start,) to record predecessor steps.
 
     Returns
     -------
@@ -83,6 +86,14 @@ def oltw_arzt_loop(
 
             min_dist = min(dist1, dist2, dist3)
             global_cost_matrix[score_index + 1, 1] = min_dist
+
+            if backpointers is not None:
+                if dist1 <= dist2 and dist1 <= dist3:
+                    backpointers[idx] = 1
+                elif dist2 <= dist3:
+                    backpointers[idx] = 2
+                else:
+                    backpointers[idx] = 3
 
             norm_cost = min_dist / (input_index + score_index + 1.0)
 
