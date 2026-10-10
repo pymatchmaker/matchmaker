@@ -533,6 +533,12 @@ class OnlineTimeWarpingArztTempoFrame(OnlineAlignment):
         self._orig_V = np.asarray(reference_features, dtype=np.float64).copy()
         self._orig_f2b = np.asarray(ref_frame_to_beat, dtype=np.float64).copy()
         self.queue_timeout = 1
+        self.latency_stats: Dict[str, float] = {
+            "total_latency": 0,
+            "total_frames": 0,
+            "max_latency": 0,
+            "min_latency": float("inf"),
+        }
         self.reset()
 
     def reset(self) -> None:
@@ -561,6 +567,14 @@ class OnlineTimeWarpingArztTempoFrame(OnlineAlignment):
         self._min_y_needed = 0
         self._alignment_path = []
         self.current_index = 0
+
+    def __call__(self, observation: Any, perf_time: float) -> float:
+        t0 = time.time()
+        beat = super().__call__(observation, perf_time)
+        self.latency_stats = set_latency_stats(
+            time.time() - t0, self.latency_stats, self.n_received
+        )
+        return beat
 
     def is_still_following(self) -> bool:
         return not self.finished
