@@ -97,7 +97,9 @@ class TestPublicTables(unittest.TestCase):
             )
 
     def test_families_are_populated(self):
-        self.assertEqual(OLTW_METHODS, {"arzt", "dixon"})
+        self.assertEqual(
+            OLTW_METHODS, {"arzt", "dixon", "arzt_tempo", "arzt_multi_fold"}
+        )
         self.assertEqual(PARANGONAR_METHODS, {"OPTM", "OTM", "SLT_OLTW", "SL_OLTW"})
 
     def test_obj_tag_resolves_to_the_real_object(self):

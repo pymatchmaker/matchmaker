@@ -62,9 +62,10 @@ def build_chord_sequence(note_array: np.ndarray):
     """
     onsets = note_array["onset_beat"]
     pitches = note_array["pitch"]
-    durations = note_array["duration_beat"]
+    # score time in quarters is independent of the time signature's beat unit
+    quarters = note_array["onset_quarter"] if "onset_quarter" in note_array.dtype.names else onsets
 
-    unique_onsets = np.unique(onsets)
+    unique_onsets, first = np.unique(onsets, return_index=True)
     K = len(unique_onsets)
 
     chords: List[List[int]] = []
@@ -75,11 +76,10 @@ def build_chord_sequence(note_array: np.ndarray):
         chords.append(pitches[mask].tolist())
         onset_beats[k] = ub
 
-    # Nominal length l_k = onset_{k+1} - onset_k (in beat units, then /4
-    # to convert to whole-note units since 1 whole note = 4 beats)
+    # Nominal length l_k = onset_{k+1} - onset_k in whole notes (4 quarters)
+    onset_quarters = quarters[first]
     lengths = np.zeros(K)
-    for k in range(K - 1):
-        lengths[k] = (onset_beats[k + 1] - onset_beats[k]) / 4.0
+    lengths[:-1] = np.diff(onset_quarters) / 4.0
     # Last chord: use same length as previous, or 1 beat
     lengths[K - 1] = lengths[K - 2] if K > 1 else 0.25
 

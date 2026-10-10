@@ -87,16 +87,17 @@ def plot_alignment_path(perf_sec, score_beat, gt_perf, gt_score, save_path, run_
     plt.close(fig)
 
 
-def save_results(save_dir, run_name, results, perf_sec, score_beat, gt_perf, gt_score):
-    """Save wp/gt TSVs, results JSON, and the alignment path plot."""
+def save_results(save_dir, run_name, results, perf_sec, score_beat, gt_perf, gt_score, save_plots=True):
+    """Save alignment data, metrics, and an optional plot."""
     save_dir.mkdir(parents=True, exist_ok=True)
     save_tsv(np.column_stack([perf_sec, score_beat]), save_dir / f"wp_{run_name}.tsv")
     save_tsv(np.column_stack([gt_perf, gt_score]), save_dir / f"gt_{run_name}.tsv")
     with open(save_dir / f"{run_name}.json", "w") as f:
         json.dump(results, f, indent=4)
-    plot_alignment_path(
-        perf_sec, score_beat, gt_perf, gt_score, save_dir / f"{run_name}.png", run_name
-    )
+    if save_plots:
+        plot_alignment_path(
+            perf_sec, score_beat, gt_perf, gt_score, save_dir / f"{run_name}.png", run_name
+        )
 
 
 def main():
@@ -106,17 +107,45 @@ def main():
     group.add_argument("--audio", action="store_true", help="Use audio input mode")
     group.add_argument("--midi", action="store_true", help="Use MIDI input mode")
     parser.add_argument(
+        "--piece",
+        type=str,
+        default="simple_mozart",
+        choices=list(EXAMPLE_PIECES.keys()),
+        help="Built-in example piece to run (default: simple_mozart)",
+    )
+    parser.add_argument(
         "--method",
         type=str,
         default=None,
-        help="Score following method (e.g., arzt, dixon, outerhmm, audio_outerhmm)",
+        help="Score following method (e.g., arzt, arzt_tempo, dixon, outerhmm)",
     )
+    parser.add_argument("--score", type=str, default=None, help="Path to custom score XML/MusicXML")
+    parser.add_argument("--audio-file", type=str, default=None, help="Path to custom performance audio file")
+    parser.add_argument("--midi-file", type=str, default=None, help="Path to custom performance MIDI file")
+    parser.add_argument("--match", type=str, default=None, help="Path to custom .match ground truth file")
+    parser.add_argument("--unfold", action="store_true", help="Unfold score repetitions during load")
+    parser.add_argument("--no-plots", action="store_true", help="Skip alignment plots")
+    parser.add_argument("--output-dir", type=Path, default=ROOT_DIR / "results", help="Result directory")
+    parser.add_argument("--kwargs", type=json.loads, default={}, help="Method option overrides")
     args = parser.parse_args()
 
     input_mode = "midi" if args.midi else "audio"
-    performance_file = select_performance_file(input_mode)
 
-    print(f"Running matchmaker with the score file ({SCORE_FILE.name})...")
+    # Resolve piece files
+    if args.score:
+        score_file = Path(args.score)
+        performance_file = Path(args.midi_file if input_mode == "midi" else args.audio_file)
+        match_file = Path(args.match) if args.match else None
+        run_name = score_file.stem
+    else:
+        piece_cfg = EXAMPLE_PIECES[args.piece]
+        score_file = Path(piece_cfg["score"])
+        performance_file = Path(piece_cfg["midi"] if input_mode == "midi" else piece_cfg["audio"])
+        match_file = Path(piece_cfg["match"]) if "match" in piece_cfg else None
+        run_name = args.piece
+
+    print(f"Performance file: {performance_file.name}, with input mode: {input_mode}")
+    print(f"Running matchmaker with the score file ({score_file.name})...")
     print("-" * 50)
 
     if args.method is not None:
@@ -127,10 +156,12 @@ def main():
     # Initialize matchmaker (simulation mode)
     try:
         mm = Matchmaker(
-            score_file=SCORE_FILE,
+            score_file=score_file,
             performance_file=performance_file,
             input_type=input_mode,
             method=method,
+            unfold_score=args.unfold,
+            kwargs=args.kwargs or None,
         )
     except Empty as e:
         print(f"Error initializing Matchmaker: {e}")
@@ -141,17 +172,22 @@ def main():
         timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[{timestamp}] Current beat position: {current_position}")
 
-    print("-" * 50)
-    print(f"Running evaluation using the match file ({MATCH_FILE.name})...")
+    if match_file and match_file.is_file():
+        print("-" * 50)
+        print(f"Running evaluation using the match file ({match_file.name})...")
 
-    results, perf_sec, score_beat, gt_perf, gt_score = evaluate(mm, MATCH_FILE)
-    print(f"Evaluation Result: {json.dumps(results, indent=4)}")
+        results, perf_sec, score_beat, gt_perf, gt_score = evaluate(mm, match_file)
+        print(f"Evaluation Result: {json.dumps(results, indent=4)}")
 
-    results_dir = ROOT_DIR / "results"
-    save_results(
-        results_dir, "simple_example", results, perf_sec, score_beat, gt_perf, gt_score
-    )
-    print(f"Detailed evaluation results saved in {results_dir}")
+        results_dir = args.output_dir
+        save_results(
+            results_dir, f"{run_name}_{method}", results, perf_sec, score_beat, gt_perf, gt_score,
+            save_plots=not args.no_plots,
+        )
+        print(f"Detailed evaluation results saved in {results_dir}")
+    else:
+        print("\nAlignment finished (no match file provided for quantitative evaluation).")
+    return
 
 
 if __name__ == "__main__":
