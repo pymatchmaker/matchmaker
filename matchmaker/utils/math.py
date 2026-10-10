@@ -40,7 +40,7 @@ def discrete_normal_density(x, mu, sigma2, grid, log=False):
         # evaluate the normal density on the grid
         prob = normal_density(grid, mu, sigma2)
         # normalize to have a discrete distribution
-        out = normal_density(x, mu, sigma2) * np.in1d(x, grid) / np.sum(prob)
+        out = normal_density(x, mu, sigma2) * np.isin(x, grid) / np.sum(prob)
     if log:
         out = np.log(out)
     return out
