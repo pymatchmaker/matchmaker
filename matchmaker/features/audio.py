@@ -9,7 +9,7 @@ from typing import Dict, Optional, Tuple, Union
 import librosa
 import numpy as np
 
-from matchmaker.features.processor import Processor, KorzeniowskiObservation
+from matchmaker.features.processor import KorzeniowskiObservation, Processor
 
 SAMPLE_RATE = 44100
 FRAME_RATE = 30
@@ -382,7 +382,6 @@ class KorzeniowskiAudioProcessor(Processor):
         win_length: int = 2048,
         n_fft: int = 4096,
     ):
-
         super().__init__()
 
         self.sample_rate = sample_rate
@@ -401,7 +400,6 @@ class KorzeniowskiAudioProcessor(Processor):
         self.frame_index = 0
 
     def reset(self):
-
         self.previous_spectrum = None
 
         self.frame_index = 0
@@ -410,17 +408,12 @@ class KorzeniowskiAudioProcessor(Processor):
         self,
         data: InputAudioFrame,
     ):
-
         frame, f_time = data
         spectrum = self.compute_spectrum(frame)
 
-        onset = self.compute_onset(
-            frame
-        )
+        onset = self.compute_onset(frame)
 
-        loudness = self.compute_loudness(
-            frame
-        )
+        loudness = self.compute_loudness(frame)
 
         observation = KorzeniowskiObservation(
             spectrum=spectrum,
@@ -429,7 +422,7 @@ class KorzeniowskiAudioProcessor(Processor):
         )
 
         return observation, f_time
-    
+
     def compute_spectrum(
         self,
         frame: np.ndarray,
@@ -438,7 +431,7 @@ class KorzeniowskiAudioProcessor(Processor):
         Compute the normalized magnitude spectrum.
         """
 
-        frame = frame[:self.win_length] * self.window
+        frame = frame[: self.win_length] * self.window
 
         magnitude = np.abs(
             np.fft.rfft(
@@ -454,7 +447,6 @@ class KorzeniowskiAudioProcessor(Processor):
 
         return magnitude
 
-
     def compute_onset(self, frame: np.ndarray) -> float:
         """
         Compute normalized causal spectral-flux onset activation.
@@ -469,7 +461,7 @@ class KorzeniowskiAudioProcessor(Processor):
         float
             Non-negative normalized onset activation.
         """
-        windowed = frame[:self.win_length] * self.window
+        windowed = frame[: self.win_length] * self.window
 
         spectrum = np.abs(np.fft.rfft(windowed, n=self.n_fft))
 
@@ -489,7 +481,6 @@ class KorzeniowskiAudioProcessor(Processor):
         self.previous_spectrum = spectrum
 
         return float(flux / (energy + 1e-8))
-
 
     def compute_loudness(
         self,

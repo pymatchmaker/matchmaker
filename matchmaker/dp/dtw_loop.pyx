@@ -47,8 +47,9 @@ def oltw_arzt_loop(
         Minimum costs of current window.
     min_index: int
         Index of minimum costs of current window.
-    backpointers: numpy.ndarray, optional
-        1D array of shape (window_end - window_start,) to record predecessor steps.
+    backpointers: numpy.ndarray or None
+        Optional array of shape (window_end - window_start,) to record backpointers
+        (1=vertical, 2=horizontal, 3=diagonal).
 
     Returns
     -------
@@ -59,7 +60,7 @@ def oltw_arzt_loop(
     min_costs: float
         Minimum costs of current window.
     """
-    cdef float dist1, dist2, dist3, min_dist, local_dist, norm_cost
+    cdef float dist1, dist2, dist3, local_dist, norm_cost
     cdef int idx = 0, score_index = window_start
     cdef Py_ssize_t k, wk = window_cost.shape[0]
     cdef Py_ssize_t N = global_cost_matrix.shape[0]

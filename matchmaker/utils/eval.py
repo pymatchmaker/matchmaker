@@ -145,6 +145,69 @@ def get_evaluation_results(
     return results
 
 
+def compute_sparc(
+    score_beat: np.ndarray,
+    perf_sec: np.ndarray,
+    fs: float = 50.0,
+    fc: float = 10.0,
+    padlevel: int = 4,
+) -> float:
+    """Compute Spectral Arc Length (SPARC) for an alignment path.
+
+    Parameters
+    ----------
+    score_beat : np.ndarray
+        Score positions (in beats).
+    perf_sec : np.ndarray
+        Performance timestamps (in seconds).
+    fs : float
+        Uniform resampling frequency in Hz (default: 50.0 Hz).
+    fc : float
+        Cutoff frequency in Hz for arc length integration (default: 10.0 Hz).
+    padlevel : int
+        Zero-padding level for FFT (default: 4).
+
+    Returns
+    -------
+    float
+        SPARC value (strictly negative; values closer to 0 indicate smoother tracking).
+    """
+    score_beat = np.asarray(score_beat, dtype=float)
+    perf_sec = np.asarray(perf_sec, dtype=float)
+
+    valid = np.isfinite(score_beat) & np.isfinite(perf_sec)
+    score_beat = score_beat[valid]
+    perf_sec = perf_sec[valid]
+
+    if len(perf_sec) < 2:
+        return 0.0
+
+    t_start, t_end = float(perf_sec[0]), float(perf_sec[-1])
+    duration = t_end - t_start
+    if duration <= 0.1:
+        return 0.0
+
+    n_pts = max(int(np.round(duration * fs)), 2)
+    t_uniform = np.linspace(t_start, t_end, n_pts)
+    s_interp = np.interp(t_uniform, perf_sec, score_beat)
+    vel = np.gradient(s_interp, 1.0 / fs)
+
+    nfft = int(2 ** (np.ceil(np.log2(len(vel))) + padlevel))
+    freq = np.fft.rfftfreq(nfft, d=1.0 / fs)
+    mask = freq <= fc
+    freq_filtered = freq[mask]
+
+    Mf = np.abs(np.fft.rfft(vel, n=nfft))[mask]
+    max_mf = Mf.max()
+    if max_mf > 0:
+        Mf = Mf / max_mf
+
+    d_freq = np.diff(freq_filtered) / fc
+    d_mf = np.diff(Mf)
+    arc = np.sum(np.sqrt(d_freq**2 + d_mf**2))
+    return float(-arc)
+
+
 def evaluate_alignment(
     aligned_score_beats,
     aligned_perf_sec,
@@ -173,7 +236,7 @@ def evaluate_alignment(
     Returns
     -------
     dict
-        {"beat": {...}, "ms": {...}}
+        {"beat": {...}, "ms": {...}, "sparc": float}
     """
     # GT interpolator: score beat → perf time
     valid = np.isfinite(gt_perf_sec) & np.isfinite(gt_score_beats)
@@ -211,7 +274,9 @@ def evaluate_alignment(
         tolerances=ms_tolerances,
     )
 
-    return {"beat": beat_results, "ms": ms_results}
+    sparc_val = compute_sparc(aligned_score_beats, aligned_perf_sec)
+
+    return {"beat": beat_results, "ms": ms_results, "sparc": sparc_val}
 
 
 def _streamed_onsets(performance, match_perf, performance_ids):
@@ -231,7 +296,9 @@ def _streamed_onsets(performance, match_perf, performance_ids):
     parts = getattr(performance, "performedparts", [performance])
     streamed = {str(n["id"]): n for part in parts for n in part.notes}
     pitch_in_match = {
-        str(n["id"]): int(n["pitch"]) for part in match_perf.performedparts for n in part.notes
+        str(n["id"]): int(n["pitch"])
+        for part in match_perf.performedparts
+        for n in part.notes
     }
     for pid in performance_ids:
         note = streamed.get(pid)
@@ -266,9 +333,6 @@ def gt_from_match(match_path, score_notes, performance=None):
             )
             for n in match_notes
         }
-    # note_on, not note_array()'s float32 onset_sec: a MIDI follower stamps its
-    # updates with the float64 onset, and a GT time rounded below it would hide
-    # the update made at that very onset from the perf -> score lookup.
     onset_at = {
         str(n["id"]): float(n["note_on"])
         for part in perf.performedparts
@@ -311,7 +375,7 @@ def resolve_gt(gt, score_notes, performance=None):
         arr = np.asarray(gt, dtype=float)
         return arr[:, 0], arr[:, 1]
     if Path(gt).suffix.lower() == ".match":
-        return gt_from_match(gt, score_notes, performance)
+        return gt_from_match(gt, score_notes, performance=performance)
     with open(gt) as f:
         header = f.readline().rstrip("\n").split("\t")
     data = np.loadtxt(gt, delimiter="\t", skiprows=1, ndmin=2)
