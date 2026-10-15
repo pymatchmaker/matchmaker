@@ -139,6 +139,55 @@ class TestOnlineTimeWarpingArzt(unittest.TestCase):
                         # __call__ now returns the float beat position
                         self.assertTrue(isinstance(current_position, float))
 
+    def test_tempo_model(self):
+        """Test OnlineTimeWarpingArztFrame with ArztTempoModel."""
+        from matchmaker.utils.tempo_models import ArztTempoModel
+
+        X, Y, path = generate_example_sequences(
+            lenX=50,
+            centers=3,
+            n_features=3,
+            maxreps=4,
+            minreps=1,
+            noise_scale=0.00,
+            random_state=RNG,
+            dtype=np.float32,
+        )
+        score_positions = np.arange(X.shape[0], dtype=np.float32)
+
+        # Baseline tracker without tempo model
+        oltw_no_tm = OnlineTimeWarpingArzt(
+            reference_features=X,
+            score_positions=score_positions,
+            ref_frame_to_beat=score_positions,
+            window_size=5,
+            step_size=3,
+            frame_rate=50,
+        )
+        self.assertEqual(oltw_no_tm.current_relative_tempo, 1.0)
+        self.assertFalse(oltw_no_tm.backward_forward)
+
+        # Tracker with ArztTempoModel class passed
+        oltw_tm = OnlineTimeWarpingArzt(
+            reference_features=X,
+            score_positions=score_positions,
+            ref_frame_to_beat=score_positions,
+            window_size=5,
+            step_size=3,
+            frame_rate=50,
+            tempo_model=ArztTempoModel,
+        )
+        self.assertFalse(oltw_tm.backward_forward)
+        self.assertIsInstance(oltw_tm.tempo_model, ArztTempoModel)
+
+        positions = []
+        for obs in Y:
+            pos = oltw_tm(obs, 0.0)
+            self.assertIsInstance(pos, float)
+            positions.append(pos)
+        self.assertGreater(len(positions), 0)
+        self.assertIsInstance(oltw_tm.current_relative_tempo, float)
+
         # Test that error is raised if incorrect name
         self.assertRaises(
             MatchmakerInvalidOptionError,
