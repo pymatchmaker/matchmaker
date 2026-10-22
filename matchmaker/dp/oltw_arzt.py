@@ -15,13 +15,14 @@ Classes:
 """
 
 import time
-from typing import Any, Callable, Dict, Generator, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Generator, NamedTuple, Optional, Tuple, Union
 
 import numpy as np
 import scipy.spatial.distance
 from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
+from matchmaker.dp.direction import Direction
 from matchmaker.dp.dtw_loop import oltw_arzt_loop
 from matchmaker.features.audio import FRAME_RATE
 from matchmaker.io.audio import QUEUE_TIMEOUT
@@ -43,11 +44,12 @@ STEP_SIZE: int = 3
 START_WINDOW_SIZE: Union[float, int] = 0.1
 WINDOW_SIZE: int = 10
 
-_ADV_IN, _ADV_SC, _BOTH = (
-    0,
-    1,
-    2,
-)  # Dixon (2005) GetInc: Row (input), Column (score), Both
+
+class BackpointerColumn(NamedTuple):
+    """Predecessor directions in one input frame's reference window."""
+
+    window_start: int
+    predecessor_directions: NDArray[np.int8]
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +208,8 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
             self._backpointers = {}
             self._last_window_end = 0
             self._min_x_needed = 0
-        self._run_count, self._run_prev = 0, None
+        self.run_count_ref = 0
+        self.run_count_input = 0
         if self.backward_forward:
             K = 4 * self._window_size
             self._cost_band = np.full(
@@ -257,27 +260,26 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
     def tempo_current_cell(self) -> Tuple[int, int]:
         return self.input_index - 1, self._current_frame
 
-    def tempo_backward_path(self, start_x: int, start_y: int):
-        x, y = start_x, start_y
-        while x > 0 and y > 0:
-            entry = self._backpointers.get(x)
-            if entry is None:
+    def tempo_backward_path(self, start_input_index: int, start_ref_index: int):
+        input_index, ref_index = start_input_index, start_ref_index
+        while input_index > 0 and ref_index > 0:
+            column = self._backpointers.get(input_index)
+            if column is None:
                 break
-            ws, codes = entry
-            offset = y - ws
-            if offset < 0 or offset >= len(codes):
+            offset = ref_index - column.window_start
+            if offset < 0 or offset >= len(column.predecessor_directions):
                 break
-            code = codes[offset]
-            if code == 1:  # vertical: (x, y-1)
-                y -= 1
-            elif code == 2:  # horizontal: (x-1, y)
-                x -= 1
-            elif code == 3:  # diagonal: (x-1, y-1)
-                x -= 1
-                y -= 1
+            direction = column.predecessor_directions[offset]
+            if direction == Direction.REF:
+                ref_index -= 1
+            elif direction == Direction.INPUT:
+                input_index -= 1
+            elif direction == Direction.BOTH:
+                input_index -= 1
+                ref_index -= 1
             else:
                 break
-            yield x, y
+            yield input_index, ref_index
 
     def tempo_note_path_end(self, x: int, y: int) -> None:
         self._min_x_needed = x if not self._min_x_needed else min(self._min_x_needed, x)
@@ -289,144 +291,211 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
         return self.reference_features, self._ref_frame_to_beat, self.is_onset
 
     def tempo_set_score(self, features, frame_to_beat, is_onset) -> None:
-        n = len(features)
-        ps = self._current_frame
-        G = self.global_cost_matrix  # row k + 1 = score frame k
-        if n < self.N_ref:
-            r = ps + 2
-            self.global_cost_matrix = np.ascontiguousarray(np.delete(G, r + 1, axis=0))
-            for x, (s, c) in list(self._backpointers.items()):
-                if s > r:
-                    self._backpointers[x] = (s - 1, c)
-                elif r - s < len(c):
-                    self._backpointers[x] = (s, np.delete(c, r - s))
-            if self.backward_forward:
-                self._band_alter(r, -1)
-        elif n > self.N_ref:
-            r = ps + 1
-            if r + 1 < len(G):
-                interp = 0.5 * (G[r] + G[r + 1])
-            else:
-                interp = np.full(2, np.inf, dtype=np.float32)
+        n_frames = len(features)
+        if len(frame_to_beat) != n_frames or len(is_onset) != n_frames:
+            raise ValueError("Score features, beat mapping and onset flags must agree.")
+        if abs(n_frames - self.N_ref) > 1:
+            raise ValueError("A tempo alteration must insert or delete a single frame.")
+
+        cost_matrix = self.global_cost_matrix  # row k + 1 = reference frame k
+        if n_frames < self.N_ref:
+            deleted_ref_index = self._current_frame + 2
+            if not 0 <= deleted_ref_index < self.N_ref:
+                raise ValueError("The reference frame to delete is out of bounds.")
             self.global_cost_matrix = np.ascontiguousarray(
-                np.insert(G, r + 1, interp, axis=0)
+                np.delete(cost_matrix, deleted_ref_index + 1, axis=0)
             )
-            for x, (s, c) in list(self._backpointers.items()):
-                if s >= r:
-                    self._backpointers[x] = (s + 1, c)
-                elif r - s < len(c):
-                    self._backpointers[x] = (s, np.insert(c, r - s, 1).astype(np.int8))
+            for input_index, column in list(self._backpointers.items()):
+                if column.window_start > deleted_ref_index:
+                    self._backpointers[input_index] = column._replace(
+                        window_start=column.window_start - 1
+                    )
+                else:
+                    offset = deleted_ref_index - column.window_start
+                    if offset < len(column.predecessor_directions):
+                        self._backpointers[input_index] = column._replace(
+                            predecessor_directions=np.delete(
+                                column.predecessor_directions, offset
+                            )
+                        )
             if self.backward_forward:
-                self._band_alter(r, 1)
+                self._band_alter(deleted_ref_index, -1)
+        elif n_frames > self.N_ref:
+            inserted_ref_index = self._current_frame + 1
+            if not 0 <= inserted_ref_index <= self.N_ref:
+                raise ValueError("The reference insertion position is out of bounds.")
+            if inserted_ref_index + 1 < len(cost_matrix):
+                interpolated_cost = 0.5 * (
+                    cost_matrix[inserted_ref_index]
+                    + cost_matrix[inserted_ref_index + 1]
+                )
+            else:
+                interpolated_cost = np.full(2, np.inf, dtype=np.float32)
+            self.global_cost_matrix = np.ascontiguousarray(
+                np.insert(
+                    cost_matrix, inserted_ref_index + 1, interpolated_cost, axis=0
+                )
+            )
+            for input_index, column in list(self._backpointers.items()):
+                if column.window_start >= inserted_ref_index:
+                    self._backpointers[input_index] = column._replace(
+                        window_start=column.window_start + 1
+                    )
+                else:
+                    offset = inserted_ref_index - column.window_start
+                    if offset < len(column.predecessor_directions):
+                        self._backpointers[input_index] = column._replace(
+                            predecessor_directions=np.insert(
+                                column.predecessor_directions, offset, Direction.REF
+                            ).astype(np.int8)
+                        )
+            if self.backward_forward:
+                self._band_alter(inserted_ref_index, 1)
         self.reference_features = features
         self._ref_frame_to_beat = frame_to_beat
         self.is_onset = is_onset
-        self.N_ref = n
+        self.N_ref = n_frames
 
     # Strategy 1 (Arzt, Widmer & Dixon 2008, Sec. 3.2).
 
-    def _band_alter(self, r, sign):
-        st, ln, band = self._cost_start, self._cost_len, self._cost_band
-        for k in range(len(band)):
-            s, n = st[k], ln[k]
-            if sign < 0:
-                if s > r:
-                    st[k] = s - 1
-                elif r - s < n:
-                    band[k, r - s : n - 1] = band[k, r - s + 1 : n].copy()
-                    band[k, n - 1] = np.inf
-                    ln[k] = n - 1
+    def _band_alter(self, ref_index, change):
+        for slot in range(len(self._cost_band)):
+            window_start = self._cost_start[slot]
+            window_length = self._cost_len[slot]
+            offset = ref_index - window_start
+            if change < 0:
+                if window_start > ref_index:
+                    self._cost_start[slot] = window_start - 1
+                elif offset < window_length:
+                    self._cost_band[slot, offset : window_length - 1] = self._cost_band[
+                        slot, offset + 1 : window_length
+                    ].copy()
+                    self._cost_band[slot, window_length - 1] = np.inf
+                    self._cost_len[slot] = window_length - 1
             else:
-                if s >= r:
-                    st[k] = s + 1
-                elif r - s < n:
-                    m = min(n + 1, band.shape[1])
-                    band[k, r - s + 1 : m] = band[k, r - s : m - 1].copy()
-                    band[k, r - s] = np.inf
-                    ln[k] = m
+                if window_start >= ref_index:
+                    self._cost_start[slot] = window_start + 1
+                elif offset < window_length:
+                    new_length = min(window_length + 1, self._cost_band.shape[1])
+                    self._cost_band[slot, offset + 1 : new_length] = self._cost_band[
+                        slot, offset : new_length - 1
+                    ].copy()
+                    self._cost_band[slot, offset] = np.inf
+                    self._cost_len[slot] = new_length
 
-    def _cost_row(self, y, x0, x1):
-        xs = np.arange(x0, x1 + 1)
-        K = len(self._cost_band)
-        sl = xs % K
-        k = y - self._cost_start[sl]
-        ok = (
-            (xs > self.input_index - K)
-            & (xs <= self.input_index)
-            & (k >= 0)
-            & (k < self._cost_len[sl])
+    def _cost_row(self, ref_index, input_start, input_end):
+        input_indices = np.arange(input_start, input_end + 1)
+        capacity = len(self._cost_band)
+        slots = input_indices % capacity
+        offsets = ref_index - self._cost_start[slots]
+        valid = (
+            (input_indices > self.input_index - capacity)
+            & (input_indices <= self.input_index)
+            & (offsets >= 0)
+            & (offsets < self._cost_len[slots])
         )
-        out = np.full(len(xs), np.inf)
-        out[ok] = self._cost_band[sl[ok], k[ok]]
-        return out
+        costs = np.full(len(input_indices), np.inf)
+        costs[valid] = self._cost_band[slots[valid], offsets[valid]]
+        return costs
 
-    def _cost_col(self, x, y0, y1):
-        out = np.full(y1 - y0 + 1, np.inf)
-        K = len(self._cost_band)
-        if x > self.input_index or x <= self.input_index - K or x < 0:
-            return out
-        sl = x % K
-        s, n = self._cost_start[sl], self._cost_len[sl]
-        a, b = max(y0, s), min(y1, s + n - 1)
-        if a <= b:
-            out[a - y0 : b - y0 + 1] = self._cost_band[sl, a - s : b - s + 1]
-        return out
+    def _cost_col(self, input_index, ref_start, ref_end):
+        costs = np.full(ref_end - ref_start + 1, np.inf)
+        capacity = len(self._cost_band)
+        if (
+            input_index > self.input_index
+            or input_index <= self.input_index - capacity
+            or input_index < 0
+        ):
+            return costs
+        slot = input_index % capacity
+        window_start = self._cost_start[slot]
+        window_length = self._cost_len[slot]
+        overlap_start = max(ref_start, window_start)
+        overlap_end = min(ref_end, window_start + window_length - 1)
+        if overlap_start <= overlap_end:
+            costs[overlap_start - ref_start : overlap_end - ref_start + 1] = (
+                self._cost_band[
+                    slot, overlap_start - window_start : overlap_end - window_start + 1
+                ]
+            )
+        return costs
 
-    def _cost(self, x, y):
-        return float(self._cost_col(x, y, y)[0])
+    def _cost(self, input_index, ref_index):
+        return float(self._cost_col(input_index, ref_index, ref_index)[0])
 
-    def _update_runs(self, move: int) -> None:
-        if move == self._run_prev:
-            self._run_count += 1
-        else:
-            self._run_count, self._run_prev = 1, move
+    def update_run_counts(self, adv_ref, adv_input):
+        """Count actual single-axis advances, following Dixon's convention."""
+        if adv_ref and adv_input:
+            self.run_count_ref = 0
+            self.run_count_input = 0
+        elif adv_ref:
+            self.run_count_ref += 1
+            self.run_count_input = 0
+        elif adv_input:
+            self.run_count_input += 1
+            self.run_count_ref = 0
 
-    def _get_inc(self, x, y):
-        M = self.max_run_count
-        if M is not None and self._run_count > M:
-            return _ADV_SC if self._run_prev == _ADV_IN else _ADV_IN
-        c = self._window_size
-        best = self._cost(x, y) / (x + y + 1.0)
-        bx, by = x, y
-        x0, y0 = max(0, x - c + 1), max(0, y - c + 1)
-        r = self._cost_row(y, x0, x) / (np.arange(x0, x + 1) + y + 1.0)
-        k = int(np.argmin(r))
-        if r[k] < best:
-            best, bx, by = r[k], x0 + k, y
-        cl = self._cost_col(x, y0, y) / (x + np.arange(y0, y + 1) + 1.0)
-        k = int(np.argmin(cl))
-        if cl[k] < best:
-            best, bx, by = cl[k], x, y0 + k
-        if bx < x:
-            return _ADV_SC
-        if by < y:
-            return _ADV_IN
-        return _BOTH
+    def get_inc(self, input_index, ref_index) -> Direction:
+        if self.max_run_count is not None:
+            if self.run_count_ref >= self.max_run_count:
+                return Direction.INPUT
+            if self.run_count_input >= self.max_run_count:
+                return Direction.REF
+        window_size = self._window_size
+        best_cost = self._cost(input_index, ref_index) / (input_index + ref_index + 1.0)
+        best_input, best_ref = input_index, ref_index
+        input_start = max(0, input_index - window_size + 1)
+        ref_start = max(0, ref_index - window_size + 1)
+        row_costs = self._cost_row(ref_index, input_start, input_index) / (
+            np.arange(input_start, input_index + 1) + ref_index + 1.0
+        )
+        best_offset = int(np.argmin(row_costs))
+        if row_costs[best_offset] < best_cost:
+            best_cost = row_costs[best_offset]
+            best_input, best_ref = input_start + best_offset, ref_index
+        column_costs = self._cost_col(input_index, ref_start, ref_index) / (
+            input_index + np.arange(ref_start, ref_index + 1) + 1.0
+        )
+        best_offset = int(np.argmin(column_costs))
+        if column_costs[best_offset] < best_cost:
+            best_input, best_ref = input_index, ref_start + best_offset
+        if best_input < input_index:
+            return Direction.REF
+        if best_ref < ref_index:
+            return Direction.INPUT
+        return Direction.BOTH
 
-    def _strategy1(self, T, y):
-        b = 50 if self._n_bf % 5 == 4 else 10
+    def _strategy1(self, input_end, ref_index):
+        backward_distance = 50 if self._n_bf % 5 == 4 else 10
         self._n_bf += 1
-        x, target = T, y - b
-        for x, y in self.tempo_backward_path(T, y):
-            if y <= target:
+        input_index, target_ref = input_end, ref_index - backward_distance
+        for input_index, ref_index in self.tempo_backward_path(input_end, ref_index):
+            if ref_index <= target_ref:
                 break
-        self.tempo_note_path_end(x, y)
-        J = self._last_window_end - 1
-        self._run_count, self._run_prev = 0, None
-        while x < T and y < J:
-            if self._get_inc(x, y) != _ADV_SC:
-                if not np.isfinite(self._cost(x + 1, y)) and not np.isfinite(
-                    self._cost(x + 1, y + 1)
-                ):
+        self.tempo_note_path_end(input_index, ref_index)
+        ref_end = self._last_window_end - 1
+        self.run_count_ref = 0
+        self.run_count_input = 0
+        while input_index < input_end and ref_index < ref_end:
+            previous_input, previous_ref = input_index, ref_index
+            if self.get_inc(input_index, ref_index) != Direction.REF:
+                if not np.isfinite(
+                    self._cost(input_index + 1, ref_index)
+                ) and not np.isfinite(self._cost(input_index + 1, ref_index + 1)):
                     break
-                x += 1
-            if x <= T and y < J and self._get_inc(x, y) != _ADV_IN:
-                y += 1
-            if not np.isfinite(self._cost(x, y)):
+                input_index += 1
+            if (
+                input_index <= input_end
+                and ref_index < ref_end
+                and self.get_inc(input_index, ref_index) != Direction.INPUT
+            ):
+                ref_index += 1
+            if not np.isfinite(self._cost(input_index, ref_index)):
                 break
-            if self.max_run_count is not None:
-                self._update_runs(self._get_inc(x, y))
-        return y
+            self.update_run_counts(
+                ref_index > previous_ref, input_index > previous_input
+            )
+        return ref_index
 
     @property
     def window_index(self) -> int:
@@ -525,7 +594,9 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
         store = (self.tempo_model is not None) or self.backward_forward
         backpointers = None
         if store:
-            backpointers = np.zeros(window_end - window_start, dtype=np.int8)
+            backpointers = np.full(
+                window_end - window_start, Direction.NONE, dtype=np.int8
+            )
 
         self.global_cost_matrix, min_index, min_costs = oltw_arzt_loop(
             global_cost_matrix=self.global_cost_matrix,
@@ -547,7 +618,9 @@ class OnlineTimeWarpingArztFrame(OnlineTimeWarpingArzt):
             self._cost_start[k], self._cost_len[k] = window_start, n
 
         if store:
-            self._backpointers[self.input_index] = (window_start, backpointers)
+            self._backpointers[self.input_index] = BackpointerColumn(
+                window_start=window_start, predecessor_directions=backpointers
+            )
             self._last_window_end = window_end
             if (self.input_index + 1) % self._window_size == 0:
                 keep = min(self.input_index - 2 * self._window_size, self._min_x_needed)

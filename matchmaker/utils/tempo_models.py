@@ -611,6 +611,16 @@ class ArztTempoModel(TempoModel):
             init_score_onset=init_score_onset,
             score_onsets=score_onsets,
         )
+        if not np.isfinite(init_beat_period) or init_beat_period <= 0:
+            raise ValueError("init_beat_period must be finite and positive.")
+        if (
+            not np.isfinite(tempo_min)
+            or not np.isfinite(tempo_max)
+            or not 0 < tempo_min <= tempo_max
+        ):
+            raise ValueError(
+                "Tempo bounds must be finite and satisfy 0 < tempo_min <= tempo_max."
+            )
         self.init_beat_period = init_beat_period
         self.window_size = window_size
         self.min_past = min_past
@@ -669,12 +679,18 @@ class ArztTempoModel(TempoModel):
 
     def before_step(self, tracker) -> None:
         """Estimate the tempo and alter the tracker's score representation."""
-        t = self.relative_tempo(tracker)
-        if t is not None:
-            self._current_tempo = t
-            base_bp = getattr(self, "init_beat_period", 0.5)
-            self.beat_period = base_bp / max(1e-4, t)
-        self.alter(tracker, t)
+        relative_tempo = self.relative_tempo(tracker)
+        if relative_tempo is not None:
+            if not np.isfinite(relative_tempo) or relative_tempo <= 0:
+                relative_tempo = None
+            else:
+                beat_period = self.init_beat_period / max(1e-4, relative_tempo)
+                if not np.isfinite(beat_period) or beat_period <= 0:
+                    relative_tempo = None
+                else:
+                    self._current_tempo = relative_tempo
+                    self.beat_period = beat_period
+        self.alter(tracker, relative_tempo)
 
     def relative_tempo(self, tracker) -> Optional[float]:
         """Sec. 4.1: relative tempo from the rectified backward path."""
@@ -726,7 +742,7 @@ class ArztTempoModel(TempoModel):
 
     def alter(self, tracker, t: Optional[float]) -> None:
         """Sec. 4.2: alter the score representation at the last processed frame."""
-        if t is None:
+        if t is None or not np.isfinite(t) or t <= 0:
             self._consecutive = 0
             return
         t = max(self.tempo_min, min(self.tempo_max, t))
@@ -785,6 +801,8 @@ class ArztTempoModel(TempoModel):
         **kwargs,
     ) -> None:
         """Update beat period using the Eq. 1 weighted average of recent local tempi."""
+        if not np.isfinite(performed_onset) or not np.isfinite(score_onset):
+            return
         self.est_onset = performed_onset
         self._history_perf.append(performed_onset)
         self._history_score.append(score_onset)
@@ -811,8 +829,10 @@ class ArztTempoModel(TempoModel):
             base_bp = getattr(self, "init_beat_period", 0.5)
             rel_t = base_bp / max(1e-4, est_bp)
             rel_t = max(self.tempo_min, min(self.tempo_max, rel_t))
-            self._current_tempo = rel_t
-            self.beat_period = base_bp / rel_t
+            beat_period = base_bp / rel_t
+            if np.isfinite(beat_period) and beat_period > 0:
+                self._current_tempo = rel_t
+                self.beat_period = beat_period
 
 
 # Aliases for backward compatibility

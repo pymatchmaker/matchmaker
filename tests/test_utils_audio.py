@@ -4,6 +4,8 @@
 This module contains tests for the utils/audio.py module.
 """
 
+import os
+import runpy
 import unittest
 from io import StringIO
 from unittest.mock import patch
@@ -18,19 +20,8 @@ from matchmaker.utils.audio import (
     list_audio_devices,
 )
 
-
-def has_audio_devices():
-    """Check if system has audio devices"""
-    p = pyaudio.PyAudio()
-
-    DEVICE_COUNT = p.get_device_count()
-
-    has_audio = DEVICE_COUNT > 0
-
-    return has_audio
-
-
-HAS_AUDIO_DEVICES = has_audio_devices()
+# Reuse the CI guard and initialization-error handling in the audio utilities.
+HAS_AUDIO_DEVICES = bool(get_audio_devices())
 
 
 SKIP_REASON = (not HAS_AUDIO_DEVICES, "No audio device detected")
@@ -64,7 +55,6 @@ class TestUtilsAudio(unittest.TestCase):
 
         self.assertTrue(isinstance(has_audio_inputs, bool))
 
-    @unittest.skipIf(*SKIP_REASON)
     @patch(
         "matchmaker.utils.audio.get_audio_devices",
         return_value=["Device 1", "Device 2"],
@@ -96,3 +86,30 @@ class TestUtilsAudio(unittest.TestCase):
         # Test raising error
         with self.assertRaises(ValueError):
             get_device_index_from_name("NoT a ReAl AuDiO dEvIcE")
+
+
+class TestAudioDeviceAvailability(unittest.TestCase):
+    def test_module_import_in_ci_does_not_initialize_audio(self):
+        with (
+            patch.dict(os.environ, {"CI": "true"}),
+            patch(
+                "pyaudio.PyAudio",
+                side_effect=OSError(-9999, "Unanticipated host error"),
+            ) as initialize_audio,
+        ):
+            module = runpy.run_path(__file__)
+        self.assertFalse(module["HAS_AUDIO_DEVICES"])
+        initialize_audio.assert_not_called()
+
+    def test_module_import_handles_unavailable_audio_host(self):
+        with (
+            patch.dict(os.environ, {"CI": "", "GITHUB_ACTIONS": ""}),
+            patch(
+                "pyaudio.PyAudio",
+                side_effect=OSError(-9999, "Unanticipated host error"),
+            ) as initialize_audio,
+            patch("builtins.print"),
+        ):
+            module = runpy.run_path(__file__)
+        self.assertFalse(module["HAS_AUDIO_DEVICES"])
+        initialize_audio.assert_called_once()

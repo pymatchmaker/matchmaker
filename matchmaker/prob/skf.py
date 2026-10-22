@@ -62,8 +62,13 @@ def build_chord_sequence(note_array: np.ndarray):
     """
     onsets = note_array["onset_beat"]
     pitches = note_array["pitch"]
-    # score time in quarters is independent of the time signature's beat unit
-    quarters = note_array["onset_quarter"] if "onset_quarter" in note_array.dtype.names else onsets
+    # Quarter-note positions are independent of the time signature's beat unit.
+    # Legacy arrays without onset_quarter are assumed to use quarter-note beats.
+    quarters = (
+        note_array["onset_quarter"]
+        if "onset_quarter" in note_array.dtype.names
+        else onsets
+    )
 
     unique_onsets, first = np.unique(onsets, return_index=True)
     K = len(unique_onsets)

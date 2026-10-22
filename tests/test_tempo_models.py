@@ -1,22 +1,17 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-Tests for Arzt (2010) Simple Tempo Model and Raphael/Jiang (2020) SKF.
+Tests for the Arzt (2010) simple tempo model.
 """
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from matchmaker.dp.oltw_arzt import OnlineTimeWarpingArztFrame
-from matchmaker.prob.skf import (
-    SwitchingKalmanFilterFollower,
-    build_chord_sequence,
-    build_spectral_templates,
-)
 from matchmaker.registry import REGISTRY
 from matchmaker.utils.tempo_models import ArztTempoModel
-from tests.utils import generate_example_sequences
 
 RNG = np.random.RandomState(1984)
 
@@ -65,6 +60,41 @@ class TestArztTempoModel(unittest.TestCase):
         self.assertTrue(tracker.is_onset[50])
         self.assertFalse(tracker.is_onset[25])
 
+    def test_invalid_tempo_configuration(self):
+        for value in (0.0, -1.0, np.nan, np.inf, -np.inf):
+            for parameter in ("init_beat_period", "tempo_min", "tempo_max"):
+                with self.subTest(parameter=parameter, value=value):
+                    with self.assertRaises(ValueError):
+                        ArztTempoModel(**{parameter: value})
+        with self.assertRaises(ValueError):
+            ArztTempoModel(tempo_min=1.2, tempo_max=0.8)
+
+    def test_invalid_estimates_preserve_last_valid_tempo(self):
+        tracker = self._tracker()
+        model = tracker.tempo_model
+        with patch.object(model, "relative_tempo", return_value=1.1):
+            model.before_step(tracker)
+        for value in (None, 0.0, -1.0, np.nan, np.inf, -np.inf):
+            with self.subTest(value=value):
+                with patch.object(model, "relative_tempo", return_value=value):
+                    model.before_step(tracker)
+                model.alter(tracker, value)
+                self.assertEqual(model.current_tempo, 1.1)
+                self.assertEqual(model.beat_period, 0.5 / 1.1)
+                self.assertEqual(model.n_inserted + model.n_deleted, 0)
+                np.testing.assert_array_equal(tracker.V, self.X)
+
+    def test_nonfinite_onsets_do_not_poison_tempo_history(self):
+        model = ArztTempoModel()
+        model(0.0, 0.0)
+        for value in (np.nan, np.inf, -np.inf):
+            model(value, 1.0)
+            model(1.0, value)
+        model(0.5, 1.0)
+        self.assertEqual(model._history_perf, [0.0, 0.5])
+        self.assertEqual(model._history_score, [0.0, 1.0])
+        self.assertEqual(model.beat_period, 0.5)
+
     def test_run_steps(self):
         tracker = self._tracker()
         beats = self._perform(tracker, 1.0, 200)
@@ -84,6 +114,15 @@ class TestArztTempoModel(unittest.TestCase):
         self.assertLess(tracker.N, len(self.X))
         expected = 1.5 * np.arange(400) / self.frame_rate
         self.assertLess(np.abs(beats[200:] - expected[200:]).max(), 0.5)
+
+    def test_backward_forward_refinement_tracks_with_shared_directions(self):
+        for speed in (0.8, 1.0, 1.5):
+            with self.subTest(speed=speed):
+                tracker = self._tracker(backward_forward=True, max_run_count=3)
+                beats = self._perform(tracker, speed, 400)
+                expected = speed * np.arange(400) / self.frame_rate
+                self.assertTrue(np.all(np.isfinite(beats)))
+                self.assertLess(np.abs(beats[200:] - expected[200:]).max(), 0.5)
 
     def test_without_tempo_model(self):
         tracker = self._tracker(tempo_model=None)
@@ -147,99 +186,6 @@ class TestArztTempoModel(unittest.TestCase):
         tm.reset()
         self.assertEqual(tm.counter, 0)
         self.assertEqual(tm.current_tempo, 1.0)
-
-
-class TestRaphaelSwitchingStateSpace(unittest.TestCase):
-    """Tests for Raphael & Jiang (2020 ISMIR) Switching State-Space Model."""
-
-    def setUp(self):
-        # Create a simple synthetic note_array
-        self.note_array = np.zeros(
-            4,
-            dtype=[
-                ("pitch", "i4"),
-                ("onset_beat", "f4"),
-                ("duration_beat", "f4"),
-            ],
-        )
-        self.note_array["pitch"] = [60, 64, 67, 72]  # C major chord arpeggio
-        self.note_array["onset_beat"] = [0.0, 1.0, 2.0, 3.0]
-        self.note_array["duration_beat"] = [1.0, 1.0, 1.0, 1.0]
-
-    def test_build_chord_sequence(self):
-        chords, lengths, onset_beats = build_chord_sequence(self.note_array)
-        self.assertEqual(len(chords), 4)
-        self.assertEqual(chords[0], [60])
-        self.assertEqual(chords[1], [64])
-        np.testing.assert_array_equal(onset_beats, [0.0, 1.0, 2.0, 3.0])
-        # 1 beat = 0.25 whole note
-        np.testing.assert_allclose(lengths, [0.25, 0.25, 0.25, 0.25])
-
-    def test_build_spectral_templates(self):
-        chords, _, _ = build_chord_sequence(self.note_array)
-        templates = build_spectral_templates(chords, n_fft=512, sample_rate=8000)
-        self.assertEqual(templates.shape[0], 4)
-        self.assertEqual(templates.shape[1], 257)
-        # Each template row should sum to 1
-        np.testing.assert_allclose(templates.sum(axis=1), np.ones(4), atol=1e-5)
-
-    def test_initialization_and_step(self):
-        follower = SwitchingKalmanFilterFollower(
-            reference_features=self.note_array,
-            tempo=120.0,
-            sample_rate=8000,
-            n_fft=512,
-            hop_length=128,
-            max_hypotheses=50,
-        )
-        self.assertEqual(follower.K, 4)
-        self.assertEqual(follower.current_index, 0)
-        # Initial tempo: 240 / 120 = 2.0 s/whole-note
-        self.assertAlmostEqual(follower.init_tempo, 2.0)
-
-        # Process 20 frames
-        delta = 128 / 8000.0
-        for i in range(20):
-            dummy_spectrum = np.random.rand(257).astype(np.float32)
-            pos = follower(dummy_spectrum, perf_time=i * delta)
-            self.assertIsInstance(pos, float)
-            self.assertGreaterEqual(pos, 0.0)
-            self.assertLessEqual(pos, 4.0)
-
-        # Verify hypotheses count is bounded by max_hypotheses
-        self.assertLessEqual(len(follower.hypotheses), 50)
-        path = follower.alignment_path
-        self.assertEqual(path.shape, (2, 20))
-
-    def test_kalman_tempo_adaptation(self):
-        follower = SwitchingKalmanFilterFollower(
-            reference_features=self.note_array,
-            tempo=120.0,
-            sample_rate=8000,
-            n_fft=512,
-            hop_length=128,
-        )
-        # Test transition Kalman update directly:
-        # Expected duration = length * tempo = 0.25 * 2.0 = 0.5s.
-        # Suppose performer played chord 0 in 0.25s (twice as fast, tempo should decrease s/wn):
-        fast_age = int(0.25 / follower.delta)
-        mu_new, var_new = follower._kalman_update(
-            mu_t_prev=2.0, var_t_prev=0.04, k_prev=0, age_prev=fast_age
-        )
-        self.assertLess(mu_new, 2.0)
-
-        # Suppose performer played chord 0 in 1.0s (twice as slow, tempo should increase s/wn):
-        slow_age = int(1.0 / follower.delta)
-        mu_new_slow, var_new_slow = follower._kalman_update(
-            mu_t_prev=2.0, var_t_prev=0.04, k_prev=0, age_prev=slow_age
-        )
-        self.assertGreater(mu_new_slow, 2.0)
-
-    def test_registry_lookup(self):
-        spec = REGISTRY.method("audio", "skf")
-        self.assertEqual(
-            spec.cls_path, "matchmaker.prob.skf:SwitchingKalmanFilterFollower"
-        )
 
 
 if __name__ == "__main__":

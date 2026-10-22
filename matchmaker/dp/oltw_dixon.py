@@ -16,7 +16,6 @@ Classes:
 """
 
 import time
-from enum import IntEnum
 from typing import Any, Dict, Generator, Optional, Tuple
 
 import numpy as np
@@ -24,17 +23,11 @@ import scipy.spatial.distance
 from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
+from matchmaker.dp.direction import Direction
 from matchmaker.features.audio import FRAME_RATE
 from matchmaker.io.audio import QUEUE_TIMEOUT
 from matchmaker.io.queue import RECVQueue
 from matchmaker.utils.misc import set_latency_stats
-
-
-class Direction(IntEnum):
-    REF = 0
-    INPUT = 1
-    BOTH = 2
-
 
 MAX_RUN_COUNT: int = 3
 WINDOW_SIZE = 10  # seconds for frame, events for event
