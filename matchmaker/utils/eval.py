@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional, Union
 
 import numpy as np
 import partitura as pt
@@ -6,6 +7,7 @@ import scipy
 
 TOLERANCES_IN_MILLISECONDS = [50, 100, 300, 500, 1000, 2000]
 TOLERANCES_IN_BEATS = [0.05, 0.1, 0.3, 0.5, 1, 2]
+ONSET_WINDOW_DURATION = 30.0
 
 
 def transfer_positions(
@@ -145,67 +147,159 @@ def get_evaluation_results(
     return results
 
 
+def onset_wise_windows(
+    perf_onsets: np.ndarray, window_duration: float = ONSET_WINDOW_DURATION
+) -> list[dict]:
+    """Forward windows anchored at unique, finite GT onsets.
+
+    Indices address the stably sorted finite onsets, including simultaneous
+    notes. Stop after the first window that reaches the final onset; a short
+    performance therefore has one whole-performance window.
+    """
+    if not np.isfinite(window_duration) or window_duration <= 0:
+        raise ValueError("window_duration must be finite and positive")
+    times = np.asarray(perf_onsets, dtype=float)
+    times = np.sort(times[np.isfinite(times)], kind="stable")
+    if len(times) == 0:
+        return []
+    final_onset = float(times[-1])
+    unique_starts = np.flatnonzero(np.r_[True, times[1:] != times[:-1]])
+    windows = []
+    for left in unique_starts:
+        start = float(times[left])
+        nominal_stop = start + window_duration
+        right = int(np.searchsorted(times, nominal_stop, side="right"))
+        reaches_final_onset = right == len(times)
+        windows.append(
+            {
+                "t0": start,
+                "t1": min(nominal_stop, final_onset),
+                "onset_index_start": int(left),
+                "onset_index_stop": right,
+                "n_points": right - int(left),
+                "n_onsets": int(len(np.unique(times[left:right]))),
+                "short_piece_fallback": left == 0 and reaches_final_onset,
+                "reaches_final_onset": reaches_final_onset,
+            }
+        )
+        if reaches_final_onset:
+            break
+    return windows
+
+
+def spectral_arc_length(
+    speed: np.ndarray,
+    fs: float,
+    padlevel: int = 4,
+    fc: float = 10.0,
+    amp_th: float = 0.05,
+) -> Optional[float]:
+    """Adaptive SPARC of a speed magnitude profile (Balasubramanian, 2015).
+
+    Return None for stationary/insufficient profiles or an undefined band.
+    """
+    if not np.isfinite(fs) or fs <= 0:
+        raise ValueError("fs must be finite and positive")
+    if not np.isfinite(fc) or fc <= 0:
+        raise ValueError("fc must be finite and positive")
+    if not np.isfinite(amp_th) or not 0 < amp_th <= 1:
+        raise ValueError("amp_th must be in (0, 1]")
+    if not isinstance(padlevel, (int, np.integer)) or padlevel < 0:
+        raise ValueError("padlevel must be a nonnegative integer")
+    speed = np.asarray(speed, dtype=float)
+    if len(speed) < 2 or not np.all(np.isfinite(speed)) or not np.any(speed):
+        return None
+    n_fft = int(2 ** (np.ceil(np.log2(len(speed))) + padlevel))
+    spectrum = np.abs(np.fft.rfft(speed, n=n_fft))
+    spectrum /= spectrum.max()
+    frequencies = np.fft.rfftfreq(n_fft, d=1.0 / fs)
+    support = np.flatnonzero((frequencies <= fc) & (spectrum >= amp_th))
+    if len(support) < 2:
+        return None
+    band = slice(support[0], support[-1] + 1)
+    frequencies, spectrum = frequencies[band], spectrum[band]
+    span = frequencies[-1] - frequencies[0]
+    return float(-np.hypot(np.diff(frequencies) / span, np.diff(spectrum)).sum())
+
+
 def compute_sparc(
     score_beat: np.ndarray,
     perf_sec: np.ndarray,
     fs: float = 50.0,
     fc: float = 10.0,
     padlevel: int = 4,
-) -> float:
-    """Compute Spectral Arc Length (SPARC) for an alignment path.
+    *,
+    onset_times: Optional[np.ndarray] = None,
+    window_sec: float = ONSET_WINDOW_DURATION,
+    amp_th: float = 0.05,
+    return_details: bool = False,
+) -> Union[float, dict, None]:
+    """Mean adaptive SPARC over GT onset-wise windows, without time weights.
 
-    Parameters
-    ----------
-    score_beat : np.ndarray
-        Score positions (in beats).
-    perf_sec : np.ndarray
-        Performance timestamps (in seconds).
-    fs : float
-        Uniform resampling frequency in Hz (default: 50.0 Hz).
-    fc : float
-        Cutoff frequency in Hz for arc length integration (default: 10.0 Hz).
-    padlevel : int
-        Zero-padding level for FFT (default: 4).
+    Each window uses the full position trajectory resampled at ``fs``, rather
+    than sampling positions only at onsets. Stationary/undefined windows are
+    omitted from the mean; an entirely undefined path returns None.
 
-    Returns
-    -------
-    float
-        SPARC value (strictly negative; values closer to 0 indicate smoother tracking).
+    Pass the same GT ``onset_times`` for every follower being compared, as
+    ``evaluate_alignment`` does. Standalone calls without GT use the path's
+    timestamps as anchors. With ``return_details=True``, return the scalar,
+    total/valid window counts, valid fraction and per-window diagnostics.
     """
+    if not np.isfinite(fs) or fs <= 0:
+        raise ValueError("fs must be finite and positive")
     score_beat = np.asarray(score_beat, dtype=float)
     perf_sec = np.asarray(perf_sec, dtype=float)
-
+    if score_beat.ndim != 1 or perf_sec.ndim != 1 or score_beat.shape != perf_sec.shape:
+        raise ValueError(
+            "score_beat and perf_sec must be matching one-dimensional arrays"
+        )
     valid = np.isfinite(score_beat) & np.isfinite(perf_sec)
-    score_beat = score_beat[valid]
-    perf_sec = perf_sec[valid]
-
-    if len(perf_sec) < 2:
-        return 0.0
-
-    t_start, t_end = float(perf_sec[0]), float(perf_sec[-1])
-    duration = t_end - t_start
-    if duration <= 0.1:
-        return 0.0
-
-    n_pts = max(int(np.round(duration * fs)), 2)
-    t_uniform = np.linspace(t_start, t_end, n_pts)
-    s_interp = np.interp(t_uniform, perf_sec, score_beat)
-    vel = np.gradient(s_interp, 1.0 / fs)
-
-    nfft = int(2 ** (np.ceil(np.log2(len(vel))) + padlevel))
-    freq = np.fft.rfftfreq(nfft, d=1.0 / fs)
-    mask = freq <= fc
-    freq_filtered = freq[mask]
-
-    Mf = np.abs(np.fft.rfft(vel, n=nfft))[mask]
-    max_mf = Mf.max()
-    if max_mf > 0:
-        Mf = Mf / max_mf
-
-    d_freq = np.diff(freq_filtered) / fc
-    d_mf = np.diff(Mf)
-    arc = np.sum(np.sqrt(d_freq**2 + d_mf**2))
-    return float(-arc)
+    score_beat, perf_sec = score_beat[valid], perf_sec[valid]
+    order = np.argsort(perf_sec, kind="stable")
+    score_beat, perf_sec = score_beat[order], perf_sec[order]
+    # Keep the final decision at duplicate timestamps, as in transfer_positions.
+    last_at_time = np.r_[perf_sec[1:] != perf_sec[:-1], True] if len(perf_sec) else []
+    score_beat, perf_sec = score_beat[last_at_time], perf_sec[last_at_time]
+    windows = onset_wise_windows(
+        perf_sec if onset_times is None else onset_times, window_sec
+    )
+    diagnostics = []
+    values = []
+    cached_windows = {}
+    if windows and len(perf_sec) >= 2:
+        times = np.arange(windows[0]["t0"], windows[-1]["t1"], 1.0 / fs)
+        positions = np.interp(times, perf_sec, score_beat)
+    else:
+        times, positions = np.array([]), np.array([])
+    for window in windows:
+        start, stop = window["t0"], window["t1"]
+        value, reason = None, "insufficient_samples"
+        if len(perf_sec) >= 2 and (start < perf_sec[0] or stop > perf_sec[-1]):
+            reason = "uncovered"
+        elif len(times):
+            left, right = np.searchsorted(times, [start, stop], side="left")
+            key = (int(left), int(right))
+            if key not in cached_windows:
+                position = positions[left:right]
+                if len(position) >= 2:
+                    speed = np.abs(np.gradient(position, 1.0 / fs))
+                    value = spectral_arc_length(speed, fs, padlevel, fc, amp_th)
+                    reason = "stationary" if not np.any(speed) else "undefined_band"
+                    if value is not None:
+                        reason = "ok"
+                cached_windows[key] = value, reason
+            value, reason = cached_windows[key]
+        diagnostics.append({"t0": start, "t1": stop, "sparc": value, "reason": reason})
+        if value is not None:
+            values.append(value)
+    result = {
+        "sparc": float(np.mean(values)) if values else None,
+        "sparc_n_windows": len(windows),
+        "sparc_n_valid_windows": len(values),
+        "sparc_valid_window_fraction": len(values) / len(windows) if windows else None,
+        "sparc_windows": diagnostics,
+    }
+    return result if return_details else result["sparc"]
 
 
 def evaluate_alignment(
@@ -215,6 +309,7 @@ def evaluate_alignment(
     gt_perf_sec,
     beat_tolerances=TOLERANCES_IN_BEATS,
     ms_tolerances=TOLERANCES_IN_MILLISECONDS,
+    sparc_window_sec=ONSET_WINDOW_DURATION,
 ):
     """Evaluate alignment quality in both beat and ms domains.
 
@@ -232,11 +327,14 @@ def evaluate_alignment(
         Tolerance thresholds for beat error.
     ms_tolerances : list
         Tolerance thresholds for ms error.
+    sparc_window_sec : float
+        Forward-window duration for GT onset-wise SPARC (default: 30 seconds).
 
     Returns
     -------
     dict
-        {"beat": {...}, "ms": {...}, "sparc": float}
+        Beat/ms metrics, mean SPARC (float or None), total/valid SPARC window
+        counts, valid fraction, and per-window SPARC diagnostics.
     """
     # GT interpolator: score beat → perf time
     valid = np.isfinite(gt_perf_sec) & np.isfinite(gt_score_beats)
@@ -274,9 +372,15 @@ def evaluate_alignment(
         tolerances=ms_tolerances,
     )
 
-    sparc_val = compute_sparc(aligned_score_beats, aligned_perf_sec)
+    sparc_results = compute_sparc(
+        aligned_score_beats,
+        aligned_perf_sec,
+        onset_times=np.asarray(gt_perf_sec)[valid],
+        window_sec=sparc_window_sec,
+        return_details=True,
+    )
 
-    return {"beat": beat_results, "ms": ms_results, "sparc": sparc_val}
+    return {"beat": beat_results, "ms": ms_results, **sparc_results}
 
 
 def _streamed_onsets(performance, match_perf, performance_ids):
