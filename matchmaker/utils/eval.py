@@ -147,6 +147,35 @@ def get_evaluation_results(
     return results
 
 
+def evaluate_beat_errors(
+    gt_score_beats,
+    predicted_score_beats,
+    beat_tolerances=TOLERANCES_IN_BEATS,
+    *,
+    total_counts=None,
+):
+    """Summarize beat errors and tolerance accuracy, including pooled events."""
+    beat = get_evaluation_results(
+        gt_score_beats,
+        predicted_score_beats,
+        total_counts=len(gt_score_beats) if total_counts is None else total_counts,
+        tolerances=beat_tolerances,
+        in_seconds=False,
+    )
+    return {
+        "mean_b": beat["mean"],
+        "median_b": beat["median"],
+        "std_b": beat["std"],
+        "accuracy_b": {
+            threshold: accuracy
+            for threshold, accuracy in beat.items()
+            if threshold.endswith("b")
+        },
+        "skewness": beat["skewness"],
+        "kurtosis": beat["kurtosis"],
+    }
+
+
 def onset_wise_windows(
     perf_onsets: np.ndarray, window_duration: float = ONSET_WINDOW_DURATION
 ) -> list[dict]:
@@ -357,12 +386,11 @@ def evaluate_alignment(
         domain="score",
     )
     n_valid = min(len(gt_score_beats), len(score_predicted))
-    beat_results = get_evaluation_results(
+    results = evaluate_beat_errors(
         gt_score_beats[:n_valid],
         score_predicted[:n_valid],
         total_counts=len(gt_score_beats),
-        tolerances=beat_tolerances,
-        in_seconds=False,
+        beat_tolerances=beat_tolerances,
     )
 
     sparc_results = compute_sparc(
@@ -374,19 +402,7 @@ def evaluate_alignment(
     )
 
     smoothness = sparc_results["sparc"]
-    results = {
-        "mean_b": beat_results["mean"],
-        "median_b": beat_results["median"],
-        "std_b": beat_results["std"],
-        "accuracy_b": {
-            threshold: accuracy
-            for threshold, accuracy in beat_results.items()
-            if threshold.endswith("b")
-        },
-        "skewness": beat_results["skewness"],
-        "kurtosis": beat_results["kurtosis"],
-        "smoothness": round(smoothness, 4) if smoothness is not None else None,
-    }
+    results["smoothness"] = round(smoothness, 4) if smoothness is not None else None
     if return_details:
         gt_interp = scipy.interpolate.interp1d(
             gt_score_beats[valid],

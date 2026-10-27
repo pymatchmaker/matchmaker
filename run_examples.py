@@ -43,9 +43,7 @@ def evaluate(mm, match_file):
         if perf_dur > 0:
             results["rtf"] = float(f"{mm.alignment_duration / perf_dur:.4f}")
     if mm.input_type == "audio":
-        latency = mm.get_latency_stats()
-        results["feature_latency_ms"] = latency["f_avg_latency"]
-        results["inference_latency_ms"] = latency["i_avg_latency"]
+        results.update(mm.get_latency_stats())
 
     return results, perf_sec, score_beat, gt_perf, gt_score
 

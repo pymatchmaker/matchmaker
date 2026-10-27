@@ -517,11 +517,11 @@ class Matchmaker(object):
         inference_stats = self.score_follower.latency_stats
 
         return {
-            "f_avg_latency": round(
+            "feature_latency_ms": round(
                 feature_stats["total_latency"] / feature_stats["total_frames"] * 1000,
                 4,
             ),
-            "i_avg_latency": round(
+            "inference_latency_ms": round(
                 inference_stats["total_latency"]
                 / inference_stats["total_frames"]
                 * 1000,
