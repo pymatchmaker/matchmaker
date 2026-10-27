@@ -1,4 +1,5 @@
 import time
+from pathlib import Path
 from typing import List, Optional
 
 import numpy as np
@@ -13,30 +14,25 @@ from matchmaker.utils.misc import set_latency_stats
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]
 
-# Nakamura et al. 2016 Section IV-B experimental parameters.
-# Neighbourhood transitions a^{(nbh)}_{j,i} from nakamura_data.py:
-#   These are the "small transition probabilities" for the banded structure.
-#   Paper: a_{i,i} = 0 (self-transition handled by bottom HMM a00),
-#          a_{i,i+2} = 1e-50 (deletion, effectively 0).
-# We use the empirical values from [13] (Nakamura JNMR 2014).
+# Neighbourhood transitions of Nakamura et al. (2016), Sec. III-B and IV-B2:
+# nbh(i) = {j; 0 <= i - j <= 2}, with a_{i,i+2} = 1e-50 for deletion errors and
+# a_{i,i} = 0 for insertion errors (staying on a note is the bottom-level a00).
 DEFAULT_TRANSITIONS = [
-    (-3, 0.00509),
-    (-2, 0.00516),
-    (-1, 0.00886),
-    (0, 0.01342),  # insertion (staying at same top state)
-    (1, 0.94531),  # normal forward progression
-    (2, 0.00610),  # deletion (skip one note)
-    (3, 0.00073),
+    (1, 1.0 - 1e-50),  # normal forward progression
+    (2, 1e-50),  # deletion (skip one note)
 ]
 
-DEFAULT_D1 = 3
-DEFAULT_D2 = 3
+# neighbourhood reach in the forward step: D1 states back, D2 states ahead
+DEFAULT_D1 = 0
+DEFAULT_D2 = 2
 
 IOI_THRESHOLD = 0.035  # seconds
 SUSTAINED_DECAY: float = 0.3  # exponential decay rate for sustained notes
 
-_FLUX_EXIT_BOOST: float = 1.0
 _OTHER_PROB: float = 1e-6
+_EMISSION_BETA: float = 5.0
+_UNIFORM_FLOOR: float = 0.2
+_PITCHEDNESS_VAR0: float = 2e-4
 # Paper IV-B:
 #   a_{0,1}^{(i)} = 1e-100  (pause entry: almost never enter pause)
 #   a_{1,1}^{(i)} = 0.999   (pause self-transition: once in pause, stay)
@@ -51,6 +47,96 @@ def _preprocess_obs(obs: np.ndarray) -> np.ndarray:
     if obs.ndim == 2:
         obs = obs[-1]
     return obs.reshape(-1)
+
+
+_PITCH_TEMPLATE_CACHE: dict = {}
+
+
+def _synthesize_pitch_templates(sample_rate: int, hop_length: int) -> np.ndarray:
+    import librosa
+    import partitura
+    from partitura.score import Note, TimeSignature
+    from partitura.utils.music import performance_from_part
+
+    note_dur, gap, bpm, quarter = 0.5, 0.25, 120.0, 480
+    step_sec = note_dur + gap
+    divs_per_sec = bpm * quarter / 60.0
+    pitch_map = [
+        ("C", 0),
+        ("C", 1),
+        ("D", 0),
+        ("D", 1),
+        ("E", 0),
+        ("F", 0),
+        ("F", 1),
+        ("G", 0),
+        ("G", 1),
+        ("A", 0),
+        ("A", 1),
+        ("B", 0),
+    ]
+    frame_rate = sample_rate / hop_length
+    per_pitch_frames = [[] for _ in range(88)]
+    for vel in (50, 80, 110):
+        part = Part(id="P0", part_name="Piano", quarter_duration=quarter)
+        part.add(TimeSignature(4, 4), start=0)
+        for k in range(88):
+            pitch = 21 + k
+            step, alter = pitch_map[pitch % 12]
+            onset = int(k * step_sec * divs_per_sec)
+            note = Note(
+                id=f"n{k}", step=step, octave=pitch // 12 - 1, alter=alter, voice=1
+            )
+            part.add(note, start=onset, end=onset + int(note_dur * divs_per_sec))
+        ppart = performance_from_part(part, bpm=bpm)
+        for n in ppart.notes:
+            n["velocity"] = vel
+        audio = partitura.save_wav_fluidsynth(ppart, out=None, samplerate=sample_rate)
+        cqt = np.abs(
+            librosa.cqt(
+                y=np.asarray(audio, dtype=np.float32),
+                sr=sample_rate,
+                hop_length=hop_length,
+                fmin=librosa.note_to_hz("A0"),
+                n_bins=88,
+                bins_per_octave=12,
+            )
+        ).T
+        for k in range(88):
+            a = int((k * step_sec + 0.02) * frame_rate)
+            b = int((k * step_sec + note_dur - 0.02) * frame_rate)
+            for f in cqt[a:b]:
+                s = f.sum()
+                if s > 0:
+                    per_pitch_frames[k].append(np.maximum(f, 0.0) / s)
+
+    mu = np.zeros((88, 88), dtype=float)
+    for k in range(88):
+        frames = np.asarray(per_pitch_frames[k])
+        if frames.size == 0:
+            raise RuntimeError("empty pitch template from synthesis")
+        mu[k] = frames.mean(axis=0)
+    return mu
+
+
+def build_pitch_cqt_templates(sample_rate: int, hop_length: int) -> np.ndarray:
+    # Synthesized per-pitch templates, overlaid with the bundled real-piano
+    # templates for pitches with training support.
+    key = (int(sample_rate), int(hop_length))
+    if key in _PITCH_TEMPLATE_CACHE:
+        return _PITCH_TEMPLATE_CACHE[key]
+    mu = _synthesize_pitch_templates(int(sample_rate), int(hop_length))
+    learned = (
+        Path(__file__).parent
+        / "templates"
+        / f"pitch_templates_{int(sample_rate)}_{int(hop_length)}.npz"
+    )
+    if learned.exists():
+        lmu = np.load(learned)["mu"]
+        support = lmu.sum(axis=1) > 0.5
+        mu[support] = lmu[support]
+    _PITCH_TEMPLATE_CACHE[key] = mu
+    return mu
 
 
 def get_weighted_chords_from_score(
@@ -119,20 +205,58 @@ def compute_transition_matrix(
     if transitions is None:
         transitions = DEFAULT_TRANSITIONS
 
-    # Initialize transition matrix with epsilons
-    alpha = np.full((N, N), 1e-6, dtype=float)
+    # only the band is used in the forward step; moves outside it are the s_j r_i term
+    alpha = np.zeros((N, N), dtype=float)
     for delta, prob in transitions:
         for i in range(N):
             j = i + delta
             if 0 <= j < N:
                 alpha[i, j] = prob
 
-    alpha += np.finfo(float).eps
-    alpha /= alpha.sum(axis=1, keepdims=True)
+    row_sums = alpha.sum(axis=1, keepdims=True)
+    alpha = np.divide(alpha, row_sums, out=np.zeros_like(alpha), where=row_sums > 0)
     return alpha, D1, D2
 
 
 class AudioOuterProductHMM(OnlineAlignment):
+    """
+    Two-level HMM for audio score following (audio method ``"outerhmm"``),
+    after Nakamura et al. (2016), "Real-time audio-to-score alignment of music
+    performances containing errors and arbitrary repeats and skips".
+
+    The top level moves between score chords through neighbourhood
+    transitions plus repeat/skip transitions ``s_j * r_i``; the bottom level
+    of each chord has a sounding state, whose self-transition matches the
+    chord's notated duration at ``tempo``, and a pause state. Each frame of
+    CQT features is scored against a pitch-template mixture of the chord.
+
+    Parameters
+    ----------
+    reference_features : np.ndarray
+        Score note array (structured, with ``onset_beat``, ``onset_quarter``
+        and ``pitch``).
+    queue : RECVQueue, optional
+        Input queue for the stream-driven ``run()``.
+    transitions : list of (delta, prob), optional
+        Probability of moving ``delta`` chords ahead (negative = back).
+        If None, uses ``DEFAULT_TRANSITIONS``.
+    tempo : float
+        Notated tempo in quarter-note BPM, used for the chord durations.
+    sample_rate : int
+        Sample rate of the input audio in Hz.
+    hop_length : int
+        Hop length of the input features in samples.
+    s_j : float
+        Probability of leaving any chord by a repeat or skip. 0 disables
+        repeats and skips.
+    r_i : np.ndarray, optional
+        Probability of resuming at each chord after a repeat or skip. If None,
+        uniform.
+    ``**kwargs``
+        ``emission_beta`` (float) sharpens the emission likelihood; anything
+        else is ignored.
+    """
+
     def __init__(
         self,
         reference_features: np.ndarray,
@@ -141,7 +265,7 @@ class AudioOuterProductHMM(OnlineAlignment):
         tempo: float = 120.0,
         sample_rate: int = 16000,
         hop_length: int = 320,
-        s_j: float = 1e-5,
+        s_j: float = 1e-100,
         r_i: Optional[np.ndarray] = None,
         **kwargs,
     ) -> None:
@@ -152,16 +276,17 @@ class AudioOuterProductHMM(OnlineAlignment):
         )
         self.n_states = len(weighted_chords)
         self.score_positions = unique_onsets
-        self.chord_harmonic_mask = np.zeros((self.n_states, 88), dtype=float)
+        pitch_mu = build_pitch_cqt_templates(int(sample_rate), int(hop_length))
+        chord_mu = np.zeros((self.n_states, 88), dtype=float)
         for i, chord in enumerate(weighted_chords):
             for p, note_weight in chord.items():
                 if not (21 <= p <= 108):
                     continue
-                base = int(p - 21)
-                self.chord_harmonic_mask[i, base] += note_weight
-            s = float(np.sum(self.chord_harmonic_mask[i]))
-            if s > 0:
-                self.chord_harmonic_mask[i] /= s
+                chord_mu[i] += note_weight * pitch_mu[int(p) - 21]
+        chord_mu /= np.maximum(chord_mu.sum(axis=1, keepdims=True), 1e-12)
+        templates = (1.0 - _UNIFORM_FLOOR) * chord_mu + _UNIFORM_FLOOR / 88.0
+        self._log_templates = np.log(templates)
+        self.emission_beta = float(kwargs.get("emission_beta", _EMISSION_BETA))
         self.transitions = (
             transitions if transitions is not None else DEFAULT_TRANSITIONS
         )
@@ -219,8 +344,18 @@ class AudioOuterProductHMM(OnlineAlignment):
         }
         # Bottom transitions a_{l',l}^{(i)} and exit probs e_l^{(i)} (Eq.(5))
         frame_rate = float(self.sample_rate) / float(self.hop_length)
+        # chord durations in quarter notes: `tempo` is quarter-note BPM, while
+        # score beats follow the time signature (an eighth in 6/8, a half in 2/2)
+        notes = (
+            self.reference_features
+            if isinstance(self.reference_features, np.ndarray)
+            else self.reference_features.note_array()
+        )
+        quarter_at = dict(
+            zip(notes["onset_beat"].tolist(), notes["onset_quarter"].tolist())
+        )
         self.a00 = self._compute_chord_self_transition_probs(
-            unique_onsets=unique_onsets,
+            onset_quarters=np.array([quarter_at[b] for b in unique_onsets.tolist()]),
             tempo=tempo,
             frame_rate=frame_rate,
         )
@@ -259,20 +394,21 @@ class AudioOuterProductHMM(OnlineAlignment):
 
     @staticmethod
     def _compute_chord_self_transition_probs(
-        unique_onsets: np.ndarray,
+        onset_quarters: np.ndarray,
         tempo: float,
         frame_rate: float,
     ) -> np.ndarray:
         """
         Compute self-transition probabilities from chord durations (Eq.5).
 
-        a_i = 1 - 1/d_i, where d_i = duration_sec / frame_time.
+        a_i = 1 - 1/d_i, where d_i = duration_sec / frame_time. ``onset_quarters``
+        are the chord onsets in quarter notes and ``tempo`` is quarter-note BPM.
         """
-        N = len(unique_onsets)
+        N = len(onset_quarters)
         frame_time = 1.0 / max(frame_rate, 1e-6)
 
-        # Convert onset beats to seconds, then compute inter-onset durations
-        onset_sec = unique_onsets * (60.0 / tempo)
+        # Convert onset quarters to seconds, then compute inter-onset durations
+        onset_sec = np.asarray(onset_quarters, dtype=float) * (60.0 / tempo)
         dur_sec = np.zeros(N, dtype=float)
         if N >= 2:
             dur_sec[:-1] = np.diff(onset_sec)
@@ -324,7 +460,7 @@ class AudioOuterProductHMM(OnlineAlignment):
 
         self.current_index = new_top
         self.current_position = float(self.score_positions[self.current_index])
-        self._alignment_path.append((self.current_position, self.current_perf_time))
+        self._alignment_path.append((self.current_perf_time, self.current_position))
         self.input_index += 1
         self.latency_stats = set_latency_stats(
             time.time() - t0, self.latency_stats, self.input_index
@@ -337,15 +473,19 @@ class AudioOuterProductHMM(OnlineAlignment):
     ) -> NDArrayFloat:
         """Compute per-top-state sound emission b_0^{(i)}(y_t) for current frame."""
         obs = _preprocess_obs(observation)
-
-        # CQT-based emission: chord_harmonic_mask @ normalized_cqt
         cqt = np.maximum(obs[:88] if obs.size >= 88 else obs, 0.0)
         s = cqt.sum()
         if s <= 0:
             return np.full(self.n_states, 1e-300, dtype=float)
-        cqt = cqt / s
+        return self._emission_from_cqt(cqt / s)
 
-        em = self.chord_harmonic_mask @ cqt
+    def _emission_from_cqt(self, cqt_norm: np.ndarray) -> np.ndarray:
+        # KL log-likelihood to uniform-floored templates (Nakamura reference),
+        # beta scaled by pitchedness so flat frames stay neutral
+        pitchedness = float(np.var(cqt_norm))
+        pitchedness /= pitchedness + _PITCHEDNESS_VAR0
+        scores = self._log_templates @ cqt_norm
+        em = np.exp(self.emission_beta * pitchedness * (scores - scores.max()))
         return np.maximum(np.nan_to_num(em, nan=1e-12), 1e-12)
 
     def _compute_pause_emission(self, observation: np.ndarray) -> float:
@@ -404,9 +544,7 @@ class AudioOuterProductHMM(OnlineAlignment):
         if cqt_sum <= 0:
             emit_sound = np.full(N, 1e-300, dtype=float)
         else:
-            cqt_norm = cqt / cqt_sum
-            em = self.chord_harmonic_mask @ cqt_norm
-            emit_sound = np.maximum(np.nan_to_num(em, nan=1e-12), 1e-12)
+            emit_sound = self._emission_from_cqt(cqt / cqt_sum)
 
         # Pause emission (from _compute_pause_emission)
         if cqt_sum <= 0:
@@ -418,12 +556,7 @@ class AudioOuterProductHMM(OnlineAlignment):
             )
         emit_pause = np.full(N, emit_pause_scalar, dtype=float)
 
-        # Spectral-flux-driven exit boost
-        flux = float(obs[88]) if obs.size > 88 else 0.0
-        f = flux / (flux + 1.0)  # [0,1)
-        boost = 1.0 + _FLUX_EXIT_BOOST * f
-        e0 = np.clip(self.e0 * boost, 1e-10, 1.0 - self.a01 - 1e-10)
-        a00 = np.clip(1.0 - self.a01 - e0, 1e-10, 1.0 - 1e-10)
+        e0, a00 = self.e0, self.a00
 
         # Exit masses from each top state j (Eq.(6))
         exit_mass = prev_sound * e0 + prev_pause * self.e1  # (N,)

@@ -1,5 +1,30 @@
 # Changes
 
+## Version 0.4.0
+
+New score followers, a method registry, and a standardized evaluation output. Not backwards compatible with 0.3.
+
+### Added
+
+- Korzeniowski particle filter for audio and MIDI (`method="pfkorz"`), and the OLTW variants `arzt_tempo` and `arzt_multi_fold`.
+- `register_method()` and a YAML method registry for custom score followers.
+- SPARC smoothness in `evaluate_alignment()`, using configurable onset-wise windows and last-position hold resampling. Compare smoothness only within the same input type (audio or MIDI).
+- Python 3.13 and NumPy 2 support.
+
+### Changed
+
+- `method="pf"` (`ParticleFilter`) is removed; use `method="pfkorz"`.
+- `alignment_path` rows are now `(performance time in seconds, score position in beats)`, the reverse of 0.3.
+- Custom followers now receive observations through `__call__(observation, perf_time)` instead of a single `(observation, perf_time)` tuple.
+- `evaluate_alignment()` returns flat fields (`mean_b`, `median_b`, `std_b`, `accuracy_<tolerance>b`, `skewness`, `kurtosis`, `smoothness`).
+- Removed millisecond-based alignment metrics (`in_seconds`, `TOLERANCES_IN_MILLISECONDS`, `ms_tolerances`) and the `return_details` option on `evaluate_alignment()`.
+- Latency keys are renamed from `f_avg_latency` and `i_avg_latency` to `feature_latency_ms` and `inference_latency_ms`.
+
+### Fixed
+
+- Corrected CQT/STFT magnitude features, non-4/4 chord durations, MIDI onset timestamps, and grace-note tempo initialization.
+- Included bundled example assets in distribution wheels.
+
 ## Version 0.3.0
 
 This is a major feature release introducing new symbolic and audio score-following trackers, a unified interface refactor, particle filters, bug fixes, and documentation improvements. This version is not backwards compatible with 0.2 versions.

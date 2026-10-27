@@ -13,6 +13,7 @@ from .oltw_arzt import (
     OnlineTimeWarpingArztEvent,
     OnlineTimeWarpingArztFrame,
 )
+from .oltw_arzt_multi_fold import OnlineTimeWarpingArztMultiFold
 from .oltw_dixon import (
     OnlineTimeWarpingDixon,
     OnlineTimeWarpingDixonEvent,

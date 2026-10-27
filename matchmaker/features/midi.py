@@ -13,7 +13,7 @@ from partitura.performance import PerformanceLike, PerformedPart
 from partitura.score import Part, Score, ScoreLike, merge_parts
 from partitura.utils.music import performance_from_part
 
-from matchmaker.features.processor import Processor
+from matchmaker.features.processor import KorzeniowskiObservation, Processor
 from matchmaker.utils.symbolic import (
     framed_midi_messages_from_performance,
     midi_messages_from_performance,
@@ -287,16 +287,14 @@ class ChordOnsetProcessor(Processor):
 
 class PitchClassPianoRollProcessor(Processor):
     """
-    A class to convert a MIDI file time slice to a piano roll representation.
+    A class to convert a MIDI file time slice to a pitch-class (12-bin) piano
+    roll of the notes held at the end of the frame.
 
     Parameters
     ----------
     use_velocity : bool
         If True, the velocity of the note is used as the value in the piano
         roll. Otherwise, the value is 1.
-    piano_range : bool
-        If True, the piano roll will only contain the notes in the piano.
-        Otherwise, the piano roll will contain all 128 MIDI notes.
     dtype : type
         The data type of the piano roll. Default is float.
     """
@@ -481,6 +479,143 @@ def group_onsets(
             if 0 <= p < dim:
                 features[i, p] = 1.0
     return features, times
+
+
+class ParticleFilterMidiProcessor(PianoRollProcessor):
+    """
+    MIDI feature processor for the Korzeniowski particle filter.
+
+    The processor computes:
+
+        • active notes
+        • onset notes
+        • symbolic loudness (derived from MIDI velocity)
+    """
+
+    def __init__(
+        self,
+        piano_range: bool = False,
+        dtype=np.float32,
+    ):
+        super().__init__(
+            use_velocity=True,
+            piano_range=piano_range,
+            dtype=dtype,
+        )
+
+        # Notes beginning during the current frame.
+        self.current_onsets: List[int] = []
+
+        self.velocities: np.ndarray = np.zeros(128, dtype=np.float32)
+
+    def __call__(
+        self,
+        frame: InputMIDIFrame,
+    ) -> Tuple[KorzeniowskiObservation, float]:
+        """
+        Process one MIDI frame and return a Korzeniowski observation.
+
+        Parameters
+        ----------
+        frame
+            Tuple of (MIDI messages, frame time).
+
+        Returns
+        -------
+        (KorzeniowskiObservation, time)
+            ``time`` is the first onset in the frame, or the frame time when
+            the frame has none. The frame time is the middle of the polling
+            window, which lies before the onsets in its second half and after
+            those in its first half; the other MIDI processors also stamp an
+            observation with its first note.
+        """
+
+        data, f_time = frame
+
+        # Reset onset list for this frame.
+        self.current_onsets = []
+        onset_time = None
+
+        for msg, m_time in data:
+            if msg.type == "note_on" and msg.velocity > 0:
+                # new onset in this frame
+                self.current_onsets.append(msg.note)
+                self.velocities[msg.note] = msg.velocity
+                onset_time = m_time if onset_time is None else min(onset_time, m_time)
+
+                self.active_notes[msg.note] = (
+                    msg.velocity,
+                    m_time,
+                )
+
+            elif msg.type == "note_off" or (
+                msg.type == "note_on" and msg.velocity == 0
+            ):
+                self.active_notes.pop(
+                    msg.note,
+                    None,
+                )
+
+                self.velocities[msg.note] = 0
+
+        # Currently sounding pitches.
+        active_notes = np.array(
+            sorted(self.active_notes.keys()),
+            dtype=np.int16,
+        )
+
+        # Notes beginning in this frame.
+        onset_notes = np.array(
+            sorted(self.current_onsets),
+            dtype=np.int16,
+        )
+
+        # Notes that are currently active but have no onset in this frame.
+        continuing_notes = np.array(
+            sorted(set(active_notes) - set(onset_notes)),
+            dtype=np.int16,
+        )
+
+        self.velocities[continuing_notes] *= 0.95  # decay velocity of continuing notes
+
+        observation = KorzeniowskiObservation(
+            active_notes=active_notes,
+            onset_notes=onset_notes,
+            loudness=self.compute_loudness(),
+        )
+
+        return observation, (f_time if onset_time is None else onset_time)
+
+    def compute_loudness(self) -> float:
+        """
+        Compute symbolic loudness from the currently active MIDI notes.
+
+        Loudness is defined as the square root of the summed squared
+        normalized MIDI velocities (energy RMS).
+
+        Returns
+        -------
+        float
+            Symbolic loudness.
+        """
+
+        # Silence
+        if not self.active_notes:
+            return -70.0
+
+        # Extract normalized velocities.
+        velocities = np.array(
+            [self.velocities[note] / 127.0 for note in self.active_notes],
+            dtype=np.float32,
+        )
+
+        # Total symbolic energy.
+        loudness = np.sqrt(np.sum(velocities**2))
+
+        # Convert to decibels (dB).
+        loudness = 20.0 * np.log10(loudness)
+
+        return float(loudness)
 
 
 if __name__ == "__main__":  # pragma: no cover

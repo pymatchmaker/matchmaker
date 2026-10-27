@@ -8,6 +8,13 @@ cimport numpy as np
 
 import numpy as np
 
+from matchmaker.dp.direction import Direction
+
+cdef signed char NO_DIRECTION = Direction.NONE
+cdef signed char REF_DIRECTION = Direction.REF
+cdef signed char INPUT_DIRECTION = Direction.INPUT
+cdef signed char BOTH_DIRECTION = Direction.BOTH
+
 # from numpy.math cimport INFINITY
 
 from libc.math cimport INFINITY
@@ -23,7 +30,8 @@ def oltw_arzt_loop(
     int window_end,
     int input_index,
     float min_costs,
-    int min_index
+    int min_index,
+    signed char[:] backpointers = None
 ):
     """
     Cythonized main loop for online time warping.
@@ -46,6 +54,9 @@ def oltw_arzt_loop(
         Minimum costs of current window.
     min_index: int
         Index of minimum costs of current window.
+    backpointers: numpy.ndarray or None
+        Optional array of shape (window_end - window_start,) to record backpointers
+        Values follow Direction: NONE=-1, REF=0, INPUT=1, BOTH=2.
 
     Returns
     -------
@@ -68,6 +79,8 @@ def oltw_arzt_loop(
         # global_cost_matrix[1, 1] = sum(window_cost)
         min_costs = global_cost_matrix[1, 1]
         min_index = 0
+        if backpointers is not None:
+            backpointers[0] = NO_DIRECTION
 
     while score_index < window_end:
 
@@ -84,6 +97,14 @@ def oltw_arzt_loop(
             min_dist = min(dist1, dist2, dist3)
             global_cost_matrix[score_index + 1, 1] = min_dist
 
+            if backpointers is not None:
+                if dist1 <= dist2 and dist1 <= dist3:
+                    backpointers[idx] = REF_DIRECTION
+                elif dist2 <= dist3:
+                    backpointers[idx] = INPUT_DIRECTION
+                else:
+                    backpointers[idx] = BOTH_DIRECTION
+
             norm_cost = min_dist / (input_index + score_index + 1.0)
 
             # check if new cell has lower costs and might be current position
@@ -96,7 +117,9 @@ def oltw_arzt_loop(
 
     update_cost_matrix(global_cost_matrix, N)
 
-    return global_cost_matrix, min_index, min_costs
+    # Row arithmetic in the tempo model needs an ndarray, not a Cython memoryview.
+    # np.asarray shares the existing buffer without copying its data.
+    return np.asarray(global_cost_matrix), min_index, min_costs
 
 @cython.boundscheck(False)
 @cython.wraparound(False)

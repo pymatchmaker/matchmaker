@@ -53,6 +53,9 @@ class BaseHMM(HiddenMarkovModel, OnlineAlignment):
     """
     Base class for Hidden Markov Model alignment methods.
 
+    Each ``step`` runs one step of the forward algorithm and moves
+    ``current_index`` to the most likely state.
+
     Parameters
     ----------
     observation_model: ObservationModel
@@ -69,6 +72,13 @@ class BaseHMM(HiddenMarkovModel, OnlineAlignment):
 
     has_insertions: bool
         A boolean indicating whether the state space consider inserted notes.
+
+    queue: Optional[RECVQueue]
+        Input queue for the stream-driven ``run()``.
+
+    patience: int
+        Number of consecutive steps without a state change after which the
+        audio HMMs' ``run()`` stops. Unused by the MIDI HMMs.
     """
 
     observation_model: ObservationModel
@@ -118,31 +128,43 @@ class BaseHMM(HiddenMarkovModel, OnlineAlignment):
 
 class PitchHMM(BaseHMM):
     """
-    Implements the behavior of a HiddenMarkovModel, specifically designed for
-    the task of score following.
+    Pitch-only HMM score follower for MIDI input (method ``"pthmm"``).
+
+    The hidden states are the unique score onsets (plus, with
+    ``has_insertions``, one inserted state between each pair of onsets). Each
+    observation is the binary pitch vector of a MIDI frame, scored against the
+    chord pitches of every state with a Bernoulli observation model.
 
     Parameters
     ----------
-    _transition_matrix : numpy.ndarray
-        Matrix for computations of state transitions within the HMM.
-
-    _observation_model : ObservationModel
-        Object responsible for computing the observation probabilities for each
-        state of the HMM.
-
-    initial_distribution : numpy array
-        The initial distribution of the model. If not given, it is assumed to
-        be uniform.
-
-    forward_variable : numpy array
-        The current (latest) value of the forward variable.
-
-    _variation_coeff : float
-        The normalized coefficient of variation of the current (latest) forward
-        variable. Used to determine the confidence of the prediction of the HMM.
-
-    current_state : int
-        The index of the current state of the HMM.
+    reference_features : np.ndarray
+        Score note array (structured, with ``onset_beat`` and ``pitch``).
+    queue : RECVQueue, optional
+        Input queue for the stream-driven ``run()``.
+    transition_model : TransitionModel, optional
+        Transition model to use. If None, a ``ConstantTransitionModel`` is
+        built from a Gumbel-shaped transition matrix over the score states.
+    observation_model : ObservationModel, optional
+        Currently ignored: the ``BernoulliPitchObservationModel`` built from
+        ``reference_features`` is always used.
+    transition_matrix : np.ndarray, optional
+        Currently ignored: the transition matrix built from
+        ``reference_features`` is always used.
+    pitch_obs_prob_func : callable, optional
+        Currently ignored (see ``observation_model``).
+    pitch_prob_args : dict, optional
+        Currently ignored (see ``observation_model``).
+    initial_probabilities : np.ndarray, optional
+        Currently ignored: a Gumbel-shaped initial distribution over the score
+        states is always used.
+    has_insertions : bool
+        If True, add an inserted state between consecutive score onsets to
+        absorb extra performed notes.
+    piano_range : bool
+        If True, pitch vectors cover the 88-key piano range (MIDI 21-108);
+        must match the processor's ``piano_range``.
+    ``**kwargs``
+        Ignored; accepted so ``Matchmaker`` can pass its configuration.
     """
 
     def __init__(
@@ -159,34 +181,6 @@ class PitchHMM(BaseHMM):
         piano_range: bool = True,
         **kwargs,
     ) -> None:
-        """
-        Initialize the object.
-
-        Parameters
-        ----------
-        transition_matrix : numpy array
-            The Tranistion probability matrix of HMM.
-
-        pitch_profiles : numpy array
-            The pre-computed pitch profiles, for each separate possible pitch
-            in the MIDI range. Used in calculating the pitch observation
-            probabilities.
-
-        ioi_matrix : numpy array
-            The pre-computed score IOI values in beats, from each unique state
-            to all other states, stored in a matrix.
-
-        ioi_precision : float
-            The precision parameter for computing the IOI observation
-            probability.
-
-        score_onsets : numpy array
-
-        initial_distribution : numpy array
-            The initial distribution of the model. If not given, it is asumed to
-            be uniform.
-            Default = None.
-        """
         OnlineAlignment.__init__(
             self,
             reference_features=reference_features,
@@ -1393,31 +1387,53 @@ class ACCPitchIOIObservationModel(ObservationModel):
 
 class PitchIOIHMM(BaseHMM):
     """
-    Implements the behavior of a HiddenMarkovModel, specifically designed for
-    the task of score following.
+    Pitch and inter-onset-interval HMM score follower for MIDI input
+    (method ``"hmm"``), after Cancino-Chacón et al. (2023).
+
+    The hidden states are the unique score onsets (plus, with
+    ``has_insertions``, one inserted state between each pair of onsets). Each
+    observation is the list of pitches of a MIDI frame together with the time
+    since the previous observation; the IOI term compares it with the score
+    IOI scaled by the tempo model's current beat period, and the tempo model is
+    updated whenever the follower advances to a new onset.
 
     Parameters
     ----------
-    _transition_matrix : numpy.ndarray
-        Matrix for computations of state transitions within the HMM.
-
-    _observation_model : ObservationModel
-        Object responsible for computing the observation probabilities for each
-        state of the HMM.
-
-    initial_distribution : numpy array
-        The initial distribution of the model. If not given, it is assumed to
-        be uniform.
-
-    forward_variable : numpy array
-        The current (latest) value of the forward variable.
-
-    _variation_coeff : float
-        The normalized coefficient of variation of the current (latest) forward
-        variable. Used to determine the confidence of the prediction of the HMM.
-
-    current_state : int
-        The index of the current state of the HMM.
+    reference_features : np.ndarray
+        Score note array (structured, with ``onset_beat`` and ``pitch``).
+    queue : RECVQueue, optional
+        Input queue for the stream-driven ``run()``.
+    tempo_model : type
+        Tempo model *class* (e.g. ``KalmanTempoModel``); it is instantiated
+        with an initial beat period of 0.6 s at the first score onset.
+        Required in practice: ``Matchmaker`` passes ``KalmanTempoModel``.
+    transition_model : TransitionModel, optional
+        Transition model to use. If None, a ``ConstantTransitionModel`` is
+        built from a Gumbel-shaped transition matrix over the score states.
+    observation_model : PitchIOIObservationModel, optional
+        Currently ignored: the ``ACCPitchIOIObservationModel`` built from
+        ``reference_features`` is always used.
+    transition_matrix : np.ndarray, optional
+        Currently ignored: the transition matrix built from
+        ``reference_features`` is always used.
+    pitch_obs_prob_func, ioi_obs_prob_func : callable, optional
+        Currently ignored (see ``observation_model``).
+    ioi_matrix : np.ndarray, optional
+        Currently ignored (see ``observation_model``).
+    pitch_prob_args, ioi_prob_args : dict, optional
+        Currently ignored (see ``observation_model``).
+    initial_probabilities : np.ndarray, optional
+        Currently ignored: a Gumbel-shaped initial distribution over the score
+        states is always used.
+    has_insertions : bool
+        If True, add an inserted state between consecutive score onsets to
+        absorb extra performed notes. The tempo model is then only updated on
+        onset (even-indexed) states.
+    piano_range : bool
+        If True, pitches are indexed in the 88-key piano range (MIDI 21-108);
+        must match the processor's ``piano_range``.
+    ``**kwargs``
+        Passed on to ``BaseHMM`` (e.g. ``patience``).
     """
 
     def __init__(
@@ -1438,35 +1454,6 @@ class PitchIOIHMM(BaseHMM):
         piano_range: bool = False,
         **kwargs,
     ) -> None:
-        """
-        Initialize the object.
-
-        Parameters
-        ----------
-        transition_matrix : numpy array
-            The Tranistion probability matrix of HMM.
-
-        pitch_profiles : numpy array
-            The pre-computed pitch profiles, for each separate possible pitch
-            in the MIDI range. Used in calculating the pitch observation
-            probabilities.
-
-        ioi_matrix : numpy array
-            The pre-computed score IOI values in beats, from each unique state
-            to all other states, stored in a matrix.
-
-        ioi_precision : float
-            The precision parameter for computing the IOI observation
-            probability.
-
-        score_onsets : numpy array
-            TODO
-
-        initial_distribution : numpy array
-            The initial distribution of the model. If not given, it is asumed to
-            be uniform.
-            Default = None.
-        """
         OnlineAlignment.__init__(
             self,
             reference_features=reference_features,
@@ -1670,7 +1657,40 @@ def build_local_transition_matrix(n_states, window):
 
 class GaussianAudioPitchHMM(BaseHMM):
     """
-    Audio Gaussian HMM
+    Frame-level audio HMM with a Gaussian observation model.
+
+    Each state is one frame of the reference audio features; an input frame is
+    scored against every reference frame with a Gaussian likelihood, and the
+    states advance through a left-to-right stay/advance transition matrix.
+    Not registered in ``methods.yaml``; use it directly. Unlike
+    ``OnlineAlignment``, its ``__call__`` takes a single
+    ``(features, f_time)`` tuple and returns the state index.
+
+    Parameters
+    ----------
+    reference_features : np.ndarray
+        Reference audio features, shape ``(n_frames, n_features)``; one state
+        per frame.
+    queue : RECVQueue, optional
+        Input queue for the stream-driven ``run()``.
+    transition_model : TransitionModel, optional
+        Transition model to use. If None, one is built from
+        ``transition_matrix`` and ``initial_probabilities``.
+    observation_model : ObservationModel, optional
+        Observation model to use. If None, a
+        ``GaussianAudioPitchObservationModel`` is built with ``precision``.
+    transition_matrix : np.ndarray, optional
+        Used when ``transition_model`` is None. Defaults to a left-to-right
+        matrix with stay and advance probabilities of 0.5.
+    precision : float
+        Precision of the Gaussian observation model.
+    initial_probabilities : np.ndarray, optional
+        Used when ``transition_model`` is None. Defaults to a Gumbel-shaped
+        distribution favouring the first frames.
+    score_positions : np.ndarray, optional
+        Score position of each state. Defaults to the frame indices.
+    patience : int
+        ``run()`` stops after this many consecutive steps in the same state.
     """
 
     def __init__(
@@ -1685,35 +1705,6 @@ class GaussianAudioPitchHMM(BaseHMM):
         score_positions: Optional[NDArray] = None,
         patience: int = 50,
     ) -> None:
-        """
-        Initialize the object.
-
-        Parameters
-        ----------
-        transition_matrix : numpy array
-            The Tranistion probability matrix of HMM.
-
-        pitch_profiles : numpy array
-            The pre-computed pitch profiles, for each separate possible pitch
-            in the MIDI range. Used in calculating the pitch observation
-            probabilities.
-
-        ioi_matrix : numpy array
-            The pre-computed score IOI values in beats, from each unique state
-            to all other states, stored in a matrix.
-
-        ioi_precision : float
-            The precision parameter for computing the IOI observation
-            probability.
-
-        score_onsets : numpy array
-            TODO
-
-        initial_distribution : numpy array
-            The initial distribution of the model. If not given, it is asumed to
-            be uniform.
-            Default = None.
-        """
         OnlineAlignment.__init__(
             self,
             reference_features=reference_features,
@@ -1798,7 +1789,7 @@ class GaussianAudioPitchHMM(BaseHMM):
             observation=frame,
             log_probabilities=False,
         )
-        self._alignment_path.append((current_state, self.input_index))
+        self._alignment_path.append((self.input_index, current_state))
         self.input_index = self.input_index + 1 if frame_index is None else frame_index
 
         self.current_index = current_state
@@ -1852,7 +1843,50 @@ class GaussianAudioPitchHMM(BaseHMM):
 
 class GaussianAudioPitchTempoHMM(BaseHMM):
     """
-    Audio Gaussian HMM
+    Frame-level audio HMM with a Gaussian observation model and a tempo model.
+
+    Like ``GaussianAudioPitchHMM``, but the observation model also scores how
+    well the input matches the current beat period of a tempo model, which is
+    updated whenever the follower moves forward. Not registered in
+    ``methods.yaml``; use it directly. Unlike ``OnlineAlignment``, its
+    ``__call__`` takes a single ``(features, f_time)`` tuple and returns the
+    state index.
+
+    Parameters
+    ----------
+    reference_features : np.ndarray
+        Reference audio features, shape ``(n_frames, n_features)``; one state
+        per frame.
+    queue : RECVQueue, optional
+        Input queue for the stream-driven ``run()``.
+    transition_model : TransitionModel, optional
+        Transition model to use. If None, one is built from
+        ``transition_matrix`` and ``initial_probabilities``.
+    observation_model : ObservationModel, optional
+        Observation model to use. If None, a
+        ``GaussianAudioPitchTempoObservationModel`` is built with
+        ``pitch_precision`` and ``ioi_precision``.
+    tempo_model : TempoModel, optional
+        Tempo model instance. Defaults to a ``ReactiveTempoModel`` with a beat
+        period of one frame.
+    transition_matrix : np.ndarray, optional
+        Used when ``transition_model`` is None. Defaults to a left-to-right
+        matrix with stay probability 0.45 and advance probability 0.475.
+    pitch_precision : float
+        Precision of the Gaussian feature term of the observation model.
+    ioi_precision : float
+        Precision of the tempo (IOI) term of the observation model.
+    transition_scale : float
+        Currently unused.
+    initial_probabilities : np.ndarray, optional
+        Used when ``transition_model`` is None. Defaults to a Gumbel-shaped
+        distribution favouring the first frames.
+    score_positions : np.ndarray, optional
+        Score position of each state. Defaults to the frame indices.
+    patience : int
+        ``run()`` stops after this many consecutive steps in the same state.
+    ``**kwargs``
+        Ignored.
     """
 
     def __init__(
@@ -1871,35 +1905,6 @@ class GaussianAudioPitchTempoHMM(BaseHMM):
         patience: int = 200,
         **kwargs,
     ) -> None:
-        """
-        Initialize the object.
-
-        Parameters
-        ----------
-        transition_matrix : numpy array
-            The Tranistion probability matrix of HMM.
-
-        pitch_profiles : numpy array
-            The pre-computed pitch profiles, for each separate possible pitch
-            in the MIDI range. Used in calculating the pitch observation
-            probabilities.
-
-        ioi_matrix : numpy array
-            The pre-computed score IOI values in beats, from each unique state
-            to all other states, stored in a matrix.
-
-        ioi_precision : float
-            The precision parameter for computing the IOI observation
-            probability.
-
-        score_onsets : numpy array
-            TODO
-
-        initial_distribution : numpy array
-            The initial distribution of the model. If not given, it is asumed to
-            be uniform.
-            Default = None.
-        """
         OnlineAlignment.__init__(
             self,
             reference_features=reference_features,
@@ -2000,7 +2005,7 @@ class GaussianAudioPitchTempoHMM(BaseHMM):
             log_probabilities=False,
         )
 
-        self._alignment_path.append((current_state, self.input_index))
+        self._alignment_path.append((self.input_index, current_state))
         self.input_index = self.input_index + 1 if frame_index is None else frame_index
 
         if current_state >= self.current_index:
