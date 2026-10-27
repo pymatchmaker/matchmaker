@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pymatchmaker"
-version = "0.4.0rc1"
+version = "0.4.0rc2"
 description = "A package for real-time music alignment"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
@@ -66,7 +66,7 @@ dev = [
 exclude = ["tests", "docs"]
 
 [tool.setuptools.package-data]
-"matchmaker" = ["methods.yaml"]
+"matchmaker" = ["methods.yaml", "assets/*"]
 "matchmaker.prob" = ["templates/*.npz"]
 
 [tool.ruff]
