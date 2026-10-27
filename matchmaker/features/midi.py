@@ -13,7 +13,7 @@ from partitura.performance import PerformanceLike, PerformedPart
 from partitura.score import Part, Score, ScoreLike, merge_parts
 from partitura.utils.music import performance_from_part
 
-from matchmaker.features.processor import Processor, KorzeniowskiObservation
+from matchmaker.features.processor import KorzeniowskiObservation, Processor
 from matchmaker.utils.symbolic import (
     framed_midi_messages_from_performance,
     midi_messages_from_performance,
@@ -287,16 +287,14 @@ class ChordOnsetProcessor(Processor):
 
 class PitchClassPianoRollProcessor(Processor):
     """
-    A class to convert a MIDI file time slice to a piano roll representation.
+    A class to convert a MIDI file time slice to a pitch-class (12-bin) piano
+    roll of the notes held at the end of the frame.
 
     Parameters
     ----------
     use_velocity : bool
         If True, the velocity of the note is used as the value in the piano
         roll. Otherwise, the value is 1.
-    piano_range : bool
-        If True, the piano roll will only contain the notes in the piano.
-        Otherwise, the piano roll will contain all 128 MIDI notes.
     dtype : type
         The data type of the piano roll. Default is float.
     """
@@ -499,7 +497,6 @@ class ParticleFilterMidiProcessor(PianoRollProcessor):
         piano_range: bool = False,
         dtype=np.float32,
     ):
-
         super().__init__(
             use_velocity=True,
             piano_range=piano_range,
@@ -539,9 +536,7 @@ class ParticleFilterMidiProcessor(PianoRollProcessor):
         self.current_onsets = []
         onset_time = None
 
-
         for msg, m_time in data:
-
             if msg.type == "note_on" and msg.velocity > 0:
                 # new onset in this frame
                 self.current_onsets.append(msg.note)
@@ -553,14 +548,9 @@ class ParticleFilterMidiProcessor(PianoRollProcessor):
                     m_time,
                 )
 
-            elif (
-                msg.type == "note_off"
-                or (
-                    msg.type == "note_on"
-                    and msg.velocity == 0
-                )
-                ):
-
+            elif msg.type == "note_off" or (
+                msg.type == "note_on" and msg.velocity == 0
+            ):
                 self.active_notes.pop(
                     msg.note,
                     None,
@@ -582,10 +572,7 @@ class ParticleFilterMidiProcessor(PianoRollProcessor):
 
         # Notes that are currently active but have no onset in this frame.
         continuing_notes = np.array(
-            sorted(
-                set(active_notes)
-                - set(onset_notes)
-            ),
+            sorted(set(active_notes) - set(onset_notes)),
             dtype=np.int16,
         )
 
@@ -598,7 +585,7 @@ class ParticleFilterMidiProcessor(PianoRollProcessor):
         )
 
         return observation, (f_time if onset_time is None else onset_time)
-    
+
     def compute_loudness(self) -> float:
         """
         Compute symbolic loudness from the currently active MIDI notes.
@@ -622,18 +609,14 @@ class ParticleFilterMidiProcessor(PianoRollProcessor):
             dtype=np.float32,
         )
 
-
         # Total symbolic energy.
-        loudness = np.sqrt(
-            np.sum(
-                velocities ** 2
-            )
-        )
+        loudness = np.sqrt(np.sum(velocities**2))
 
         # Convert to decibels (dB).
         loudness = 20.0 * np.log10(loudness)
 
         return float(loudness)
+
 
 if __name__ == "__main__":  # pragma: no cover
     pass

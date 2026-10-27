@@ -105,9 +105,9 @@ You can test the alignment with a score and a performance file. No extra depende
 from matchmaker import Matchmaker
 
 mm = Matchmaker(
-    score_file=”path/to/score.musicxml”,
-    performance_file=”path/to/performance.wav”,
-    input_type=”audio”,
+    score_file="path/to/score.musicxml",
+    performance_file="path/to/performance.wav",
+    input_type="audio",
 )
 for current_position in mm.run():
     print(current_position)  # beat position in the score
@@ -123,9 +123,9 @@ To run with a live audio or MIDI input, install with `pip install pymatchmaker[d
 
 ```python
 mm = Matchmaker(
-    score_file=”path/to/score.musicxml”,
-    input_type=”audio”,
-    device_name_or_index=”MacBookPro Microphone”,
+    score_file="path/to/score.musicxml",
+    input_type="audio",
+    device_name_or_index="MacBookPro Microphone",
 )
 for current_position in mm.run():
     print(current_position)
@@ -138,14 +138,14 @@ from matchmaker import Matchmaker
 
 # Audio input
 mm = Matchmaker(
-    score_file=”path/to/score.musicxml”,
-    input_type=”audio”,
+    score_file="path/to/score.musicxml",
+    input_type="audio",
 )
 
 # MIDI input
 mm = Matchmaker(
-    score_file=”path/to/score.musicxml”,
-    input_type=”midi”,
+    score_file="path/to/score.musicxml",
+    input_type="midi",
 )
 ```
 
@@ -275,7 +275,7 @@ Matchmaker has the following pipeline:
 ```
    input source              Stream              Processor              OnlineAlignment
    (audio/MIDI                                   (chroma,               (e.g.,
-    file or live)      ─►   AudioStream    ─►    pitch_chord,    ─►    PitchHMM,        ─►   alignment_path
+    file or live)      ─►   AudioStream    ─►    pitch,          ─►    PitchHMM,        ─►   alignment_path
                             MidiStream           ...)                   OLTWArzt, ...)        (2, T) array
 ```
 
@@ -286,12 +286,13 @@ Matchmaker has the following pipeline:
   `RECVQueue`, followed by a `STREAM_END` sentinel when the source is
   exhausted.
 
-- **`Processor`** (e.g., `ChromagramProcessor`, `PitchChordProcessor`) takes
+- **`Processor`** (e.g., `ChromagramProcessor`, `PitchProcessor`) takes
   a `(data, frame_time)` tuple and returns either a `(features, perf_time)`
   tuple or `None` while buffering. `data` is `np.ndarray` for audio or
   `List[(mido.Message, m_time)]` for MIDI; `perf_time` is the timestamp the
-  feature corresponds to (most processors pass `frame_time` through;
-  chord-buffering MIDI processors emit the chord onset).
+  feature corresponds to (most processors pass `frame_time` through; MIDI
+  processors that emit note or chord observations, such as `PitchProcessor`
+  and `ChordOnsetProcessor`, stamp it with the first note-on time).
 
 - **`OnlineAlignment`** (the score follower base class; e.g.,
   `OnlineTimeWarpingArzt`, `PitchIOIHMM`) consumes `(features, perf_time)`
@@ -347,10 +348,11 @@ Default method: `"arzt"`
 |---|---|
 | `"arzt"` | On-line time warping adapted from Brazier and Widmer (2020) |
 | `"dixon"` | On-line time warping by Dixon (2005) |
-| `"outerhmm"` | Outer-product HMM score follower by Nakamura (2014) |
+| `"outerhmm"` | Two-level HMM with repeats and skips by Nakamura et al. (2016) |
 | `"skf"` | Switching Kalman Filter with hidden tempo by Jiang and Raphael (2020) |
 | `"arzt_tempo"` | On-line time warping by Arzt with a tempo model (Arzt and Widmer, 2010) |
 | `"arzt_multi_fold"` | Arzt OLTW tracking several unfolded score variants in parallel |
+| `"pfkorz"` | Particle filter score follower by Korzeniowski et al. (2013) |
 
 ### MIDI (`input_type="midi"`)
 
@@ -363,12 +365,21 @@ Default method: `"pthmm"`
 | `"outerhmm"` | Outer-product HMM score follower by Nakamura (2014) |
 | `"hmm"` | HMM score follower by Cancino-Chacón et al. (2023) |
 | `"pthmm"` | Pitch-based HMM score follower |
+| `"pfkorz"` | Particle filter score follower by Korzeniowski et al. (2013) |
+| `"SL_OLTW"` | Symbolic-level OLTW note matcher from [parangonar](https://github.com/sildater/parangonar) |
+| `"SLT_OLTW"` | Symbolic-level OLTW note matcher with tempo, from parangonar |
+| `"OTM"` | Online transformer note matcher from parangonar |
+| `"OPTM"` | Online pure-transformer note matcher from parangonar |
+
+The parangonar methods match one performed note at a time, so they always run
+event-based (no MIDI polling).
 
 ## Features
 
 ### Audio (`input_type="audio"`)
 
-Default processor: `"chroma"`
+Default processor: `"chroma"`. Some methods default to their own processor
+(e.g. `"dixon"` → `"lse"`); see `default_kwargs` in `methods.yaml`.
 
 | Processor | Description |
 |---|---|
@@ -379,17 +390,21 @@ Default processor: `"chroma"`
 | `"lse"` | Log-spectral energy features used in Dixon (2005) |
 | `"cqt_spectral_flux"` | CQT-based spectral flux used in Nakamura (2014) |
 | `"raw_spectrum"` | Raw power spectrum used in Jiang and Raphael (2020) |
+| `"korzeniowski"` | Spectral observations for the Korzeniowski et al. (2013) particle filter |
 
 ### MIDI (`input_type="midi"`)
 
-Default processor: `"pitch_chord"`
+Default processor: `"pitch"`. Some methods default to their own processor
+(e.g. MIDI `"arzt"` / `"dixon"` → `"chord_onset"`).
 
 | Processor | Description |
 |---|---|
-| `"pitch_chord"` | Pitch features grouped per chord onset |
-| `"pitch"` | Pitch features per note (no chord grouping) |
-| `"pianoroll"` | Piano-roll features |
-| `"pitchclass"` | Pitch class features |
+| `"pitch"` | Binary pitch vector of the note-ons in each MIDI frame (a chord when MIDI polling groups notes) |
+| `"chord_onset"` | Binary pitch vector per chord, merging note-ons that arrive within 35 ms |
+| `"pianoroll"` | Piano-roll of the notes held in each frame |
+| `"pitchclass"` | Pitch-class (12-bin) piano-roll |
+| `"korzeniowski"` | Note observations for the Korzeniowski et al. (2013) particle filter |
+| `"parangonar"` | One partitura note-array row per performed note, for the parangonar methods |
 
 ## Configurations
 
@@ -401,17 +416,18 @@ Initialization parameters for the `Matchmaker` class:
 | `performance_file` | str or None | `None` | Path to a recorded performance file for simulation mode. If `None`, live device input is used. |
 | `input_type` | str | `"audio"` | Input modality. Options: `"audio"`, `"midi"`. |
 | `method` | str or None | `None` | Alignment method. Defaults to `"arzt"` for audio, `"pthmm"` for MIDI. See [Alignment Methods](#alignment-methods). |
-| `processor` | str or None | `None` | Feature processor. Defaults to `"chroma"` for audio, `"pitch_chord"` for MIDI. See [Features](#features). |
+| `processor` | str or None | `None` | Feature processor. Defaults to the method's own processor, else `"chroma"` for audio and `"pitch"` for MIDI. See [Features](#features). |
 | `kwargs` | dict or None | `None` | Method-specific parameters (e.g., `window_size`, `sample_rate`, `frame_rate`). If `None`, built-in defaults for the chosen method are used. |
 | `stream` | Stream or None | `None` | Custom `Stream` instance for external input sources (e.g., WebSocket). If `None`, the stream is built automatically from `input_type`. |
 | `device_name_or_index` | str or int or None | `None` | Audio/MIDI device name or index for live input. Requires `pymatchmaker[devices]`. |
 | `tempo` | float or None | `None` | Initial tempo in BPM for score rendering. If `None`, inferred from the score. |
-| `wait` | bool | `False` | If `True`, block until the score follower finishes before returning from `run()`. |
+| `wait` | bool | `False` | Audio simulation mode only. If `True`, the performance file is streamed at real-time speed instead of as fast as possible. |
 | `unfold_score` | bool | `True` | If `True`, unfold repeat signs in the score before alignment. |
 
 ## Contributing
 
-If you want to add a new score follower, please refer to [HOW_TO_CONTRIBUTE.md](HOW_TO_CONTRIBUTE.md)
+For issues, branches and pull requests, see [CONTRIBUTING.md](CONTRIBUTING.md).
+If you want to add a new score follower, please refer to [HOW_TO_MAKE_CUSTOM_SCORE_FOLLOWERS.md](HOW_TO_MAKE_CUSTOM_SCORE_FOLLOWERS.md)
 for the `OnlineAlignment` interface, boilerplate, and audio/MIDI tips.
 The same guide is also available in the [online docs](https://pymatchmaker.readthedocs.io/en/latest/contribute.html).
 
@@ -421,21 +437,21 @@ If you find Matchmaker useful, we would appreciate if you could cite us!
 
 ```bibtex
 @inproceedings{park_matchmaker_2025,
-	title = {Matchmaker: {An} {Open}-{Source} {Library} for {Real}-{Time} {Piano} {Score} {Following} and {Systematic} {Evaluation}},
-	booktitle = {Proceedings of the 26th {International} {Society} for {Music} {Information} {Retrieval} {Conference} ({ISMIR} 2025)},
-	author = {Park, Jiyun and Cancino-Chacón, Carlos and Chiruthapudi, Suhit and Nam, Juhan},
-    address = {Daejeon, South Korea}
-	year = {2025}
+  title     = {{Matchmaker}: An Open-Source Library for Real-Time Piano Score Following and Systematic Evaluation},
+  booktitle = {Proceedings of the 26th International Society for Music Information Retrieval Conference ({ISMIR})},
+  author    = {Park, Jiyun and Cancino-Chac{\'o}n, Carlos and Chiruthapudi, Suhit and Nam, Juhan},
+  address   = {Daejeon, South Korea},
+  year      = {2025}
 }
 ```
 
 ```bibtex
 @inproceedings{matchmaker_lbd,
-  title={{Matchmaker: A Python library for Real-time Music Alignment}},
-  author={Park, Jiyun and Cancino-Chac\'{o}n, Carlos and Kwon, Taegyun and Nam, Juhan},
-  booktitle={{Proceedings of the Late Breaking/Demo Session at the 25th International Society for Music Information Retrieval Conference}},
-  address={San Francisco, USA.},
-  year={2024}
+  title     = {{Matchmaker}: A {Python} Library for Real-Time Music Alignment},
+  booktitle = {Proceedings of the Late Breaking/Demo Session at the 25th International Society for Music Information Retrieval Conference ({ISMIR})},
+  author    = {Park, Jiyun and Cancino-Chac{\'o}n, Carlos and Kwon, Taegyun and Nam, Juhan},
+  address   = {San Francisco, USA},
+  year      = {2024}
 }
 ```
 

@@ -18,11 +18,12 @@ class OnlineAlignment(object):
 
     Input
     -----
-    Each ``__call__(observation)`` takes a ``(features, perf_time)`` tuple,
-    where ``features`` is the per-frame feature vector from the Processor
-    and ``perf_time`` is the timestamp (chord onset for chord-buffering
-    MIDI processors, frame time otherwise). The stream-driven ``run()``
-    pulls these tuples from ``self.queue`` until a ``STREAM_END`` sentinel.
+    Each ``__call__(observation, perf_time)`` takes the two items of a
+    Processor's ``(features, perf_time)`` output, where ``features`` is the
+    per-frame feature vector and ``perf_time`` is the timestamp (first
+    note-on time for MIDI note and chord processors, frame time otherwise).
+    The stream-driven ``run()`` pulls these tuples from ``self.queue`` and
+    unpacks them into ``__call__`` until a ``STREAM_END`` sentinel.
 
     Output
     ------
@@ -65,6 +66,20 @@ class OnlineAlignment(object):
         self._alignment_path: List[Tuple[float, float]] = []
 
     def __call__(self, observation: Any, perf_time: float) -> float:
+        """Run one ``step`` and record the new position.
+
+        Parameters
+        ----------
+        observation : Any
+            Features from the Processor, passed to ``step``.
+        perf_time : float
+            Performance time of the observation in seconds.
+
+        Returns
+        -------
+        current_position : float
+            The current score position in beats.
+        """
         self.current_perf_time = perf_time
         self.step(observation)
         self.current_position = self.get_current_position()
@@ -73,11 +88,15 @@ class OnlineAlignment(object):
 
     @property
     def alignment_path(self) -> NDArray[np.float64]:
+        """``(2, T)`` array of performance times (s) and score beats, one
+        column per ``__call__``; ``(2, 0)`` before the first one."""
         if not self._alignment_path:
             return np.empty((2, 0))
         return np.array(self._alignment_path).T
 
     def is_still_following(self) -> bool:
+        """Whether ``run()`` should keep reading: False once the last score
+        position is reached."""
         return self.current_index < len(self.score_positions) - 1
 
     def get_current_position(self) -> float:
@@ -96,7 +115,7 @@ class OnlineAlignment(object):
     def run(self, verbose: bool = True) -> Generator[float, None, NDArray]:
         """Drive the score follower from `self.queue`.
 
-        Pulls `(features, perf_time)` items from `self.queue`, calls `self(item)` per step,
+        Pulls `(features, perf_time)` items from `self.queue`, calls `self(*item)` per step,
         and yields the current beat each step. The final return value is the alignment path.
 
         Parameters

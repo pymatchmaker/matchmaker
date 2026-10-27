@@ -219,6 +219,44 @@ def compute_transition_matrix(
 
 
 class AudioOuterProductHMM(OnlineAlignment):
+    """
+    Two-level HMM for audio score following (audio method ``"outerhmm"``),
+    after Nakamura et al. (2016), "Real-time audio-to-score alignment of music
+    performances containing errors and arbitrary repeats and skips".
+
+    The top level moves between score chords through neighbourhood
+    transitions plus repeat/skip transitions ``s_j * r_i``; the bottom level
+    of each chord has a sounding state, whose self-transition matches the
+    chord's notated duration at ``tempo``, and a pause state. Each frame of
+    CQT features is scored against a pitch-template mixture of the chord.
+
+    Parameters
+    ----------
+    reference_features : np.ndarray
+        Score note array (structured, with ``onset_beat``, ``onset_quarter``
+        and ``pitch``).
+    queue : RECVQueue, optional
+        Input queue for the stream-driven ``run()``.
+    transitions : list of (delta, prob), optional
+        Probability of moving ``delta`` chords ahead (negative = back).
+        If None, uses ``DEFAULT_TRANSITIONS``.
+    tempo : float
+        Notated tempo in quarter-note BPM, used for the chord durations.
+    sample_rate : int
+        Sample rate of the input audio in Hz.
+    hop_length : int
+        Hop length of the input features in samples.
+    s_j : float
+        Probability of leaving any chord by a repeat or skip. 0 disables
+        repeats and skips.
+    r_i : np.ndarray, optional
+        Probability of resuming at each chord after a repeat or skip. If None,
+        uniform.
+    ``**kwargs``
+        ``emission_beta`` (float) sharpens the emission likelihood; anything
+        else is ignored.
+    """
+
     def __init__(
         self,
         reference_features: np.ndarray,
@@ -313,7 +351,9 @@ class AudioOuterProductHMM(OnlineAlignment):
             if isinstance(self.reference_features, np.ndarray)
             else self.reference_features.note_array()
         )
-        quarter_at = dict(zip(notes["onset_beat"].tolist(), notes["onset_quarter"].tolist()))
+        quarter_at = dict(
+            zip(notes["onset_beat"].tolist(), notes["onset_quarter"].tolist())
+        )
         self.a00 = self._compute_chord_self_transition_probs(
             onset_quarters=np.array([quarter_at[b] for b in unique_onsets.tolist()]),
             tempo=tempo,

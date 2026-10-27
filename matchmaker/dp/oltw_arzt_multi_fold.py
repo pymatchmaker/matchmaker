@@ -31,21 +31,21 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 import numpy as np
 import partitura as pt
 from numpy.typing import NDArray
+from partitura.io.exportmidi import get_ppq
 from partitura.score import Part, merge_parts
 
 from matchmaker.base import OnlineAlignment
 from matchmaker.dp.oltw_arzt import (
-    OnlineTimeWarpingArztFrame,
     START_WINDOW_SIZE,
     STEP_SIZE,
     WINDOW_SIZE,
+    OnlineTimeWarpingArztFrame,
 )
 from matchmaker.features.audio import FRAME_RATE
 from matchmaker.features.processor import Processor
 from matchmaker.io.audio import QUEUE_TIMEOUT
 from matchmaker.io.queue import RECVQueue
 from matchmaker.utils.misc import generate_score_audio, set_latency_stats
-from partitura.io.exportmidi import get_ppq
 
 
 class OnlineTimeWarpingArztMultiFold(OnlineTimeWarpingArztFrame):
@@ -53,6 +53,12 @@ class OnlineTimeWarpingArztMultiFold(OnlineTimeWarpingArztFrame):
 
     Parameters
     ----------
+    reference_features : np.ndarray, optional
+        Reference features passed on to the base tracker. Each hypothesis
+        builds its own reference from ``score_part``.
+    score_positions : np.ndarray, optional
+        Ignored; the score positions are the unique onsets of the folded
+        ``score_part``.
     score_part : Part
         The original (folded) partitura Part.
     tempo : float
@@ -69,6 +75,8 @@ class OnlineTimeWarpingArztMultiFold(OnlineTimeWarpingArztFrame):
         Maximum forward advance per input frame (default: 3).
     start_window_size : float or int
         Window size during warmup (default: 0.1).
+    distance_func : str
+        Distance between input and reference frames (default: "Manhattan").
     selection_window : int
         Number of trailing frames over which running matching cost is averaged
         for hypothesis selection (default: 50 frames, about 1.7 s at 30 fps).
@@ -77,6 +85,9 @@ class OnlineTimeWarpingArztMultiFold(OnlineTimeWarpingArztFrame):
         strictly lower by this fraction before switching (default: 0.05).
     queue : Optional[RECVQueue]
         Input queue for streaming observations.
+    ref_frame_to_beat : np.ndarray, optional
+        Score beat of each frame of ``reference_features``, passed on to the
+        base tracker.
     """
 
     def __init__(
@@ -218,9 +229,7 @@ class OnlineTimeWarpingArztMultiFold(OnlineTimeWarpingArztFrame):
 
             # 2. Frame to unfolded beat
             times = (
-                (np.arange(n_ref_frames) / self.frame_rate)
-                * tick
-                * (self.tempo / 60.0)
+                (np.arange(n_ref_frames) / self.frame_rate) * tick * (self.tempo / 60.0)
             )
             ref_frame_to_unfolded_beat = np.array(
                 [float(clone.beat_map(t)) for t in times], dtype=np.float32
@@ -257,7 +266,9 @@ class OnlineTimeWarpingArztMultiFold(OnlineTimeWarpingArztFrame):
                     right=n_uniq[-1],
                 ).astype(np.float32)
             else:
-                ref_frame_to_notated_beat = ref_frame_to_unfolded_beat.astype(np.float32)
+                ref_frame_to_notated_beat = ref_frame_to_unfolded_beat.astype(
+                    np.float32
+                )
 
             # 4. Instantiate follower
             tracker = OnlineTimeWarpingArztFrame(
@@ -278,9 +289,7 @@ class OnlineTimeWarpingArztMultiFold(OnlineTimeWarpingArztFrame):
                     "clone": clone,
                     "tracker": tracker,
                     "ref_frame_to_notated_beat": ref_frame_to_notated_beat,
-                    "recent_costs": collections.deque(
-                        maxlen=self.selection_window
-                    ),
+                    "recent_costs": collections.deque(maxlen=self.selection_window),
                     "mean_recent_cost": float("inf"),
                 }
             )

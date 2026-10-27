@@ -28,6 +28,27 @@ InputAudioFrame = Tuple[InputAudioSeries, float]
 
 
 class ChromagramProcessor(Processor):
+    """
+    Chroma features from an STFT (``librosa.feature.chroma_stft``).
+
+    Parameters
+    ----------
+    sample_rate : int
+        Sample rate of the input audio in Hz.
+    hop_length : int
+        Hop length in samples.
+    n_chroma : int
+        Number of chroma bins.
+    norm : float, str or None
+        Per-frame normalisation passed to librosa (``np.inf`` = max norm).
+    n_fft : int, optional
+        FFT size. Defaults to ``2 * hop_length``.
+
+    Returns
+    -------
+    ``(features, f_time)`` with ``features`` of shape ``(n_frames, n_chroma)``.
+    """
+
     def __init__(
         self,
         sample_rate: int = SAMPLE_RATE,
@@ -62,6 +83,26 @@ class ChromagramProcessor(Processor):
 
 
 class MFCCProcessor(Processor):
+    """
+    Mel-frequency cepstral coefficients (``librosa.feature.mfcc``), with
+    ``n_fft = 2 * hop_length``.
+
+    Parameters
+    ----------
+    sample_rate : int
+        Sample rate of the input audio in Hz.
+    hop_length : int
+        Hop length in samples.
+    n_mfcc : int
+        Number of coefficients.
+    norm : str or None
+        DCT normalisation passed to librosa.
+
+    Returns
+    -------
+    ``(features, f_time)`` with ``features`` of shape ``(n_frames, n_mfcc)``.
+    """
+
     def __init__(
         self,
         sample_rate: int = SAMPLE_RATE,
@@ -95,6 +136,25 @@ class MFCCProcessor(Processor):
 
 
 class CQTProcessor(Processor):
+    """
+    Constant-Q transform magnitude over the 88 piano keys (A0-C8), one bin
+    per semitone (``librosa.cqt``). The first and last frames, which are
+    affected by edge padding, are dropped.
+
+    Parameters
+    ----------
+    sample_rate : int
+        Sample rate of the input audio in Hz.
+    hop_length : int
+        Hop length in samples.
+    norm : float, str or None
+        Filter normalisation passed to librosa.
+
+    Returns
+    -------
+    ``(features, f_time)`` with ``features`` of shape ``(n_frames - 2, 88)``.
+    """
+
     def __init__(
         self,
         sample_rate: int = SAMPLE_RATE,
@@ -182,6 +242,26 @@ class CQTSpectralFluxProcessor(Processor):
 
 
 class MelSpectrogramProcessor(Processor):
+    """
+    Mel-scaled power spectrogram (``librosa.feature.melspectrogram``), with
+    ``n_fft = 2 * hop_length``.
+
+    Parameters
+    ----------
+    sample_rate : int
+        Sample rate of the input audio in Hz.
+    hop_length : int
+        Hop length in samples.
+    n_mels : int
+        Number of mel bands.
+    norm : float, str or None
+        Mel filter normalisation passed to librosa.
+
+    Returns
+    -------
+    ``(features, f_time)`` with ``features`` of shape ``(n_frames, n_mels)``.
+    """
+
     def __init__(
         self,
         sample_rate: int = SAMPLE_RATE,

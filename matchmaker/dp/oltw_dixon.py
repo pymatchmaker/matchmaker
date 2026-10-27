@@ -396,8 +396,19 @@ class OnlineTimeWarpingDixonEvent(OnlineTimeWarpingDixon):
 
     Parameters
     ----------
+    reference_features : np.ndarray
+        Score onset features, one row per score onset (e.g. the onset
+        pianoroll built by ``Matchmaker``).
+    score_positions : np.ndarray
+        Score beat of each row of ``reference_features``.
+    queue : RECVQueue or None
+        Input queue for streaming.
     window_size : int
         Search width in number of events.
+    max_run_count : int
+        Max consecutive same-direction advances.
+    distance_func : str
+        Distance metric.
     """
 
     def __init__(

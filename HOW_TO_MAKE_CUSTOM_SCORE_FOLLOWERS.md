@@ -8,25 +8,27 @@ You will need:
 
 In the following we look the requirements for each part.
 For the package architecture and pipeline overview (Stream → Processor →
-OnlineAlignment), see the [Architecture section in the README](README.md#architecture).
+OnlineAlignment), see the [Package Overview section in the README](README.md#package-overview).
 
 ## 1. Custom Score Followers
 
 Every score follower subclasses `matchmaker.base.OnlineAlignment`.
-A new score follower class **must** inherit from `matchmaker.base.OnlineAlignment` and implement the `step(features)` and `get_current_position` methods.
+A new score follower class **must** inherit from `matchmaker.base.OnlineAlignment` and implement the `step(features)` method.
+Override `get_current_position()` only when the default (the onset at `self.current_index`) is not precise enough.
 
 | Method                        | Input                                                                                                                            | Output                         | Internal                                                     |
 | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------ |
-| `self.step(features)`         | features: whatever input observation your score follower requires. choose a fitting or custom `Processor` to provide this object | None                           | main update step, must update reference position estimation. |
+| `self.step(features)`         | features: whatever input observation your score follower requires. choose a fitting or custom `Processor` to provide this object | None                           | main update step, must update reference position estimation. **Required.** |
 | `self.__init__(**kwargs)`     | add arguments as needed                                                                                                          | None                           | all setup logic                                              |
-| `self.get_current_position()` | None                                                                                                                             | current position in beat units | defaults to indexing                                         |
+| `self.get_current_position()` | None                                                                                                                             | current position in beat units | optional; defaults to `score_positions[current_index]`       |
+
 ### Examples
 
 Here is an extremely simple score follower with random steps:
 
 ```python
-from matchmaker.base import OnlineAlignment
 import numpy as np
+from matchmaker.base import OnlineAlignment
 
 class SimplestFollower(OnlineAlignment):
 
@@ -34,30 +36,26 @@ class SimplestFollower(OnlineAlignment):
         pass
 
     def get_current_position(self):
-	    return self.current_position + np.random.rand()
+        return self.current_position + np.random.rand()
 ```
 
-The default `OnlineAlignment` already contains some useful optional logic. Very often, a score follower moves between pre-defined positions which can be indexed. To this end, the default  `OnlineAlignment` defines an index `self.current_idx`. We can use this with an externally computed score_positions (a numpy vector, beat positions corresponding to each position):
+The default `OnlineAlignment` already contains some useful optional logic. Very often, a score follower moves between pre-defined positions which can be indexed. To this end, the default `OnlineAlignment` defines an index `self.current_index`. We can use this with an externally computed `score_positions` (a numpy vector, beat positions corresponding to each position):
+
 ```python
 from matchmaker.base import OnlineAlignment
 
 class IndexFollower(OnlineAlignment):
-     def __init__(self,
-	     score_positions,
-	     **kwargs):
-        super().__init__(
-            score_positions=score_positions,
-            **kwargs,
-        )
+    def __init__(self, score_positions, **kwargs):
+        super().__init__(score_positions=score_positions, **kwargs)
 
     def step(self, features) -> None:
-	    # this tracker just marches forward for every input
-	    self.current_idx += 1
-
-
+        # this tracker just marches forward for every input
+        if self.current_index < len(self.score_positions) - 1:
+            self.current_index += 1
 ```
 
 Note that we didn't have to define `self.get_current_position()` as its default behavior is given by `return float(self.score_positions[self.current_index])`, and we have all this in place in the base class.
+
 ### Fixed internals
 
 The `matchmaker.base.OnlineAlignment` base class provides defaults for `__call__`, `run`, `alignment_path`. This enables full use of the matchmaker ecosystem including real-time tracking and offline evaluation. To this end the base class uses the following attributes and methods. They can be accessed by your custom tracking logic, but **must not be overwritten** to keep matchmaker functionality.
@@ -68,12 +66,13 @@ The `matchmaker.base.OnlineAlignment` base class provides defaults for `__call__
 | ------------------------ | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | `self.current_position`  | float                                  | `score_positions[current_index]` by default. Override `get_current_position()` for finer precision.                          |
 | `self.current_perf_time` | float                                  | Performance time (seconds) of the latest observation.                                                                        |
-| `self.alignment_path`    | ndarray of shape `(2, T)`, dtype float | Read-only; row 0 = perf times (seconds), row 1 = score beats. Accessible for a running or finished tracker, None for a yet unused one. |
+| `self.alignment_path`    | ndarray of shape `(2, T)`, dtype float | Read-only; row 0 = perf times (seconds), row 1 = score beats. Accessible for a running or finished tracker; an empty `(2, 0)` array for a yet unused one. |
+
 #### OnlineAlignment base class methods
 
 | Method                             | Returns                                                                                                                                                       | Behavior                                                                                              |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `__call__(observation, perf_time)` | `current_position: float`                                                                                                                                     | unpacks `(features, perf_time)`, calls `step()`, sets `current_position`, appends to `alignment_path` |
+| `__call__(observation, perf_time)` | `current_position: float`                                                                                                                                     | records `perf_time`, calls `step(observation)`, sets `current_position`, appends to `alignment_path`  |
 | `run(verbose: bool = True)`        | <ul><li>yields: <code>current_position: float</code> per step</li><li>returns: <code>alignment_path: np.ndarray</code> of shape <code>(2, T)</code></li></ul> | generator pulling items from `self.queue` until `STREAM_END`                                          |
 | `get_current_position()`           | `current_position: float`                                                                                                                                     | `score_positions[current_index]` (snaps to nearest onset)                                             |
 | `is_still_following()`             | `bool`                                                                                                                                                        | `current_index < len(score_positions) - 1`                                                            |
@@ -81,22 +80,77 @@ The `matchmaker.base.OnlineAlignment` base class provides defaults for `__call__
 
 #### OnlineAlignment reference_features
 
-The default `OnlineAlignment` class has an optional `reference_features` argument. When using the `MatchMaker` top-level object, it passes a score note array as reference_feature to the score follower, i.e. a structured numpy array with field such as "onset_beat" and "duration_beat". This feature is computed with the help of the `partitura` library. Any `OnlineAlignment` subclass is responsible for converting this note array into features it can use internally.
+The default `OnlineAlignment` class has an optional `reference_features` argument. When using the `Matchmaker` top-level object, it passes a score note array as `reference_features` to the score follower by default, i.e. a structured numpy array with fields such as `"onset_beat"` and `"duration_beat"`. This feature is computed with the help of the `partitura` library. Any `OnlineAlignment` subclass is responsible for converting this note array into features it can use internally.
 
-The `reference_features = score note array` is the default interface for passing reference information to `OnlineAlignment` subclasses and it is the preferred way whenever possible. Custom processing for other types of references is also possible, albeit not within the `MatchMaker` object.
+The `reference_features = score note array` is the default interface for passing reference information to `OnlineAlignment` subclasses and it is the preferred way whenever possible. Other references (e.g. features of a synthesised score rendering for audio followers) are selected with the `reference` key in `methods.yaml`, or with `build_reference` in `register_method()`; see [Make it accessible in `Matchmaker`](#make-it-accessible-in-matchmaker).
 
 ---
 
 ## 2. Custom Input Processors
 
-TODO: add minimal outline of a Processor (streamed and real-time)
-- must implement call method
-- input depends on MidiStream or Audiostream
-- must return features, p_time -> features must fit the step method of the score follower
-- is stateless / called by stream
-- must not change: __
-- can optionally change/add: __
+A processor turns the raw frames of a Stream into the observations your score
+follower's `step()` expects. Check the built-in processors first
+(`matchmaker.features.audio`, `matchmaker.features.midi`, listed in the
+[README](README.md#features)); write your own only when none of them produces
+the observation you need.
 
+Every processor subclasses `matchmaker.features.processor.Processor` and
+implements `__call__`:
+
+| Method                     | Input                        | Output                                           |
+| -------------------------- | ---------------------------- | ------------------------------------------------ |
+| `__call__(frame)`          | a `(data, frame_time)` tuple | `(features, perf_time)`, or `None` to emit nothing |
+| `reset()` *(optional)*     | None                         | None; clears any internal state                  |
+
+What `data` is depends on the Stream:
+
+| Stream        | `data`                                                                                   | `frame_time`                     |
+| ------------- | ---------------------------------------------------------------------------------------- | -------------------------------- |
+| `AudioStream` | `np.ndarray` of float32 samples: the newest `hop_length` chunk, preceded by the previous samples the analysis window needs | performance time of the chunk (seconds) |
+| `MidiStream`  | `List[Tuple[mido.Message, m_time]]` — the messages of one polling window, or a single message when `polling_period=None` | window time, or the message time (seconds) |
+
+For audio followers that align against a synthesised score (`reference: score_audio`),
+Matchmaker also calls the processor once on the whole rendered score, as
+`(score_audio, 0.0)`, to build the reference features.
+
+Rules of thumb:
+
+- **`features` must be what your follower's `step()` consumes.** The Stream puts
+  the returned tuple on the queue unchanged, and `OnlineAlignment.run()` calls
+  `follower(features, perf_time)` with it.
+- **`perf_time` is the performance time the observation belongs to**, in
+  seconds. Pass `frame_time` through unless you know better (e.g. MIDI
+  processors stamp an observation with its first note-on time `m_time`).
+- **Return `None`** when a frame has nothing to report (e.g. a MIDI window
+  without note-ons). The Stream then puts nothing on the queue.
+- **Keep it stateless if you can.** Time grouping of MIDI notes is the
+  Stream's job (`polling_period`). If the processor must carry state across
+  frames (a previous spectrum, a pending chord), implement `reset()`: for
+  `score_audio` followers the same processor handles the synthesised score
+  and then the live input, and Matchmaker calls `reset()` in between.
+
+A minimal MIDI processor that emits the number of note-ons per frame:
+
+```python
+import numpy as np
+from matchmaker.features.processor import Processor
+
+class NoteCountProcessor(Processor):
+    def __call__(self, frame):
+        data, frame_time = frame
+        onsets = [
+            m_time
+            for msg, m_time in data
+            if msg.type == "note_on" and msg.velocity > 0
+        ]
+        if not onsets:
+            return None
+        return np.array([len(onsets)], dtype=np.float32), min(onsets)
+```
+
+To make a processor selectable by name (`Matchmaker(processor=...)`), declare
+it under `processors:` in `methods.yaml`, or build it in the `build_processor`
+hook of `register_method()` (both below).
 
 ---
 
@@ -108,26 +162,28 @@ same `current_position` and `alignment_path`.
 |                        | `__call__(observation)` | `run()`                                                                                                                                        |
 | ---------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Source of observations | caller passes them      | `self.queue.get()`                                                                                                                             |
-| Termination            | caller stops iterating  | `STREAM_END`(sentinel `object()`) arrives, or `is_still_following()` returns `False` (score follower reached the last `score_positions` entry) |
+| Termination            | caller stops iterating  | `STREAM_END` (sentinel `object()`) arrives, or `is_still_following()` returns `False` (score follower reached the last `score_positions` entry) |
 
 This means you can process the inputs as they are expected by your score follower and loop over them. This is useful for debugging and offline tests:
 
-```
+```python
+# 1. Called directly
 score_follower = MyScoreFollower(**kwargs)
 for features, perf_time in my_processed_features:
-    beat = score_follower((features, perf_time))
+    beat = score_follower(features, perf_time)
 ```
 
 For real-time usage, you can plug your custom Processor into a stream object (which requires further arguments to set up ports etc.) and use it in your Score Follower like so:
 
-```
+```python
 # 2. Stream-driven
+from matchmaker.io.midi import MidiStream
 
 processor = MyInputProcessor(**kwargs)
-with MidiStream(processor = processor) as stream: # or AudioStream
-    score_follower = MyScoreFollower(queue = stream.queue, **kwargs)
-	for current_position in self.score_follower.run():
-		print("current position [beats]", current_position)
+with MidiStream(processor=processor) as stream:  # or AudioStream
+    score_follower = MyScoreFollower(queue=stream.queue, **kwargs)
+    for current_position in score_follower.run():
+        print("current position [beats]", current_position)
 ```
 
 ## Make it accessible in `Matchmaker`
@@ -188,6 +244,7 @@ Other per-method keys:
 | `default_kwargs` | the defaults for `Matchmaker(kwargs=...)`, i.e. `DEFAULT_KWARGS[input_type][name]` |
 | `family` | a grouping label, exposed as `OLTW_METHODS` / `PARANGONAR_METHODS` |
 | `event_based` | MIDI only: the stream emits one message per frame instead of polling |
+| `deterministic` | `false` if repeated runs on the same input can differ (e.g. a particle filter) |
 
 Feature processors are declared the same way, under `processors:`.
 

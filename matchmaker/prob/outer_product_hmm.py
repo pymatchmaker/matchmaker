@@ -206,6 +206,43 @@ def compute_transition_matrix(
 
 
 class OuterProductHMM(OnlineAlignment):
+    """
+    Outer-product HMM for MIDI score following (method ``"outerhmm"``),
+    after Nakamura et al. (2014), "Outer-product hidden Markov model and
+    polyphonic MIDI score following".
+
+    The states are the score chords. Performed notes arrive one at a time
+    (event-based); a note within ``IOI_THRESHOLD`` (35 ms) of the previous one
+    is folded into the same chord observation, so a chord takes one
+    transition (see ``__call__``). Transitions combine a band of neighbouring
+    chords (``transitions``) with arbitrary skips factorised as
+    ``S[j] * r[i]``.
+
+    Parameters
+    ----------
+    reference_features : ndarray or ScoreLike
+        Note array or score like object
+    queue : RECVQueue or None
+        Queue for receiving incoming observations
+    transitions : list of (delta, prob), optional
+        Probability of moving ``delta`` chords ahead (negative = back).
+        If None, uses ``DEFAULT_TRANSITIONS``.
+    pitch_error_probs : dict or None
+        Probabilities of correct pitches and of semitone, whole-tone and
+        octave errors. If None, uses ``DEFAULT_PITCH_ERROR_PROBS``.
+    S : 1D array, optional
+        Skip-from probability of each chord (``s_j``). If None, uniform.
+    r : 1D array, optional
+        Skip-to probability of each chord (``r_i``). If None, uniform.
+    other_prob : float
+        Small prob for unmodelled pitches
+    patience : int
+        ``run()`` stops after this many consecutive chords without a state
+        change (in addition to ``STREAM_END``).
+    ``**kwargs``
+        Ignored; accepted so ``Matchmaker`` can pass its configuration.
+    """
+
     def __init__(
         self,
         reference_features: Union[np.ndarray, ScoreLike],
@@ -218,31 +255,6 @@ class OuterProductHMM(OnlineAlignment):
         patience: int = 10,
         **kwargs,
     ) -> None:
-        """
-        Outer-product Hidden Markov Model for score following.
-
-        Parameters
-        ----------
-        reference_features : ndarray or ScoreLike
-            Note array or score like object
-
-        queue : RECVQueue or None
-            Queue for receiving incoming observations
-
-        pitch_error_probs : dict or None
-            If None, uses DEFAULT_PITCH_ERROR_PROBS.
-
-        transitions : list of (delta, prob), optional
-            If None, uses DEFAULT_TRANSITIONS.
-
-        S, r : 1D arrays or None (skip-from and skip-to)
-            If None, uniform distributions are used.
-
-        other_prob : float
-            Small prob for unmodelled pitches
-
-        """
-
         self.reference_features = reference_features
         OnlineAlignment.__init__(
             self,

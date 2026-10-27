@@ -8,11 +8,11 @@ To open an issue, navigate to the Matchmaker GitHub repository:
 
 [Matchmaker Issues](https://github.com/pymatchmaker/matchmaker/issues)
 
-#### Write your description
+### Write your description
 
 Give as much detail as possible — for bugs, include steps to reproduce, the Python version you're using, and any relevant error messages or tracebacks.
 
-#### Choose the appropriate label
+### Choose the appropriate label
 
 - **Question** to ask us something, or **help wanted** if you need a solution to a particular Matchmaker problem.
 - **Bug** to report something not working correctly.
@@ -80,7 +80,7 @@ Open a pull request from your new branch into the original **`develop`** branch 
 
 <https://github.com/pymatchmaker/matchmaker>
 
-##### Set the base to `develop` and the compare to your branch
+#### Set the base to `develop` and the compare to your branch
 
 In your PR description, reference the issue it addresses (e.g., `Closes #42`). This links the two together and helps reviewers understand the context.
 
