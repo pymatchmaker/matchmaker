@@ -3,12 +3,17 @@
 """
 Tempo Models
 
-TODO
-----
-* Adapt models from ACCompanion
+Includes:
+* ReactiveTempoModel: Baseline raw IOI ratio model.
+* MovingAverageTempoModel: Smoothed moving average IOI model.
+* KalmanTempoModel: Linear Kalman filter tempo tracker (ACCompanion).
+* LinearTempoModel: Sensorimotor synchronization linear model.
+* JointAdaptationAnticipationModel: Joint adaptation & anticipation model.
+* ArztTempoModel: Simple tempo model of Arzt & Widmer (SMC 2010) with backward
+  path estimation and dynamic score alterations for OLTW, also usable on onsets.
 """
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -296,7 +301,7 @@ class KalmanTempoModel(TempoModel):
             self.prev_perf_onset = performed_onset
             self.prev_score_onset = score_onset
             self.counter += 1
-            return # skip update on first observation
+            return  # skip update on first observation
         else:
             performed_ioi = abs(performed_onset - self.prev_perf_onset)
 
@@ -525,6 +530,324 @@ class JointAdaptationAnticipationModel(TempoModel):
         # Check other noise types
         self.tkns.append(self.timekeeper_noise.normal(0, 0.005))
         self.mns.append(self.motor_noise.normal(0, 0.0025))
+
+
+class ArztTempoModel(TempoModel):
+    """
+    Simple tempo model of Arzt & Widmer (2010).
+
+    References
+    ----------
+    A. Arzt & G. Widmer (2010), "Simple Tempo Models for Real-Time Music
+    Tracking", Sound and Music Computing Conference (SMC), Sec. 4.
+
+    When used with an on-line time warping tracker (e.g.,
+    ``OnlineTimeWarpingArztFrame``), after every input frame, the relative
+    tempo t is the Eq. 1-weighted mean of the local tempi at the ``n_onsets``
+    most recent score onsets at least ``min_past`` seconds in the past, each
+    over a ``window_size``-second window of the rectified backward path (as in
+    Mueller et al. (2009), ISMIR, Sec. 3.1 / 3.3: path rectified at onsets,
+    extended with slope 1 past its ends). The score representation is then
+    altered at the last processed score frame ps: with probability 1 - 1/t
+    (t > 1) frames ps+1 and ps+2 are merged into their mean, with probability
+    1 - t (t < 1) the mean of ps and ps+1 is inserted; onset frames are not
+    duplicated (the insertion is postponed), and at most 3 alterations are
+    made in a row.
+
+    When used as a standalone tempo model (e.g. with discrete performed and score
+    onsets), ``update_beat_period`` calculates local tempi over recent onset intervals
+    and computes the Eq. 1 weighted average.
+
+    Parameters
+    ----------
+    window_size : float
+        Window around an onset for its local tempo, in seconds (default: 3.0).
+    min_past : float
+        Onsets used must be at least this many seconds in the past (default: 1.0).
+    n_onsets : int
+        Number of recent onsets averaged (default: 20).
+    random_seed : int or None
+        Seed for the random score alterations (default: 1984).
+    tempo_min : float
+        Lower bound on relative tempo factor (default: 0.85).
+    tempo_max : float
+        Upper bound on relative tempo factor (default: 1.20).
+    min_advance : int
+        Minimum score frames between successive alterations (default: 10).
+    init_beat_period : float
+        Initial tempo in seconds per beat (default: 0.5).
+    init_score_onset : float
+        Initial score onset time in beats (default: 0.0).
+    score_onsets : Optional[np.ndarray]
+        Score onsets array in beats.
+    """
+
+    window_size: float
+    min_past: float
+    n_onsets: int
+    random_seed: Optional[int]
+    tempo_min: float
+    tempo_max: float
+    min_advance: int
+    n_inserted: int
+    n_deleted: int
+    n_postponed: int
+
+    def __init__(
+        self,
+        window_size: float = 3.0,
+        min_past: float = 1.0,
+        n_onsets: int = 20,
+        random_seed: Optional[int] = 1984,
+        tempo_min: float = 0.85,
+        tempo_max: float = 1.20,
+        min_advance: int = 10,
+        init_beat_period: float = 0.5,
+        init_score_onset: float = 0.0,
+        score_onsets: Optional[np.ndarray] = None,
+    ) -> None:
+        super().__init__(
+            init_beat_period=init_beat_period,
+            init_score_onset=init_score_onset,
+            score_onsets=score_onsets,
+        )
+        if not np.isfinite(init_beat_period) or init_beat_period <= 0:
+            raise ValueError("init_beat_period must be finite and positive.")
+        if (
+            not np.isfinite(tempo_min)
+            or not np.isfinite(tempo_max)
+            or not 0 < tempo_min <= tempo_max
+        ):
+            raise ValueError(
+                "Tempo bounds must be finite and satisfy 0 < tempo_min <= tempo_max."
+            )
+        self.init_beat_period = init_beat_period
+        self.window_size = window_size
+        self.min_past = min_past
+        self.n_onsets = n_onsets
+        self.random_seed = random_seed
+        self.tempo_min = tempo_min
+        self.tempo_max = tempo_max
+        self.min_advance = min_advance
+        self._current_tempo = 1.0
+        self.n_inserted = self.n_deleted = self.n_postponed = 0
+        self._last_altered_ps: int = -1
+        self._consecutive = 0
+        self._insert_pending = False
+        self._w = 0
+        self._min_past = 0
+        self._rng = (
+            np.random.RandomState(random_seed)
+            if random_seed is not None
+            else np.random.RandomState()
+        )
+        self._history_perf: List[float] = []
+        self._history_score: List[float] = []
+
+    def reset(self, tracker=None) -> None:
+        """Reset the tempo model state."""
+        self.counter = 0
+        self.prev_perf_onset = None
+        self.est_onset = None
+        self.asynchrony = 0.0
+        self.beat_period = getattr(self, "init_beat_period", 0.5)
+        self._consecutive = 0
+        self._insert_pending = False
+        self._current_tempo = 1.0
+        self.n_inserted = self.n_deleted = self.n_postponed = 0
+        self._last_altered_ps = -1
+        self._history_perf = []
+        self._history_score = []
+        if tracker is not None:
+            fr = tracker.frame_rate
+            self._w = int(round(self.window_size * fr))
+            self._min_past = int(round(self.min_past * fr))
+            self._rng = (
+                np.random.RandomState(self.random_seed)
+                if self.random_seed is not None
+                else np.random.RandomState()
+            )
+        elif self.random_seed is not None:
+            self._rng = np.random.RandomState(self.random_seed)
+
+    @property
+    def current_tempo(self) -> float:
+        """Current relative tempo (performance / score representation)."""
+        return self._current_tempo
+
+    # --- Tracker integration for OLTW ---
+
+    def before_step(self, tracker) -> None:
+        """Estimate the tempo and alter the tracker's score representation."""
+        relative_tempo = self.relative_tempo(tracker)
+        if relative_tempo is not None:
+            if not np.isfinite(relative_tempo) or relative_tempo <= 0:
+                relative_tempo = None
+            else:
+                beat_period = self.init_beat_period / max(1e-4, relative_tempo)
+                if not np.isfinite(beat_period) or beat_period <= 0:
+                    relative_tempo = None
+                else:
+                    self._current_tempo = relative_tempo
+                    self.beat_period = beat_period
+        self.alter(tracker, relative_tempo)
+
+    def relative_tempo(self, tracker) -> Optional[float]:
+        """Sec. 4.1: relative tempo from the rectified backward path."""
+        half = (self._w - 1) // 2
+        limit = tracker.tempo_last_input() - self._min_past
+        is_onset = tracker.tempo_score()[2]
+        x, y = tracker.tempo_current_cell()
+        y_start = y
+        phi = {}  # row -> min input index on the backward path
+        onsets = []  # onset rows on the path, most recent first
+        last_row = y
+        phi[y] = x
+        need_below = None
+        for x, y in tracker.tempo_backward_path(x, y):
+            phi[y] = x
+            if y != last_row:
+                if is_onset[last_row] and phi[last_row] <= limit:
+                    onsets.append(last_row)
+                last_row = y
+                if need_below is None and len(onsets) >= self.n_onsets:
+                    need_below = float(onsets[self.n_onsets - 1]) - half
+                if need_below is not None and float(y) < need_below and is_onset[y]:
+                    break
+        if is_onset[last_row] and phi[last_row] <= limit and last_row not in onsets:
+            onsets.append(last_row)
+        tracker.tempo_note_path_end(x, y)
+        if not onsets:
+            return None
+        # anchors: onsets on the path plus both ends (Mueller et al. 2009, Sec. 3.3)
+        rows = sorted(set([y, y_start] + [r for r in phi if is_onset[r]]))
+        g = np.array(rows, dtype=np.float64)
+        p = np.array([phi[r] for r in rows], dtype=np.float64)
+
+        def phi_r(n):
+            if n <= g[0]:
+                return p[0] - (g[0] - n)  # extended with slope 1
+            if n >= g[-1]:
+                return p[-1] + (n - g[-1])
+            return float(np.interp(n, g, p))
+
+        sel = onsets[: self.n_onsets][::-1]  # oldest first (Eq. 1 weights 1..n)
+        tempi = []
+        for o in sel:
+            go = float(o)
+            n1, n2 = go - half, go + half
+            tempi.append((n2 - n1 + 1) / (phi_r(n2) - phi_r(n1) + 1))
+        w = np.arange(1, len(tempi) + 1)
+        return float(np.sum(np.array(tempi) * w) / np.sum(w))
+
+    def alter(self, tracker, t: Optional[float]) -> None:
+        """Sec. 4.2: alter the score representation at the last processed frame."""
+        if t is None or not np.isfinite(t) or t <= 0:
+            self._consecutive = 0
+            return
+        t = max(self.tempo_min, min(self.tempo_max, t))
+        if t >= 1.0:
+            self._insert_pending = False
+        ps = tracker.tempo_last_score_frame()
+        if ps <= self._last_altered_ps + self.min_advance:
+            return
+        V, f2b, on = tracker.tempo_score()
+        if ps < 0 or ps + 2 >= len(V):
+            return
+        if self._consecutive >= 3:  # at most 3 alterations in a row
+            self._consecutive = 0
+            return
+        r = self._rng.uniform(0.0, 1.0)
+        if t > 1.0 and r > 1.0 / t:
+            V[ps + 1] = 0.5 * (V[ps + 1] + V[ps + 2])
+            if on[ps + 2] and not on[ps + 1]:
+                f2b[ps + 1] = f2b[ps + 2]
+            elif not on[ps + 1]:
+                f2b[ps + 1] = 0.5 * (f2b[ps + 1] + f2b[ps + 2])
+            on[ps + 1] |= on[ps + 2]
+            tracker.tempo_set_score(
+                np.delete(V, ps + 2, axis=0),
+                np.delete(f2b, ps + 2),
+                np.delete(on, ps + 2),
+            )
+            self.n_deleted += 1
+            self._consecutive += 1
+            self._last_altered_ps = ps
+        elif t < 1.0 and (self._insert_pending or r > t):
+            if on[ps] or on[ps + 1]:  # onset vectors are not duplicated
+                self._insert_pending = True
+                self.n_postponed += 1
+                self._consecutive = 0
+                return
+            self._insert_pending = False
+            tracker.tempo_set_score(
+                np.insert(V, ps + 1, 0.5 * (V[ps] + V[ps + 1]), axis=0),
+                np.insert(f2b, ps + 1, 0.5 * (f2b[ps] + f2b[ps + 1])),
+                np.insert(on, ps + 1, False),
+            )
+            self.n_inserted += 1
+            self._consecutive += 1
+            self._last_altered_ps = ps
+        else:
+            self._consecutive = 0
+
+    # --- Standalone onset update (Eq. 1) ---
+
+    def update_beat_period(
+        self,
+        performed_onset: float,
+        score_onset: float,
+        *args,
+        **kwargs,
+    ) -> None:
+        """Update beat period using the Eq. 1 weighted average of recent local tempi."""
+        if not np.isfinite(performed_onset) or not np.isfinite(score_onset):
+            return
+        self.est_onset = performed_onset
+        self._history_perf.append(performed_onset)
+        self._history_score.append(score_onset)
+        self.prev_perf_onset = performed_onset
+        self.prev_score_onset = score_onset
+
+        if len(self._history_perf) < 2:
+            return
+
+        perf = np.array(self._history_perf)
+        score = np.array(self._history_score)
+        n = min(self.n_onsets, len(perf) - 1)
+        tempi = []
+        for i in range(1, n + 1):
+            dp = perf[-1] - perf[-1 - i]
+            ds = score[-1] - score[-1 - i]
+            if dp > 0 and ds > 0:
+                tempi.append(dp / ds)
+
+        if tempi:
+            tempi = tempi[::-1]
+            w = np.arange(1, len(tempi) + 1)
+            est_bp = float(np.sum(np.array(tempi) * w) / np.sum(w))
+            base_bp = getattr(self, "init_beat_period", 0.5)
+            rel_t = base_bp / max(1e-4, est_bp)
+            rel_t = max(self.tempo_min, min(self.tempo_max, rel_t))
+            beat_period = base_bp / rel_t
+            if np.isfinite(beat_period) and beat_period > 0:
+                self._current_tempo = rel_t
+                self.beat_period = beat_period
+
+
+# Aliases for backward compatibility
+ArztWidmer2010TempoModel = ArztTempoModel
+
+
+def make_tempo_model(tempo_model, **kwargs) -> Optional[TempoModel]:
+    """None, a ``TempoModel`` instance, or a class (built with ``kwargs``)."""
+    if tempo_model is None or isinstance(tempo_model, TempoModel):
+        return tempo_model
+    if isinstance(tempo_model, type) and issubclass(tempo_model, TempoModel):
+        return tempo_model(**kwargs)
+    raise TypeError(
+        f"tempo_model must be None, a TempoModel or its class, got {tempo_model!r}"
+    )
 
 
 if __name__ == "__main__":

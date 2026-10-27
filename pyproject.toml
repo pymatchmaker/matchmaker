@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=80.0,<81", "Cython==3.0.8", "numpy>=1.26.3,<2.0", "build", "cibuildwheel"]
+requires = ["setuptools>=80.0,<81", "Cython>=3.0.10,<4.0", "numpy>=2.0,<3.0", "build", "cibuildwheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -29,8 +29,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "cython>=3.0.8",
-    "numpy>=1.26.3,<2.0",
+    "cython>=3.0.10",
+    "numpy>=1.26.3",
     "scipy>=1.11.4",
     "librosa>=0.10.1",
     "pandas>=2.0.0",

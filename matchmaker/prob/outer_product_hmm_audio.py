@@ -14,25 +14,21 @@ from matchmaker.utils.misc import set_latency_stats
 NDArrayFloat = NDArray[np.float32]
 NDArrayInt = NDArray[np.int32]
 
-# Score-position jump probs (d = i - j) from Nakamura 2014 Table 3, |d| <= 3.
-# d=0 (staying on the same note) is omitted: it is zeroed by fill_diagonal and
-# instead derived per-chord from note duration and tempo (a00, set in __init__).
+# Neighbourhood transitions of Nakamura et al. (2016), Sec. III-B and IV-B2:
+# nbh(i) = {j; 0 <= i - j <= 2}, with a_{i,i+2} = 1e-50 for deletion errors and
+# a_{i,i} = 0 for insertion errors (staying on a note is the bottom-level a00).
 DEFAULT_TRANSITIONS = [
-    (-3, 0.00509),
-    (-2, 0.00516),
-    (-1, 0.00886),
-    (1, 0.94531),  # normal forward progression
-    (2, 0.00610),  # deletion (skip one note)
-    (3, 0.00073),
+    (1, 1.0 - 1e-50),  # normal forward progression
+    (2, 1e-50),  # deletion (skip one note)
 ]
 
-DEFAULT_D1 = 3
-DEFAULT_D2 = 3
+# neighbourhood reach in the forward step: D1 states back, D2 states ahead
+DEFAULT_D1 = 0
+DEFAULT_D2 = 2
 
 IOI_THRESHOLD = 0.035  # seconds
 SUSTAINED_DECAY: float = 0.3  # exponential decay rate for sustained notes
 
-_FLUX_EXIT_BOOST: float = 1.0
 _OTHER_PROB: float = 1e-6
 _EMISSION_BETA: float = 5.0
 _UNIFORM_FLOOR: float = 0.2
@@ -209,16 +205,16 @@ def compute_transition_matrix(
     if transitions is None:
         transitions = DEFAULT_TRANSITIONS
 
-    # Initialize transition matrix with epsilons
-    alpha = np.full((N, N), 1e-6, dtype=float)
+    # only the band is used in the forward step; moves outside it are the s_j r_i term
+    alpha = np.zeros((N, N), dtype=float)
     for delta, prob in transitions:
         for i in range(N):
             j = i + delta
             if 0 <= j < N:
                 alpha[i, j] = prob
 
-    alpha += np.finfo(float).eps
-    alpha /= alpha.sum(axis=1, keepdims=True)
+    row_sums = alpha.sum(axis=1, keepdims=True)
+    alpha = np.divide(alpha, row_sums, out=np.zeros_like(alpha), where=row_sums > 0)
     return alpha, D1, D2
 
 
@@ -231,7 +227,7 @@ class AudioOuterProductHMM(OnlineAlignment):
         tempo: float = 120.0,
         sample_rate: int = 16000,
         hop_length: int = 320,
-        s_j: float = 1e-5,
+        s_j: float = 1e-100,
         r_i: Optional[np.ndarray] = None,
         **kwargs,
     ) -> None:
@@ -310,8 +306,16 @@ class AudioOuterProductHMM(OnlineAlignment):
         }
         # Bottom transitions a_{l',l}^{(i)} and exit probs e_l^{(i)} (Eq.(5))
         frame_rate = float(self.sample_rate) / float(self.hop_length)
+        # chord durations in quarter notes: `tempo` is quarter-note BPM, while
+        # score beats follow the time signature (an eighth in 6/8, a half in 2/2)
+        notes = (
+            self.reference_features
+            if isinstance(self.reference_features, np.ndarray)
+            else self.reference_features.note_array()
+        )
+        quarter_at = dict(zip(notes["onset_beat"].tolist(), notes["onset_quarter"].tolist()))
         self.a00 = self._compute_chord_self_transition_probs(
-            unique_onsets=unique_onsets,
+            onset_quarters=np.array([quarter_at[b] for b in unique_onsets.tolist()]),
             tempo=tempo,
             frame_rate=frame_rate,
         )
@@ -350,20 +354,21 @@ class AudioOuterProductHMM(OnlineAlignment):
 
     @staticmethod
     def _compute_chord_self_transition_probs(
-        unique_onsets: np.ndarray,
+        onset_quarters: np.ndarray,
         tempo: float,
         frame_rate: float,
     ) -> np.ndarray:
         """
         Compute self-transition probabilities from chord durations (Eq.5).
 
-        a_i = 1 - 1/d_i, where d_i = duration_sec / frame_time.
+        a_i = 1 - 1/d_i, where d_i = duration_sec / frame_time. ``onset_quarters``
+        are the chord onsets in quarter notes and ``tempo`` is quarter-note BPM.
         """
-        N = len(unique_onsets)
+        N = len(onset_quarters)
         frame_time = 1.0 / max(frame_rate, 1e-6)
 
-        # Convert onset beats to seconds, then compute inter-onset durations
-        onset_sec = unique_onsets * (60.0 / tempo)
+        # Convert onset quarters to seconds, then compute inter-onset durations
+        onset_sec = np.asarray(onset_quarters, dtype=float) * (60.0 / tempo)
         dur_sec = np.zeros(N, dtype=float)
         if N >= 2:
             dur_sec[:-1] = np.diff(onset_sec)
@@ -511,12 +516,7 @@ class AudioOuterProductHMM(OnlineAlignment):
             )
         emit_pause = np.full(N, emit_pause_scalar, dtype=float)
 
-        # Spectral-flux-driven exit boost
-        flux = float(obs[88]) if obs.size > 88 else 0.0
-        f = flux / (flux + 1.0)  # [0,1)
-        boost = 1.0 + _FLUX_EXIT_BOOST * f
-        e0 = np.clip(self.e0 * boost, 1e-10, 1.0 - self.a01 - 1e-10)
-        a00 = np.clip(1.0 - self.a01 - e0, 1e-10, 1.0 - 1e-10)
+        e0, a00 = self.e0, self.a00
 
         # Exit masses from each top state j (Eq.(6))
         exit_mass = prev_sound * e0 + prev_pause * self.e1  # (N,)
