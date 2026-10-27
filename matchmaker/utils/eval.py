@@ -5,7 +5,6 @@ import numpy as np
 import partitura as pt
 import scipy
 
-TOLERANCES_IN_MILLISECONDS = [50, 100, 300, 500, 1000, 2000]
 TOLERANCES_IN_BEATS = [0.05, 0.1, 0.3, 0.5, 1, 2]
 ONSET_WINDOW_DURATION = 30.0
 
@@ -111,13 +110,10 @@ def get_evaluation_results(
     gt_annots,
     predicted_annots,
     total_counts,
-    tolerances=TOLERANCES_IN_MILLISECONDS,
-    in_seconds=True,
+    tolerances=TOLERANCES_IN_BEATS,
 ):
-    if in_seconds:
-        errors_in_delay = (gt_annots - predicted_annots) * 1000
-    else:
-        errors_in_delay = gt_annots - predicted_annots
+    """Summarize score-position errors in beats at performance times."""
+    errors_in_delay = gt_annots - predicted_annots
 
     abs_errors_in_delay = np.abs(errors_in_delay)
 
@@ -133,16 +129,10 @@ def get_evaluation_results(
         ),
     }
 
-    if in_seconds:
-        for tau in tolerances:
-            results[f"{tau}ms"] = float(
-                f"{np.sum(np.abs(errors_in_delay) <= tau) / total_counts:.4f}"
-            )
-    else:
-        for tau in tolerances:
-            results[f"{tau}b"] = float(
-                f"{np.sum(np.abs(errors_in_delay) <= tau) / total_counts:.4f}"
-            )
+    for tau in tolerances:
+        results[f"{tau}b"] = float(
+            f"{np.sum(np.abs(errors_in_delay) <= tau) / total_counts:.4f}"
+        )
 
     return results
 
@@ -160,7 +150,6 @@ def evaluate_beat_errors(
         predicted_score_beats,
         total_counts=len(gt_score_beats) if total_counts is None else total_counts,
         tolerances=beat_tolerances,
-        in_seconds=False,
     )
     return {
         "mean_b": beat["mean"],
@@ -341,10 +330,7 @@ def evaluate_alignment(
     gt_score_beats,
     gt_perf_sec,
     beat_tolerances=TOLERANCES_IN_BEATS,
-    ms_tolerances=TOLERANCES_IN_MILLISECONDS,
     sparc_window_sec=ONSET_WINDOW_DURATION,
-    *,
-    return_details: bool = False,
 ):
     """Evaluate beat accuracy and trajectory smoothness for one performance.
 
@@ -360,20 +346,14 @@ def evaluate_alignment(
         Ground truth performance times (seconds).
     beat_tolerances : list
         Tolerance thresholds for beat error.
-    ms_tolerances : list
-        Tolerance thresholds for ms error, used when ``return_details=True``.
     sparc_window_sec : float
         Forward-window duration for GT onset-wise SPARC (default: 30 seconds).
-    return_details : bool
-        Include ms error metrics and full-precision SPARC diagnostics for
-        benchmark aggregation. Default: False.
 
     Returns
     -------
     dict
         ``mean_b``, ``median_b``, ``std_b``, ``accuracy_b``, ``skewness``,
-        ``kurtosis``, and ``smoothness``. With ``return_details=True``, also
-        includes ``ms`` metrics and a ``smoothness_details`` dictionary.
+        ``kurtosis``, and ``smoothness``.
     """
     valid = np.isfinite(gt_perf_sec) & np.isfinite(gt_score_beats)
 
@@ -393,31 +373,14 @@ def evaluate_alignment(
         beat_tolerances=beat_tolerances,
     )
 
-    sparc_results = compute_sparc(
+    smoothness = compute_sparc(
         aligned_score_beats,
         aligned_perf_sec,
         onset_times=np.asarray(gt_perf_sec)[valid],
         window_sec=sparc_window_sec,
-        return_details=True,
     )
 
-    smoothness = sparc_results["sparc"]
     results["smoothness"] = round(smoothness, 4) if smoothness is not None else None
-    if return_details:
-        gt_interp = scipy.interpolate.interp1d(
-            gt_score_beats[valid],
-            gt_perf_sec[valid],
-            kind="linear",
-            bounds_error=False,
-            fill_value=np.nan,
-        )
-        results["ms"] = get_evaluation_results(
-            gt_interp(aligned_score_beats),
-            aligned_perf_sec,
-            total_counts=len(aligned_score_beats),
-            tolerances=ms_tolerances,
-        )
-        results["smoothness_details"] = sparc_results
     return results
 
 
