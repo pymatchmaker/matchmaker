@@ -247,6 +247,21 @@ python run_examples.py --midi --method hmm
 
 This script runs a complete example with score following and evaluation, saving results to the `results/` directory.
 
+#### Evaluation output
+
+| Field | Meaning |
+| --- | --- |
+| `mean_b`, `median_b`, `std_b` | Mean, median, and standard deviation of the absolute score-position error, in beats. |
+| `accuracy_b` | Fraction of annotated onsets within each beat-error tolerance, such as `0.5b`. |
+| `skewness`, `kurtosis` | Unitless statistics describing the asymmetry and tail weight of the signed score-position error distribution. |
+| `smoothness` | Trajectory smoothness measured with SPARC. Higher (less negative) values indicate smoother motion. |
+| `rtf` | Alignment runtime divided by the annotated performance span. Lower values mean faster processing. |
+| `feature_latency_ms`, `inference_latency_ms` | Mean feature-extraction and inference time per frame, in milliseconds; reported for audio input. |
+
+`matchmaker.utils.eval.evaluate_alignment()` returns the accuracy and smoothness fields directly; the example script adds runtime and latency measurements.
+
+`smoothness` measures the smoothness of the alignment path using [SPARC (Spectral Arc Length)](https://pmc.ncbi.nlm.nih.gov/articles/PMC4674971/), with higher (less negative) values indicating smoother tracking.
+
 ### Testing with Different Methods or Features
 
 You can specify the alignment method and feature processor as follows:

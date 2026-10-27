@@ -519,13 +519,13 @@ class Matchmaker(object):
         return {
             "f_avg_latency": round(
                 feature_stats["total_latency"] / feature_stats["total_frames"] * 1000,
-                3,
+                4,
             ),
             "i_avg_latency": round(
                 inference_stats["total_latency"]
                 / inference_stats["total_frames"]
                 * 1000,
-                3,
+                4,
             ),
         }
 

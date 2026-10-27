@@ -12,7 +12,8 @@ from matchmaker import EXAMPLE_PIECES, Matchmaker
 from matchmaker.utils.eval import evaluate_alignment, resolve_gt
 
 ROOT_DIR = Path(__file__).parent
-_piece = EXAMPLE_PIECES["simple_mozart"]  # simple_mozart, bach_fugue
+DEFAULT_PIECE = "simple_mozart"  # simple_mozart, bach_fugue
+_piece = EXAMPLE_PIECES[DEFAULT_PIECE]
 SCORE_FILE = Path(_piece["score"])
 PERFORMANCE_AUDIO_FILE = Path(_piece["audio"])
 PERFORMANCE_MIDI_FILE = Path(_piece["midi"])
@@ -42,7 +43,9 @@ def evaluate(mm, match_file):
         if perf_dur > 0:
             results["rtf"] = float(f"{mm.alignment_duration / perf_dur:.4f}")
     if mm.input_type == "audio":
-        results.update(mm.get_latency_stats())
+        latency = mm.get_latency_stats()
+        results["feature_latency_ms"] = latency["f_avg_latency"]
+        results["inference_latency_ms"] = latency["i_avg_latency"]
 
     return results, perf_sec, score_beat, gt_perf, gt_score
 
@@ -123,9 +126,9 @@ def main():
     parser.add_argument(
         "--piece",
         type=str,
-        default="simple_mozart",
+        default=DEFAULT_PIECE,
         choices=list(EXAMPLE_PIECES.keys()),
-        help="Built-in example piece to run (default: simple_mozart)",
+        help=f"Built-in example piece to run (default: {DEFAULT_PIECE})",
     )
     parser.add_argument(
         "--method",
@@ -211,7 +214,7 @@ def main():
     # Run real-time score following
     for current_position in mm.run():
         timestamp = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        print(f"[{timestamp}] Current beat position: {current_position}")
+        print(f"[{timestamp}] Current beat position: {current_position:.4f}")
 
     if match_file and match_file.is_file():
         print("-" * 50)

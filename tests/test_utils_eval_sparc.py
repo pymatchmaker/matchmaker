@@ -5,7 +5,12 @@ from unittest.mock import patch
 
 import numpy as np
 
-from matchmaker.utils.eval import compute_sparc, onset_wise_windows, spectral_arc_length
+from matchmaker.utils.eval import (
+    compute_sparc,
+    evaluate_alignment,
+    onset_wise_windows,
+    spectral_arc_length,
+)
 
 
 class TestOnsetWiseWindows(unittest.TestCase):
@@ -48,6 +53,33 @@ class TestPathSparc(unittest.TestCase):
     def details(self, beats, times, onsets):
         return compute_sparc(beats, times, onset_times=onsets, return_details=True)
 
+    def test_alignment_result_has_compact_metrics_and_optional_details(self):
+        times = np.arange(4.0)
+        beats = times * 1.25
+        result = evaluate_alignment(beats, times, times, times)
+        self.assertEqual(
+            list(result),
+            [
+                "mean_b",
+                "median_b",
+                "std_b",
+                "accuracy_b",
+                "skewness",
+                "kurtosis",
+                "smoothness",
+            ],
+        )
+        self.assertEqual(result["mean_b"], 0.375)
+        self.assertEqual(result["accuracy_b"]["0.5b"], 0.75)
+        self.assertEqual(result["smoothness"], round(compute_sparc(beats, times), 4))
+
+        detailed = evaluate_alignment(beats, times, times, times, return_details=True)
+        self.assertEqual({key: detailed[key] for key in result}, result)
+        self.assertIn("mean", detailed["ms"])
+        self.assertEqual(
+            detailed["smoothness_details"], self.details(beats, times, times)
+        )
+
     def test_short_constant_speed_is_evaluated(self):
         times = np.arange(0.0, 10.02, 0.02)
         result = self.details(times, times, np.array([0.0, 5.0, 10.0]))
@@ -86,17 +118,15 @@ class TestPathSparc(unittest.TestCase):
         self.assertEqual(result["sparc_n_windows"], 3)
         self.assertEqual(result["sparc_n_valid_windows"], 2)
 
-    def test_gt_defines_windows_independently_of_output_rate(self):
+    def test_redundant_reports_do_not_change_sparc(self):
         onsets = np.array([0.0, 4.0, 11.0, 18.0, 44.0])
-        results = []
+        jump_times = np.arange(45.0)
+        expected = self.details(jump_times, jump_times, onsets)
         for frame_rate in (25, 50):
-            times = np.arange(0.0, 44.0 + 1 / frame_rate, 1 / frame_rate)
-            results.append(self.details(times, times, onsets))
-        self.assertEqual(
-            [(w["t0"], w["t1"]) for w in results[0]["sparc_windows"]],
-            [(w["t0"], w["t1"]) for w in results[1]["sparc_windows"]],
-        )
-        self.assertAlmostEqual(results[0]["sparc"], results[1]["sparc"])
+            with self.subTest(frame_rate=frame_rate):
+                times = np.arange(44 * frame_rate + 1) / frame_rate
+                result = self.details(np.floor(times), times, onsets)
+                self.assertEqual(result, expected)
 
     def test_uncovered_windows_are_not_filled_by_extrapolation(self):
         times = np.arange(0.0, 30.02, 0.02)

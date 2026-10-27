@@ -236,9 +236,10 @@ def compute_sparc(
 ) -> Union[float, dict, None]:
     """Mean adaptive SPARC over GT onset-wise windows, without time weights.
 
-    Each window uses the full position trajectory resampled at ``fs``, rather
-    than sampling positions only at onsets. Stationary/undefined windows are
-    omitted from the mean; an entirely undefined path returns None.
+    Each window uses the full position trajectory resampled at ``fs``, holding
+    the last reported position between updates, rather than sampling positions
+    only at onsets. Stationary/undefined windows are omitted from the mean; an
+    entirely undefined path returns None.
 
     Pass the same GT ``onset_times`` for every follower being compared, as
     ``evaluate_alignment`` does. Standalone calls without GT use the path's
@@ -268,7 +269,10 @@ def compute_sparc(
     cached_windows = {}
     if windows and len(perf_sec) >= 2:
         times = np.arange(windows[0]["t0"], windows[-1]["t1"], 1.0 / fs)
-        positions = np.interp(times, perf_sec, score_beat)
+        report_indices = np.searchsorted(perf_sec, times, side="right") - 1
+        positions = np.full(len(times), np.nan)
+        has_report = report_indices >= 0
+        positions[has_report] = score_beat[report_indices[has_report]]
     else:
         times, positions = np.array([]), np.array([])
     for window in windows:
@@ -310,8 +314,10 @@ def evaluate_alignment(
     beat_tolerances=TOLERANCES_IN_BEATS,
     ms_tolerances=TOLERANCES_IN_MILLISECONDS,
     sparc_window_sec=ONSET_WINDOW_DURATION,
+    *,
+    return_details: bool = False,
 ):
-    """Evaluate alignment quality in both beat and ms domains.
+    """Evaluate beat accuracy and trajectory smoothness for one performance.
 
     Parameters
     ----------
@@ -326,25 +332,21 @@ def evaluate_alignment(
     beat_tolerances : list
         Tolerance thresholds for beat error.
     ms_tolerances : list
-        Tolerance thresholds for ms error.
+        Tolerance thresholds for ms error, used when ``return_details=True``.
     sparc_window_sec : float
         Forward-window duration for GT onset-wise SPARC (default: 30 seconds).
+    return_details : bool
+        Include ms error metrics and full-precision SPARC diagnostics for
+        benchmark aggregation. Default: False.
 
     Returns
     -------
     dict
-        Beat/ms metrics, mean SPARC (float or None), total/valid SPARC window
-        counts, valid fraction, and per-window SPARC diagnostics.
+        ``mean_b``, ``median_b``, ``std_b``, ``accuracy_b``, ``skewness``,
+        ``kurtosis``, and ``smoothness``. With ``return_details=True``, also
+        includes ``ms`` metrics and a ``smoothness_details`` dictionary.
     """
-    # GT interpolator: score beat → perf time
     valid = np.isfinite(gt_perf_sec) & np.isfinite(gt_score_beats)
-    gt_interp = scipy.interpolate.interp1d(
-        gt_score_beats[valid],
-        gt_perf_sec[valid],
-        kind="linear",
-        bounds_error=False,
-        fill_value=np.nan,
-    )
 
     # Beat metrics: perf→score prediction
     wp_sec = np.array([aligned_perf_sec, aligned_score_beats])
@@ -363,15 +365,6 @@ def evaluate_alignment(
         in_seconds=False,
     )
 
-    # Ms metrics: score→perf prediction
-    gt_perf_for_wp = gt_interp(aligned_score_beats)
-    ms_results = get_evaluation_results(
-        gt_perf_for_wp,
-        aligned_perf_sec,
-        total_counts=len(aligned_score_beats),
-        tolerances=ms_tolerances,
-    )
-
     sparc_results = compute_sparc(
         aligned_score_beats,
         aligned_perf_sec,
@@ -380,7 +373,36 @@ def evaluate_alignment(
         return_details=True,
     )
 
-    return {"beat": beat_results, "ms": ms_results, **sparc_results}
+    smoothness = sparc_results["sparc"]
+    results = {
+        "mean_b": beat_results["mean"],
+        "median_b": beat_results["median"],
+        "std_b": beat_results["std"],
+        "accuracy_b": {
+            threshold: accuracy
+            for threshold, accuracy in beat_results.items()
+            if threshold.endswith("b")
+        },
+        "skewness": beat_results["skewness"],
+        "kurtosis": beat_results["kurtosis"],
+        "smoothness": round(smoothness, 4) if smoothness is not None else None,
+    }
+    if return_details:
+        gt_interp = scipy.interpolate.interp1d(
+            gt_score_beats[valid],
+            gt_perf_sec[valid],
+            kind="linear",
+            bounds_error=False,
+            fill_value=np.nan,
+        )
+        results["ms"] = get_evaluation_results(
+            gt_interp(aligned_score_beats),
+            aligned_perf_sec,
+            total_counts=len(aligned_score_beats),
+            tolerances=ms_tolerances,
+        )
+        results["smoothness_details"] = sparc_results
+    return results
 
 
 def _streamed_onsets(performance, match_perf, performance_ids):
