@@ -252,7 +252,7 @@ This script runs a complete example with score following and evaluation, saving 
 | Field | Meaning |
 | --- | --- |
 | `mean_b`, `median_b`, `std_b` | Mean, median, and standard deviation of the absolute score-position error, in beats. |
-| `accuracy_b` | Fraction of annotated onsets within each beat-error tolerance, such as `0.5b`. |
+| `accuracy_0.05b`, `accuracy_0.1b`, `accuracy_0.3b`, `accuracy_0.5b`, `accuracy_1b`, `accuracy_2b` | Fraction of annotated onsets within each beat-error tolerance. |
 | `skewness`, `kurtosis` | Unitless statistics describing the asymmetry and tail weight of the signed score-position error distribution. |
 | `smoothness` | Trajectory smoothness measured with SPARC. Higher (less negative) values indicate smoother motion. |
 | `rtf` | Alignment runtime divided by the annotated performance span. Lower values mean faster processing. |

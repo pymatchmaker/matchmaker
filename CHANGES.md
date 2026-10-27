@@ -4,7 +4,7 @@
 
 ### Breaking Changes
 
-- `evaluate_alignment()` returns `mean_b`, `median_b`, `std_b`, nested `accuracy_b`, unitless `skewness` and `kurtosis`, and scalar `smoothness` directly, replacing the previous nested result format.
+- `evaluate_alignment()` returns flat fields: `mean_b`, `median_b`, `std_b`, `accuracy_0.05b` through `accuracy_2b`, unitless `skewness` and `kurtosis`, and scalar `smoothness`, replacing the previous nested result format.
 - Removed millisecond-based alignment evaluation, including `in_seconds`, `TOLERANCES_IN_MILLISECONDS`, `ms_tolerances`, and the `return_details` option on `evaluate_alignment()`.
 - Renamed latency keys from `f_avg_latency` and `i_avg_latency` to `feature_latency_ms` and `inference_latency_ms`.
 - SPARC resampling holds the last reported position between updates. This changes smoothness values; compare them only within the same input type (audio or MIDI).

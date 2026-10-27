@@ -130,7 +130,7 @@ def get_evaluation_results(
     }
 
     for tau in tolerances:
-        results[f"{tau}b"] = float(
+        results[f"{tau:g}b"] = float(
             f"{np.sum(np.abs(errors_in_delay) <= tau) / total_counts:.4f}"
         )
 
@@ -155,8 +155,8 @@ def evaluate_beat_errors(
         "mean_b": beat["mean"],
         "median_b": beat["median"],
         "std_b": beat["std"],
-        "accuracy_b": {
-            threshold: accuracy
+        **{
+            f"accuracy_{threshold}": accuracy
             for threshold, accuracy in beat.items()
             if threshold.endswith("b")
         },
@@ -352,7 +352,7 @@ def evaluate_alignment(
     Returns
     -------
     dict
-        ``mean_b``, ``median_b``, ``std_b``, ``accuracy_b``, ``skewness``,
+        ``mean_b``, ``median_b``, ``std_b``, ``accuracy_<tolerance>b``, ``skewness``,
         ``kurtosis``, and ``smoothness``.
     """
     valid = np.isfinite(gt_perf_sec) & np.isfinite(gt_score_beats)

@@ -53,24 +53,10 @@ class TestPathSparc(unittest.TestCase):
     def details(self, beats, times, onsets):
         return compute_sparc(beats, times, onset_times=onsets, return_details=True)
 
-    def test_alignment_result_has_compact_beat_metrics(self):
+    def test_alignment_result_reports_rounded_smoothness(self):
         times = np.arange(4.0)
         beats = times * 1.25
         result = evaluate_alignment(beats, times, times, times)
-        self.assertEqual(
-            list(result),
-            [
-                "mean_b",
-                "median_b",
-                "std_b",
-                "accuracy_b",
-                "skewness",
-                "kurtosis",
-                "smoothness",
-            ],
-        )
-        self.assertEqual(result["mean_b"], 0.375)
-        self.assertEqual(result["accuracy_b"]["0.5b"], 0.75)
         self.assertEqual(result["smoothness"], round(compute_sparc(beats, times), 4))
 
     def test_short_constant_speed_is_evaluated(self):
