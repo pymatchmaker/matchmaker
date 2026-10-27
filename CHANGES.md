@@ -1,5 +1,19 @@
 # Changes
 
+## Version 0.4.0
+
+### Breaking Changes
+
+- `evaluate_alignment()` returns `mean_b`, `median_b`, `std_b`, nested `accuracy_b`, unitless `skewness` and `kurtosis`, and scalar `smoothness` directly, replacing the previous nested result format.
+- Removed millisecond-based alignment evaluation, including `in_seconds`, `TOLERANCES_IN_MILLISECONDS`, `ms_tolerances`, and the `return_details` option on `evaluate_alignment()`.
+- Renamed latency keys from `f_avg_latency` and `i_avg_latency` to `feature_latency_ms` and `inference_latency_ms`.
+- SPARC resampling holds the last reported position between updates. This changes smoothness values; compare them only within the same input type (audio or MIDI).
+
+### Improvements
+
+- Added Python 3.13 support and updated dependencies.
+- Updated the README and examples for the evaluation output and four-decimal result formatting.
+
 ## Version 0.3.0
 
 This is a major feature release introducing new symbolic and audio score-following trackers, a unified interface refactor, particle filters, bug fixes, and documentation improvements. This version is not backwards compatible with 0.2 versions.

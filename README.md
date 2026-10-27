@@ -261,6 +261,7 @@ This script runs a complete example with score following and evaluation, saving 
 `matchmaker.utils.eval.evaluate_alignment()` returns the accuracy and smoothness fields directly; the example script adds runtime and latency measurements.
 
 `smoothness` measures the smoothness of the alignment path using [SPARC (Spectral Arc Length)](https://pmc.ncbi.nlm.nih.gov/articles/PMC4674971/), with higher (less negative) values indicating smoother tracking.
+Smoothness depends on how positions are reported; compare values only within the same input type (audio or MIDI).
 
 ### Testing with Different Methods or Features
 
