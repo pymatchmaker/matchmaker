@@ -261,6 +261,7 @@ class PitchHMM(BaseHMM):
         # observation model
         observation_model = BernoulliPitchObservationModel(
             pitch_profiles=pitch_profiles,
+            inserted_states=inserted_states,
         )
 
         if inserted_states:
@@ -932,9 +933,12 @@ class BernoulliPitchObservationModel(ObservationModel):
         Pre-computed pitch profiles, for each separate possible pitch
         in the MIDI range. Used in calculating the pitch observation
         probabilities.
+    inserted_states : bool, optional
+        If True, odd states share one uniform profile, evaluated once.
+        Default is False.
     """
 
-    def __init__(self, pitch_profiles: NDArrayFloat):
+    def __init__(self, pitch_profiles: NDArrayFloat, inserted_states: bool = False):
         """
         The initialization method.
 
@@ -944,16 +948,23 @@ class BernoulliPitchObservationModel(ObservationModel):
             he pre-computed pitch profiles, for each separate possible pitch
             in the MIDI range. Used in calculating the pitch observation
             probabilities.
+        inserted_states : bool, optional
+            If True, odd states share one uniform profile, evaluated once.
+            Default is False.
         """
         super().__init__(use_log_probabilities=False)
         # Store the parameters of the object:
         self.pitch_profiles = pitch_profiles
+        self.inserted_states = inserted_states
 
     def __call__(self, observation: NDArrayFloat) -> NDArrayFloat:
-        return compute_bernoulli_pitch_probabilities(
-            pitch_obs=observation,
-            pitch_profiles=self.pitch_profiles,
-        )
+        if not self.inserted_states or len(self.pitch_profiles) < 2:
+            return compute_bernoulli_pitch_probabilities(observation, self.pitch_profiles)
+        # inserted states (odd indices) share one uniform profile: evaluate it once
+        obs_prob = np.empty(len(self.pitch_profiles))
+        obs_prob[0::2] = compute_bernoulli_pitch_probabilities(observation, self.pitch_profiles[0::2])
+        obs_prob[1::2] = compute_bernoulli_pitch_probabilities(observation, self.pitch_profiles[1:2])[0]
+        return obs_prob
 
 
 class GaussianAudioPitchObservationModel(ObservationModel):
