@@ -38,6 +38,8 @@ Supports **simulation mode**: run online alignment against recorded audio or MID
 > ```bash
 > conda install -c conda-forge fluidsynth
 > ```
+>
+> conda-forge has no Fluidsynth package for Windows; see [Installing Fluidsynth on Windows](#installing-fluidsynth-on-windows).
 
 ### Option 2: Live device support
 
@@ -51,6 +53,8 @@ Adds [PyAudio](https://pypi.org/project/PyAudio/) and [python-rtmidi](https://py
 > ```bash
 > conda install -c conda-forge fluidsynth portaudio
 > ```
+>
+> On Windows, the `pyaudio` wheels already include PortAudio, so only Fluidsynth is needed.
 
 ### Option 3: Development install (from source)
 
@@ -65,12 +69,14 @@ cd matchmaker
 conda create -n matchmaker python=3.12
 conda activate matchmaker
 
-# Install system dependencies
+# Install system dependencies (Linux and macOS; on Windows, see below)
 conda install -c conda-forge gcc=12.1.0 glib fluidsynth portaudio
 
 # Install matchmaker in editable mode with all dev dependencies (includes [devices])
 pip install -e ".[dev]"
 ```
+
+On Windows, skip the system dependencies step: conda-forge has neither `gcc=12.1.0` nor Fluidsynth for Windows, and none of these packages are needed there. Instead, install the [Visual C++ build tools](#missing-visual-c-build-tools-on-windows) to compile the Cython extensions and [install Fluidsynth from its release ZIP](#installing-fluidsynth-on-windows). The rest of the steps are the same, in a conda environment or a plain `venv`.
 
 > **Note:** `partitura` will download `MuseScore_General.sf3` (a free soundfont) on first use. This may take a moment.
 
@@ -78,18 +84,27 @@ pip install -e ".[dev]"
 
 #### Missing Visual C++ build tools (on Windows)
 
-Download `vs_BuildTools.exe` from <https://visualstudio.microsoft.com/visual-cpp-build-tools/> and run:
+Building from source (`pip install -e .`, or the sdist) fails with `Microsoft Visual C++ 14.0 or greater is required` if no C++ compiler is installed. Having Visual Studio installed is not enough; it also needs the C++ workload. Install the build tools with winget:
+
+```bash
+winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+Or download `vs_BuildTools.exe` from <https://visualstudio.microsoft.com/visual-cpp-build-tools/> and run:
 
 ```bash
 vs_buildtools.exe --norestart --passive --downloadThenInstall --includeRecommended --add Microsoft.VisualStudio.Workload.NativeDesktop --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Workload.MSBuildTools
 ```
 
-#### Issues with Fluidsynth and pyfluidsynth on Windows
+#### Installing Fluidsynth on Windows
 
-On Windows, pyfluidsynth expects `fluidsynth.exe` to be located in `C:\tools\bin` (some users report `C:\tools\fluidsynth\bin`):
+Without Fluidsynth, `import fluidsynth` raises `ImportError("Couldn't find the FluidSynth library.")`. pyfluidsynth looks for `libfluidsynth-3.dll` in `C:\tools\fluidsynth\bin` and on `PATH`:
 
-1. Download the ZIP for your Windows version from <https://github.com/FluidSynth/fluidsynth/releases/latest>
-2. Extract the contents to `C:\tools` (or wherever pyfluidsynth expects the executable).
+1. Download the ZIP for your architecture (e.g. `fluidsynth-v2.6.1-win10-x64-cpp11.zip`) from <https://github.com/FluidSynth/fluidsynth/releases/latest>.
+2. Extract it and rename the extracted folder (e.g. `fluidsynth-v2.6.1-win10-x64-cpp11`) to `C:\tools\fluidsynth`, so that the DLL is at `C:\tools\fluidsynth\bin\libfluidsynth-3.dll`. Alternatively, put the folder anywhere and add its `bin` directory to `PATH`.
+3. Check with `python -c "import fluidsynth"`.
+
+With [Chocolatey](https://chocolatey.org/), `choco install fluidsynth` installs it to `C:\tools\fluidsynth` as well.
 
 #### Using Fluidsynth installed from Homebrew on macOS
 
