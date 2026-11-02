@@ -362,7 +362,7 @@ Default method: `"arzt"`
 
 | Method | Description |
 |---|---|
-| `"arzt"` | On-line time warping adapted from Brazier and Widmer (2020) |
+| `"arzt"` | On-line time warping by Arzt, Widmer and Dixon (2008), extending Dixon (2005) |
 | `"dixon"` | On-line time warping by Dixon (2005) |
 | `"outerhmm"` | Two-level HMM with repeats and skips by Nakamura et al. (2016) |
 | `"skf"` | Switching Kalman Filter with hidden tempo by Jiang and Raphael (2020) |
@@ -376,16 +376,16 @@ Default method: `"pthmm"`
 
 | Method | Description |
 |---|---|
-| `"arzt"` | On-line time warping adapted from Brazier and Widmer (2020) |
+| `"arzt"` | On-line time warping by Arzt, Widmer and Dixon (2008), extending Dixon (2005) |
 | `"dixon"` | On-line time warping by Dixon (2005) |
-| `"outerhmm"` | Outer-product HMM score follower by Nakamura (2014) |
+| `"outerhmm"` | Outer-product HMM score follower by Nakamura et al. (2014) |
 | `"hmm"` | HMM score follower by Cancino-Chacón et al. (2023) |
 | `"pthmm"` | Pitch-based HMM score follower |
 | `"pfkorz"` | Particle filter score follower by Korzeniowski et al. (2013) |
-| `"SL_OLTW"` | Symbolic-level OLTW note matcher from [parangonar](https://github.com/sildater/parangonar) |
-| `"SLT_OLTW"` | Symbolic-level OLTW note matcher with tempo, from parangonar |
-| `"OTM"` | Online transformer note matcher from parangonar |
-| `"OPTM"` | Online pure-transformer note matcher from parangonar |
+| `"SL_OLTW"` | Symbolic-level OLTW note matcher from [parangonar](https://github.com/sildater/parangonar) (Peter, Hu and Widmer, 2025) |
+| `"SLT_OLTW"` | Symbolic-level OLTW note matcher with tempo, from parangonar (Peter, Hu and Widmer, 2025) |
+| `"OTM"` | Online transformer note matcher from parangonar (Peter, 2023) |
+| `"OPTM"` | Online pure-transformer note matcher from parangonar (Peter, 2023) |
 
 The parangonar methods match one performed note at a time, so they always run
 event-based (no MIDI polling).
@@ -404,7 +404,7 @@ Default processor: `"chroma"`. Some methods default to their own processor
 | `"cqt"` | Constant-Q transform |
 | `"mel"` | Mel-spectrogram |
 | `"lse"` | Log-spectral energy features used in Dixon (2005) |
-| `"cqt_spectral_flux"` | CQT-based spectral flux used in Nakamura (2014) |
+| `"cqt_spectral_flux"` | CQT-based spectral flux used in Nakamura et al. (2016) |
 | `"raw_spectrum"` | Raw power spectrum used in Jiang and Raphael (2020) |
 | `"korzeniowski"` | Spectral observations for the Korzeniowski et al. (2013) particle filter |
 
