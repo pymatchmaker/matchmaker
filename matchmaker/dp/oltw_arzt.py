@@ -4,6 +4,16 @@
 On-line Time Warping (OLTWArzt)
 
 OLTW with step-size constraint and adaptive window, based on:
+  Arzt, Widmer & Dixon (2008) "Automatic Page Turning for Musicians via
+                               Real-Time Machine Listening"
+which extends:
+  Dixon (2005) "Live Tracking of Musical Performances Using On-Line Time
+                Warping"
+The frame-level (audio) variant closely follows source code provided by
+Andreas Arzt; the event-level (MIDI) variant is a reimplementation by the
+matchmaker team for MIDI input.
+
+Optional extensions:
   Arzt & Widmer (2010) "Simple Tempo Models for Real-Time Music Tracking"
   Arzt & Widmer (2015) "Real-Time Music Tracking Using Multiple Performances
                         as a Reference"

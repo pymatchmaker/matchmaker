@@ -15,7 +15,7 @@ The idea of running several OLTW matchers in parallel and comparing their alignm
 is adapted from
   A. Arzt, G. Widmer and S. Dixon, "Automatic page turning for musicians via real-time
       machine listening", Proc. ECAI, 2008 (Strategy 3)
-  G. Widmer and A. Arzt, "Robust real-time music tracking", Proc. Vienna Talk, 2010.
+  A. Arzt and G. Widmer, "Robust real-time music tracking", Proc. Vienna Talk, 2010.
 The unfolded versions, the cost window and the switching margin are this implementation's
 own choices, not those papers'.
 """
