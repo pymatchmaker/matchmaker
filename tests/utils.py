@@ -5,6 +5,7 @@ Utilities for tests
 """
 
 import numbers
+import os
 import tempfile
 import threading
 import wave
@@ -319,8 +320,10 @@ def process_audio_offline(
         # TODO modify mock audio stream to handle
         # an input numpy array
 
-        # Create a temporary file and get its path
-        temp_file = tempfile.NamedTemporaryFile(delete=True, suffix=".wav")
+        # Create a temporary file and get its path. It is closed before
+        # writing, since Windows can't reopen a file that is still open.
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+        temp_file.close()
         file_path = temp_file.name
 
         save_wav_fluidsynth(
@@ -343,7 +346,7 @@ def process_audio_offline(
     outputs = [item[0] for item in list(queue.queue)]
 
     if temp_file is not None:
-        temp_file.close()
+        os.remove(file_path)
 
     return outputs
 
@@ -365,6 +368,7 @@ def generate_sine_wave(
 
     # Create a temporary file
     temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    temp_file.close()
     file_path = temp_file.name
 
     # Save the sine wave to a WAV file

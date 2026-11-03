@@ -4,6 +4,7 @@
 Tests for matchmaker/utils/partitura.py
 """
 
+import os
 import time
 import unittest
 from tempfile import NamedTemporaryFile
@@ -81,7 +82,10 @@ class TestLoadingMethods(unittest.TestCase):
         """
         Tests for `midi_messages_from_midi`.
         """
-        tmp_file = NamedTemporaryFile(delete=True)
+        # Closed before writing: Windows can't reopen a file that is still open.
+        tmp_file = NamedTemporaryFile(suffix=".mid", delete=False)
+        tmp_file.close()
+        self.addCleanup(os.remove, tmp_file.name)
         perf = generate_random_performance_note_array(
             return_performance=True,
         )
@@ -102,8 +106,6 @@ class TestLoadingMethods(unittest.TestCase):
         self.assertTrue(len(valid_messages) == len(midi_messages))
 
         self.assertTrue(np.all(np.diff(message_times) >= 0))
-
-        tmp_file.close()
 
     def test_framed_midi_messages_from_midi(self):
         """
