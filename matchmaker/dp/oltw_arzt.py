@@ -4,8 +4,8 @@
 On-line Time Warping (OLTWArzt)
 
 OLTW with step-size constraint and adaptive window, based on:
-  Arzt, Widmer & Dixon (2008) "Automatic Page Turning for Musicians via
-                               Real-Time Machine Listening"
+  Arzt et al. (2008) "Automatic Page Turning for Musicians via Real-Time
+                      Machine Listening"
 which extends:
   Dixon (2005) "Live Tracking of Musical Performances Using On-Line Time
                 Warping"

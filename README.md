@@ -362,7 +362,7 @@ Default method: `"arzt"`
 
 | Method | Description |
 |---|---|
-| `"arzt"` | On-line time warping by Arzt, Widmer and Dixon (2008), extending Dixon (2005) |
+| `"arzt"` | On-line time warping by Arzt et al. (2008), extending Dixon (2005) |
 | `"dixon"` | On-line time warping by Dixon (2005) |
 | `"outerhmm"` | Two-level HMM with repeats and skips by Nakamura et al. (2016) |
 | `"skf"` | Switching Kalman Filter with hidden tempo by Jiang and Raphael (2020) |
@@ -376,14 +376,14 @@ Default method: `"pthmm"`
 
 | Method | Description |
 |---|---|
-| `"arzt"` | On-line time warping by Arzt, Widmer and Dixon (2008), extending Dixon (2005) |
+| `"arzt"` | On-line time warping by Arzt et al. (2008), extending Dixon (2005) |
 | `"dixon"` | On-line time warping by Dixon (2005) |
 | `"outerhmm"` | Outer-product HMM score follower by Nakamura et al. (2014) |
 | `"hmm"` | HMM score follower by Cancino-Chacón et al. (2023) |
 | `"pthmm"` | Pitch-based HMM score follower |
 | `"pfkorz"` | Particle filter score follower by Korzeniowski et al. (2013) |
-| `"SL_OLTW"` | Symbolic-level OLTW note matcher from [parangonar](https://github.com/sildater/parangonar) (Peter, Hu and Widmer, 2025) |
-| `"SLT_OLTW"` | Symbolic-level OLTW note matcher with tempo, from parangonar (Peter, Hu and Widmer, 2025) |
+| `"SL_OLTW"` | Symbolic-level OLTW note matcher from [parangonar](https://github.com/sildater/parangonar) (Peter et al., 2025) |
+| `"SLT_OLTW"` | Symbolic-level OLTW note matcher with tempo, from parangonar (Peter et al., 2025) |
 | `"OTM"` | Online transformer note matcher from parangonar (Peter, 2023) |
 | `"OPTM"` | Online pure-transformer note matcher from parangonar (Peter, 2023) |
 
