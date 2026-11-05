@@ -14,6 +14,7 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13"]
 
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v3
 
@@ -22,20 +23,30 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    # A slow package mirror can stall apt for half an hour or more: retry
+    # dropped downloads, and fail after 10 minutes so the job can be re-run.
+    # No recommended packages: that skips qsynth, a Qt GUI for FluidSynth.
+    # libfluidsynth3 still pulls in a soundfont, though matchmaker synthesizes
+    # with partitura's bundled one. PyAudio is built by pip from
+    # portaudio19-dev, not taken from the system Python.
     - name: Install system dependencies (Ubuntu)
       if: matrix.platform == 'ubuntu-latest'
+      timeout-minutes: 10
       run: |
-        sudo apt-get update
-        sudo apt-get install -y portaudio19-dev python3-pyaudio fluidsynth
+        sudo apt-get update -o Acquire::Retries=3
+        sudo apt-get install -y --no-install-recommends -o Acquire::Retries=3 \
+          portaudio19-dev fluidsynth
 
     - name: Install system dependencies (macOS)
       if: matrix.platform == 'macos-latest'
+      timeout-minutes: 10
       run: |
         brew install portaudio fluidsynth
 
     # PyAudio's Windows wheels bundle PortAudio, so only FluidSynth is needed.
     - name: Install system dependencies (Windows)
       if: matrix.platform == 'windows-latest'
+      timeout-minutes: 10
       run: |
         choco install fluidsynth -y --no-progress
         echo "C:\tools\fluidsynth\bin" >> $env:GITHUB_PATH
