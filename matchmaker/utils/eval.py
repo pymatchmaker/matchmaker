@@ -7,6 +7,10 @@ import scipy
 
 TOLERANCES_IN_BEATS = [0.05, 0.1, 0.3, 0.5, 1, 2]
 ONSET_WINDOW_DURATION = 30.0
+#: SPARC resamples the held position path at this rate. Every audio frame rate
+#: matchmaker uses (25, 30, 50 and 62.5 Hz) divides it, so each frame interval
+#: spans a whole number of samples, and closely spaced MIDI updates stay apart.
+SPARC_SAMPLE_RATE = 3000.0
 
 
 def transfer_positions(
@@ -240,10 +244,102 @@ def spectral_arc_length(
     return float(-np.hypot(np.diff(frequencies) / span, np.diff(spectrum)).sum())
 
 
+def windowed_spectral_arc_lengths(
+    position: np.ndarray,
+    fs: float,
+    edges: list,
+    padlevel: int = 4,
+    fc: float = 10.0,
+    amp_th: float = 0.05,
+) -> list:
+    """``spectral_arc_length`` of ``|np.gradient(position[left:right])|`` per window.
+
+    Returns one ``(value, reason)`` per ``(left, right)`` in ``edges``, with
+    ``reason`` one of "ok", "stationary" or "undefined_band", and the same values
+    as slicing every window and calling ``spectral_arc_length``, without its cost
+    at high rates. A held position makes the speed zero except where a report
+    changes it, and SPARC reads only the bins up to ``fc``. So each window's
+    spectrum is kept as a running sum of its nonzero speed samples, evaluated at
+    those bins only, while the windows slide forward; ``np.gradient`` is
+    one-sided at a slice's ends, so the two edge samples are corrected per window.
+
+    ``edges`` must not decrease in either bound, which holds for onset-wise
+    windows. ``position`` may be NaN before the first report, but not within a
+    window.
+    """
+    position = np.asarray(position, dtype=float)
+    if len(position) < 2:
+        return [(None, "insufficient_samples")] * len(edges)
+    speed = np.nan_to_num(np.abs(np.gradient(position, 1.0 / fs)), nan=0.0)
+    nonzero = np.flatnonzero(speed)
+    results = [None] * len(edges)
+    groups = {}
+    for i, (left, right) in enumerate(edges):
+        if right - left < 2:
+            results[i] = (None, "insufficient_samples")
+            continue
+        n_fft = int(2 ** (np.ceil(np.log2(right - left)) + padlevel))
+        groups.setdefault(n_fft, []).append(i)
+
+    for n_fft, members in groups.items():
+        frequencies = np.fft.rfftfreq(n_fft, d=1.0 / fs)
+        frequencies = frequencies[: np.flatnonzero(frequencies <= fc)[-1] + 1]
+        # At low rates nearly every speed sample is nonzero and the band up to
+        # fc is a large share of the spectrum: there, plain per-window FFTs
+        # are cheaper. Both routes give the same values. A complex exponential
+        # in the sliding loop costs about 20 FFT operations.
+        first_left, last_right = edges[members[0]][0], edges[members[-1]][1]
+        in_span = np.searchsorted(nonzero, last_right) - np.searchsorted(nonzero, first_left)
+        sliding_cost = 20 * 2 * (in_span + len(members)) * len(frequencies)
+        if len(members) * n_fft * np.log2(n_fft) < sliding_cost:
+            for i in members:
+                left, right = edges[i]
+                local_speed = np.abs(np.gradient(position[left:right], 1.0 / fs))
+                value = spectral_arc_length(local_speed, fs, padlevel, fc, amp_th)
+                reason = "ok" if value is not None else (
+                    "undefined_band" if np.any(local_speed) else "stationary"
+                )
+                results[i] = (value, reason)
+            continue
+        omega = -2j * np.pi * np.arange(len(frequencies)) / n_fft
+        spectrum = np.zeros(len(frequencies), dtype=complex)
+        low = high = 0
+        for i in members:
+            left, right = edges[i]
+            while high < len(nonzero) and nonzero[high] < right:
+                spectrum += speed[nonzero[high]] * np.exp(omega * nonzero[high])
+                high += 1
+            while low < high and nonzero[low] < left:
+                spectrum -= speed[nonzero[low]] * np.exp(omega * nonzero[low])
+                low += 1
+            first = abs(position[left + 1] - position[left]) * fs
+            last = abs(position[right - 1] - position[right - 2]) * fs
+            inner = np.searchsorted(nonzero, right - 1) - np.searchsorted(nonzero, left + 1)
+            if inner == 0 and first == 0 and last == 0:
+                results[i] = (None, "stationary")
+                continue
+            local = (
+                spectrum
+                + (first - speed[left]) * np.exp(omega * left)
+                + (last - speed[right - 1]) * np.exp(omega * (right - 1))
+            )
+            # The speed is nonnegative, so the DC bin is the spectrum's maximum.
+            magnitude = np.abs(local) / local[0].real
+            support = np.flatnonzero(magnitude >= amp_th)
+            if len(support) < 2:
+                results[i] = (None, "undefined_band")
+                continue
+            band = slice(support[0], support[-1] + 1)
+            span = frequencies[band][-1] - frequencies[band][0]
+            value = -np.hypot(np.diff(frequencies[band]) / span, np.diff(magnitude[band])).sum()
+            results[i] = (float(value), "ok")
+    return results
+
+
 def compute_sparc(
     score_beat: np.ndarray,
     perf_sec: np.ndarray,
-    fs: float = 50.0,
+    fs: float = SPARC_SAMPLE_RATE,
     fc: float = 10.0,
     padlevel: int = 4,
     *,
@@ -254,9 +350,9 @@ def compute_sparc(
 ) -> Union[float, dict, None]:
     """Mean adaptive SPARC over GT onset-wise windows, without time weights.
 
-    Each window uses the full position trajectory resampled at ``fs``, holding
-    the last reported position between updates, rather than sampling positions
-    only at onsets. Stationary/undefined windows are omitted from the mean; an
+    Each window uses the full position trajectory resampled at ``fs`` (by
+    default ``SPARC_SAMPLE_RATE``), holding the last reported position between
+    updates, rather than sampling positions only at onsets. Stationary/undefined windows are omitted from the mean; an
     entirely undefined path returns None.
 
     Pass the same GT ``onset_times`` for every follower being compared, as
@@ -284,7 +380,6 @@ def compute_sparc(
     )
     diagnostics = []
     values = []
-    cached_windows = {}
     if windows and len(perf_sec) >= 2:
         times = np.arange(windows[0]["t0"], windows[-1]["t1"], 1.0 / fs)
         report_indices = np.searchsorted(perf_sec, times, side="right") - 1
@@ -293,24 +388,29 @@ def compute_sparc(
         positions[has_report] = score_beat[report_indices[has_report]]
     else:
         times, positions = np.array([]), np.array([])
-    for window in windows:
+    # Sample range of each window the path covers; windows with the same range
+    # share one value.
+    keys = {}
+    for i, window in enumerate(windows):
         start, stop = window["t0"], window["t1"]
-        value, reason = None, "insufficient_samples"
-        if len(perf_sec) >= 2 and (start < perf_sec[0] or stop > perf_sec[-1]):
-            reason = "uncovered"
-        elif len(times):
+        if len(times) and not (start < perf_sec[0] or stop > perf_sec[-1]):
             left, right = np.searchsorted(times, [start, stop], side="left")
-            key = (int(left), int(right))
-            if key not in cached_windows:
-                position = positions[left:right]
-                if len(position) >= 2:
-                    speed = np.abs(np.gradient(position, 1.0 / fs))
-                    value = spectral_arc_length(speed, fs, padlevel, fc, amp_th)
-                    reason = "stationary" if not np.any(speed) else "undefined_band"
-                    if value is not None:
-                        reason = "ok"
-                cached_windows[key] = value, reason
-            value, reason = cached_windows[key]
+            keys[i] = (int(left), int(right))
+    unique = sorted(set(keys.values()))
+    computed = dict(
+        zip(
+            unique,
+            windowed_spectral_arc_lengths(positions, fs, unique, padlevel, fc, amp_th),
+        )
+    )
+    for i, window in enumerate(windows):
+        start, stop = window["t0"], window["t1"]
+        if i in keys:
+            value, reason = computed[keys[i]]
+        elif len(perf_sec) >= 2 and (start < perf_sec[0] or stop > perf_sec[-1]):
+            value, reason = None, "uncovered"
+        else:
+            value, reason = None, "insufficient_samples"
         diagnostics.append({"t0": start, "t1": stop, "sparc": value, "reason": reason})
         if value is not None:
             values.append(value)
