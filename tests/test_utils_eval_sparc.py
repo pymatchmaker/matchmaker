@@ -6,10 +6,12 @@ from unittest.mock import patch
 import numpy as np
 
 from matchmaker.utils.eval import (
+    SPARC_SAMPLE_RATE,
     compute_sparc,
     evaluate_alignment,
     onset_wise_windows,
     spectral_arc_length,
+    windowed_spectral_arc_lengths,
 )
 
 
@@ -49,6 +51,45 @@ class TestSpectralArcLength(unittest.TestCase):
         self.assertIsNone(spectral_arc_length(np.array([1.0]), fs=50))
 
 
+class TestWindowedSpectralArcLengths(unittest.TestCase):
+    def test_default_rate_spans_every_audio_frame_interval(self):
+        self.assertEqual(compute_sparc.__defaults__[0], SPARC_SAMPLE_RATE)
+        for frame_rate in (25, 30, 50, 62.5):
+            self.assertEqual(SPARC_SAMPLE_RATE % frame_rate, 0)
+
+    def test_matches_slicing_each_window(self):
+        rng = np.random.default_rng(0)
+        for fs in (50.0, SPARC_SAMPLE_RATE):
+            # A held path: reports at irregular times, a stall, and a jump back.
+            times = np.arange(0.0, 40.0, 1.0 / fs)
+            reports = np.sort(rng.uniform(0.0, 40.0, 300))
+            beats = np.cumsum(rng.uniform(-0.1, 0.5, 300))
+            beats[100:140] = beats[100]
+            position = beats[np.clip(np.searchsorted(reports, times, side="right") - 1, 0, None)]
+            edges = [
+                tuple(np.searchsorted(times, [w["t0"], w["t1"]]))
+                for w in onset_wise_windows(np.sort(rng.uniform(0.0, 40.0, 25)))
+            ]
+            for (left, right), (value, reason) in zip(
+                edges, windowed_spectral_arc_lengths(position, fs, edges)
+            ):
+                speed = np.abs(np.gradient(position[left:right], 1.0 / fs))
+                expected = spectral_arc_length(speed, fs)
+                with self.subTest(fs=fs, left=left, right=right):
+                    if expected is None:
+                        self.assertIsNone(value)
+                    else:
+                        self.assertAlmostEqual(value, expected, places=9)
+                        self.assertEqual(reason, "ok")
+
+    def test_stationary_window(self):
+        position = np.r_[np.zeros(100), np.ones(100)]
+        self.assertEqual(
+            windowed_spectral_arc_lengths(position, 50.0, [(0, 100)]),
+            [(None, "stationary")],
+        )
+
+
 class TestPathSparc(unittest.TestCase):
     def details(self, beats, times, onsets):
         return compute_sparc(beats, times, onset_times=onsets, return_details=True)
@@ -60,8 +101,11 @@ class TestPathSparc(unittest.TestCase):
         self.assertEqual(result["smoothness"], round(compute_sparc(beats, times), 4))
 
     def test_short_constant_speed_is_evaluated(self):
+        # Sampled at the 50 Hz report rate, the held path is a constant speed.
         times = np.arange(0.0, 10.02, 0.02)
-        result = self.details(times, times, np.array([0.0, 5.0, 10.0]))
+        result = compute_sparc(
+            times, times, fs=50, onset_times=np.array([0.0, 5.0, 10.0]), return_details=True
+        )
         self.assertIsNotNone(result["sparc"])
         self.assertEqual(result["sparc_n_windows"], 1)
         self.assertEqual(result["sparc_n_valid_windows"], 1)

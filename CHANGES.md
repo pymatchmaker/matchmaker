@@ -1,5 +1,12 @@
 # Changes
 
+## Unreleased
+
+### Changed
+
+- SPARC resamples the position path at 3 kHz (`SPARC_SAMPLE_RATE`) instead of 50 Hz, so every audio frame interval (25, 30, 50, 62.5 Hz) spans a whole number of samples and closely spaced MIDI updates stay apart. `smoothness` values therefore differ from 0.4.0; pass `fs=50` to `compute_sparc` to reproduce them.
+- SPARC windows are computed from the sparse speed of the held path and only the bins up to `fc`, giving the same values as before without a full FFT per window (a 5-minute piece takes seconds at 3 kHz instead of about a minute and a half).
+
 ## Version 0.4.0
 
 New score followers, a method registry, and a standardized evaluation output. Not backwards compatible with 0.3.
