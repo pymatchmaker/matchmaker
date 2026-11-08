@@ -48,6 +48,30 @@ from matchmaker.io.queue import RECVQueue
 from matchmaker.utils.misc import generate_score_audio, set_latency_stats
 
 
+def _iter_first_unfolded_parts(part, limit=4):
+    """Yield the first variants in Partitura's traversal order, without enumerating the rest."""
+    import itertools
+
+    if limit < 1:
+        return
+    pt.score.add_segments(part)
+    segments = pt.score.get_segments(part)
+    initial = pt.score.Path(["A"], segments, no_repeats=False, all_repeats=False)
+
+    def paths(path):
+        for destination in path.list_of_destinations_from_last_segment:
+            if destination == "END":
+                path.ended = True
+                yield path
+            else:
+                yield from paths(
+                    path.make_copy_with_jump_to(destination, ignore_leap_info=True)
+                )
+
+    for path in itertools.islice(paths(initial), limit):
+        yield pt.score.new_part_from_path(path, part, update_ids=True)
+
+
 class OnlineTimeWarpingArztMultiFold(OnlineTimeWarpingArztFrame):
     """Multi-fold parallel OLTW tracker for folded scores with repeats.
 
@@ -165,7 +189,6 @@ class OnlineTimeWarpingArztMultiFold(OnlineTimeWarpingArztFrame):
 
     def _build_hypotheses(self) -> None:
         """Enumerate distinct structural fold clones safely and initialize trackers."""
-        import itertools
         import sys
 
         _prev_limit = sys.getrecursionlimit()
@@ -190,8 +213,7 @@ class OnlineTimeWarpingArztMultiFold(OnlineTimeWarpingArztFrame):
 
             # 3. Intermediate unfold variants (bounded to prevent combinatorial explosion)
             try:
-                gen = pt.score.iter_unfolded_parts(self.score_part, update_ids=True)
-                for c in itertools.islice(gen, 4):
+                for c in _iter_first_unfolded_parts(self.score_part, limit=4):
                     clones.append(c)
             except Exception:
                 pass
