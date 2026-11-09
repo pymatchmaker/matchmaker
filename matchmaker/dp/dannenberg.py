@@ -19,12 +19,13 @@ Classes:
   DPDannenberg -- windowed DP matcher (event-level, MIDI only)
 """
 
-from typing import List, Optional, Set
+from typing import Any, List, Optional, Set
 
 import numpy as np
 from numpy.typing import NDArray
 
 from matchmaker.base import OnlineAlignment
+from matchmaker.io.queue import RECVQueue
 
 
 class DPDannenberg(OnlineAlignment):
@@ -68,11 +69,36 @@ class DPDannenberg(OnlineAlignment):
         (default 0.5).
     """
 
+    score_cevts: List[Set[int]]
+    n_states: int
+    c_m: float
+    c_e: float
+    epsilon: float
+    epsilon_fraction: float
+    window: int
+    smoothing: float
+
+    _values: NDArray[np.float64]
+    _used: List[Set[int]]
+    _prev_values: NDArray[np.float64]
+    _prev_used: List[Set[int]]
+
+    _best_value: float
+    _best_row: int
+
+    _prev_note_time: Optional[float]
+
+    _beats_per_second: float
+    _anchor_beat: float
+    _anchor_time: float
+    _prev_match_time: Optional[float]
+    _prev_match_beat: Optional[float]
+
     def __init__(
         self,
-        reference_features,
-        score_positions: NDArray,
-        queue=None,
+        reference_features: List[Set[int]],
+        score_positions: NDArray[np.floating[Any]],
+        queue: Optional[RECVQueue] = None,
         c_m: float = 0.5,
         c_e: float = 0.0,
         epsilon: float = 0.090,
@@ -80,8 +106,8 @@ class DPDannenberg(OnlineAlignment):
         window: int = 50,
         tempo: float = 120.0,
         smoothing: float = 0.5,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             reference_features=reference_features,
             score_positions=score_positions,
@@ -97,20 +123,20 @@ class DPDannenberg(OnlineAlignment):
         self.smoothing = smoothing
 
         self._values = np.zeros(self.n_states, dtype=np.float64)
-        self._used: List[Set[int]] = [set() for _ in range(self.n_states)]
+        self._used = [set() for _ in range(self.n_states)]
         self._prev_values = np.zeros(self.n_states, dtype=np.float64)
-        self._prev_used: List[Set[int]] = [set() for _ in range(self.n_states)]
+        self._prev_used = [set() for _ in range(self.n_states)]
 
         self._best_value = float("-inf")
         self._best_row = 0
 
-        self._prev_note_time: Optional[float] = None
+        self._prev_note_time = None
 
         self._beats_per_second = tempo / 60.0
         self._anchor_beat = float(score_positions[0])
         self._anchor_time = 0.0
-        self._prev_match_time: Optional[float] = None
-        self._prev_match_beat: Optional[float] = None
+        self._prev_match_time = None
+        self._prev_match_beat = None
 
     def _is_new_cevt(self, note_time: float) -> bool:
         """Epsilon and epsilon-fraction tests (Sec. 5, p. 283-284)."""
@@ -132,7 +158,7 @@ class DPDannenberg(OnlineAlignment):
                 return True
         return False
 
-    def step(self, features) -> None:
+    def step(self, features: Any) -> None:
         pitch = int(np.atleast_1d(features)[0])
         note_time = self.current_perf_time
 
@@ -153,7 +179,7 @@ class DPDannenberg(OnlineAlignment):
         for r in range(lo, hi):
             B = self.score_cevts[r]
 
-            y_val = self._prev_values[r]
+            y_val = float(self._prev_values[r])
             y_used = self._prev_used[r]
 
             z_val = y_val
@@ -169,7 +195,7 @@ class DPDannenberg(OnlineAlignment):
 
                 if r > lo:
                     A = self.score_cevts[r - 1]
-                    w_val = self._prev_values[r - 1]
+                    w_val = float(self._prev_values[r - 1])
                     w_used = self._prev_used[r - 1]
                     missing_in_A = len(A - w_used)
                     d = w_val + 1 - self.c_m * missing_in_A
@@ -178,11 +204,11 @@ class DPDannenberg(OnlineAlignment):
                         z_used = {pitch}
 
             if r > lo:
-                A = self.score_cevts[r - 1]
-                x_val = self._values[r - 1]
+                A_skip = self.score_cevts[r - 1]
+                x_val = float(self._values[r - 1])
                 x_used = self._used[r - 1]
-                missing_in_A = len(A - x_used)
-                v = x_val - self.c_m * missing_in_A
+                missing_in_A_skip = len(A_skip - x_used)
+                v = x_val - self.c_m * missing_in_A_skip
                 if v >= z_val:
                     z_val = v
                     z_used = set()
@@ -191,7 +217,7 @@ class DPDannenberg(OnlineAlignment):
             self._used[r] = z_used
 
         best_r = lo + int(np.argmax(self._values[lo:hi]))
-        best_v = self._values[best_r]
+        best_v = float(self._values[best_r])
 
         if best_v > self._best_value:
             self._best_value = best_v
