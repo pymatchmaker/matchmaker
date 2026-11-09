@@ -347,6 +347,29 @@ methods:
         observation_type: midi
         num_particles: 500
 
+    dannenberg:
+      class: matchmaker.dp:DPDannenberg
+      reference: score_cevts
+      event_based: true
+      args:
+        reference_features: {from: reference_features}
+        score_positions: {from: score_positions}
+        queue: {from: queue}
+        tempo: {from: tempo}
+      config_passthrough:
+        exclude: [piano_range, return_pitch_list]
+      processor_args:
+        return_pitch_list: true
+        piano_range: false
+      default_kwargs:
+        processor: pitch
+        c_m: 0.5
+        c_e: 0.0
+        epsilon: 0.090
+        epsilon_fraction: 0.25
+        window: 50
+        smoothing: 0.5
+
     # --- parangonar trackers; all four differ only by the ``method`` string ---
     #
     # They read the live stream themselves rather than being fed frames, so

@@ -8,6 +8,7 @@ Each algorithm has a base class and two variants:
   - Event: onset-level features (MIDI)
 """
 
+from .dannenberg import DPDannenberg
 from .oltw_arzt import (
     OnlineTimeWarpingArzt,
     OnlineTimeWarpingArztEvent,
