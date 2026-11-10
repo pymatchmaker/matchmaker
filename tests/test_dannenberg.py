@@ -48,6 +48,19 @@ def _feed(follower, notes):
 
 
 class TestDPDannenbergInit(unittest.TestCase):
+    def test_initial_column_penalises_skipped_cevts(self):
+        f = _make_follower()
+        np.testing.assert_allclose(f._values, [0.0, -1.5, -2.0])
+
+    def test_wrong_first_note_does_not_jump_to_end(self):
+        # Score C-D-E; performance starts with a wrong E.
+        f = _make_follower(
+            reference_features=[{60}, {62}, {64}],
+            score_positions=np.array([0.0, 1.0, 2.0]),
+        )
+        _feed(f, [(64, 0.0)])
+        self.assertTrue(f.is_still_following())
+
     def test_state_dimensions(self):
         f = _make_follower()
         self.assertEqual(f.n_states, 3)

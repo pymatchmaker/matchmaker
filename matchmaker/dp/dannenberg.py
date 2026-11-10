@@ -122,9 +122,16 @@ class DPDannenberg(OnlineAlignment):
         self.window = window
         self.smoothing = smoothing
 
+        # Initial column (before any performance note): matching must start
+        # at the first score cevt, so row r begins with the cost of missing
+        # every note in cevts 0..r-1 (rather than 0 everywhere, which would
+        # allow a wrong first note to lock onto any row in the window).
+        sizes = np.array([len(c) for c in reference_features], dtype=np.float64)
         self._values = np.zeros(self.n_states, dtype=np.float64)
+        if self.n_states > 1:
+            self._values[1:] = -self.c_m * np.cumsum(sizes)[:-1]
         self._used = [set() for _ in range(self.n_states)]
-        self._prev_values = np.zeros(self.n_states, dtype=np.float64)
+        self._prev_values = self._values.copy()
         self._prev_used = [set() for _ in range(self.n_states)]
 
         self._best_value = float("-inf")
