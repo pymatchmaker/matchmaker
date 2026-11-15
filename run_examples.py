@@ -49,9 +49,9 @@ def evaluate(mm, match_file):
 
 
 def save_tsv(rows, path):
-    with open(path, "w") as f:
+    with open(path, "w", newline="") as f:
         f.write("perf_sec\tscore_beat\n")
-        csv.writer(f, delimiter="\t").writerows(rows)
+        csv.writer(f, delimiter="\t", lineterminator="\n").writerows(rows)
 
 
 def plot_alignment_path(perf_sec, score_beat, gt_perf, gt_score, save_path, run_name):

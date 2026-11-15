@@ -38,6 +38,8 @@ Supports **simulation mode**: run online alignment against recorded audio or MID
 > ```bash
 > conda install -c conda-forge fluidsynth
 > ```
+>
+> conda-forge has no Fluidsynth package for Windows; see [Installing Fluidsynth on Windows](#installing-fluidsynth-on-windows).
 
 ### Option 2: Live device support
 
@@ -51,6 +53,8 @@ Adds [PyAudio](https://pypi.org/project/PyAudio/) and [python-rtmidi](https://py
 > ```bash
 > conda install -c conda-forge fluidsynth portaudio
 > ```
+>
+> On Windows, the `pyaudio` wheels already include PortAudio, so only Fluidsynth is needed.
 
 ### Option 3: Development install (from source)
 
@@ -65,12 +69,14 @@ cd matchmaker
 conda create -n matchmaker python=3.12
 conda activate matchmaker
 
-# Install system dependencies
+# Install system dependencies (Linux and macOS; on Windows, see below)
 conda install -c conda-forge gcc=12.1.0 glib fluidsynth portaudio
 
 # Install matchmaker in editable mode with all dev dependencies (includes [devices])
 pip install -e ".[dev]"
 ```
+
+On Windows, skip the system dependencies step: conda-forge has neither `gcc=12.1.0` nor Fluidsynth for Windows, and none of these packages are needed there. Instead, install the [Visual C++ build tools](#missing-visual-c-build-tools-on-windows) to compile the Cython extensions and [install Fluidsynth from its release ZIP](#installing-fluidsynth-on-windows). The rest of the steps are the same, in a conda environment or a plain `venv`.
 
 > **Note:** `partitura` will download `MuseScore_General.sf3` (a free soundfont) on first use. This may take a moment.
 
@@ -78,18 +84,27 @@ pip install -e ".[dev]"
 
 #### Missing Visual C++ build tools (on Windows)
 
-Download `vs_BuildTools.exe` from <https://visualstudio.microsoft.com/visual-cpp-build-tools/> and run:
+Building from source (`pip install -e .`, or the sdist) fails with `Microsoft Visual C++ 14.0 or greater is required` if no C++ compiler is installed. Having Visual Studio installed is not enough; it also needs the C++ workload. Install the build tools with winget:
+
+```bash
+winget install --id Microsoft.VisualStudio.2022.BuildTools --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+Or download `vs_BuildTools.exe` from <https://visualstudio.microsoft.com/visual-cpp-build-tools/> and run:
 
 ```bash
 vs_buildtools.exe --norestart --passive --downloadThenInstall --includeRecommended --add Microsoft.VisualStudio.Workload.NativeDesktop --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Workload.MSBuildTools
 ```
 
-#### Issues with Fluidsynth and pyfluidsynth on Windows
+#### Installing Fluidsynth on Windows
 
-On Windows, pyfluidsynth expects `fluidsynth.exe` to be located in `C:\tools\bin` (some users report `C:\tools\fluidsynth\bin`):
+Without Fluidsynth, `import fluidsynth` raises `ImportError("Couldn't find the FluidSynth library.")`. pyfluidsynth looks for `libfluidsynth-3.dll` in `C:\tools\fluidsynth\bin` and on `PATH`:
 
-1. Download the ZIP for your Windows version from <https://github.com/FluidSynth/fluidsynth/releases/latest>
-2. Extract the contents to `C:\tools` (or wherever pyfluidsynth expects the executable).
+1. Download the ZIP for your architecture (e.g. `fluidsynth-v2.6.1-win10-x64-cpp11.zip`) from <https://github.com/FluidSynth/fluidsynth/releases/latest>.
+2. Extract it and rename the extracted folder (e.g. `fluidsynth-v2.6.1-win10-x64-cpp11`) to `C:\tools\fluidsynth`, so that the DLL is at `C:\tools\fluidsynth\bin\libfluidsynth-3.dll`. Alternatively, put the folder anywhere and add its `bin` directory to `PATH`.
+3. Check with `python -c "import fluidsynth"`.
+
+With [Chocolatey](https://chocolatey.org/), `choco install fluidsynth` installs it to `C:\tools\fluidsynth` as well.
 
 #### Using Fluidsynth installed from Homebrew on macOS
 
@@ -362,7 +377,7 @@ Default method: `"arzt"`
 
 | Method | Description |
 |---|---|
-| `"arzt"` | On-line time warping adapted from Brazier and Widmer (2020) |
+| `"arzt"` | On-line time warping by Arzt et al. (2008), extending Dixon (2005) |
 | `"dixon"` | On-line time warping by Dixon (2005) |
 | `"outerhmm"` | Two-level HMM with repeats and skips by Nakamura et al. (2016) |
 | `"skf"` | Switching Kalman Filter with hidden tempo by Jiang and Raphael (2020) |
@@ -376,16 +391,16 @@ Default method: `"pthmm"`
 
 | Method | Description |
 |---|---|
-| `"arzt"` | On-line time warping adapted from Brazier and Widmer (2020) |
+| `"arzt"` | On-line time warping by Arzt et al. (2008), extending Dixon (2005) |
 | `"dixon"` | On-line time warping by Dixon (2005) |
-| `"outerhmm"` | Outer-product HMM score follower by Nakamura (2014) |
+| `"outerhmm"` | Outer-product HMM score follower by Nakamura et al. (2014) |
 | `"hmm"` | HMM score follower by Cancino-Chacón et al. (2023) |
 | `"pthmm"` | Pitch-based HMM score follower |
 | `"pfkorz"` | Particle filter score follower by Korzeniowski et al. (2013) |
-| `"SL_OLTW"` | Symbolic-level OLTW note matcher from [parangonar](https://github.com/sildater/parangonar) |
-| `"SLT_OLTW"` | Symbolic-level OLTW note matcher with tempo, from parangonar |
-| `"OTM"` | Online transformer note matcher from parangonar |
-| `"OPTM"` | Online pure-transformer note matcher from parangonar |
+| `"SL_OLTW"` | Symbolic-level OLTW note matcher from [parangonar](https://github.com/sildater/parangonar) (Peter et al., 2025) |
+| `"SLT_OLTW"` | Symbolic-level OLTW note matcher with tempo, from parangonar (Peter et al., 2025) |
+| `"OTM"` | Online transformer note matcher from parangonar (Peter, 2023) |
+| `"OPTM"` | Online pure-transformer note matcher from parangonar (Peter, 2023) |
 
 The parangonar methods match one performed note at a time, so they always run
 event-based (no MIDI polling).
@@ -404,7 +419,7 @@ Default processor: `"chroma"`. Some methods default to their own processor
 | `"cqt"` | Constant-Q transform |
 | `"mel"` | Mel-spectrogram |
 | `"lse"` | Log-spectral energy features used in Dixon (2005) |
-| `"cqt_spectral_flux"` | CQT-based spectral flux used in Nakamura (2014) |
+| `"cqt_spectral_flux"` | CQT-based spectral flux used in Nakamura et al. (2016) |
 | `"raw_spectrum"` | Raw power spectrum used in Jiang and Raphael (2020) |
 | `"korzeniowski"` | Spectral observations for the Korzeniowski et al. (2013) particle filter |
 
@@ -475,7 +490,7 @@ If you find Matchmaker useful, we would appreciate if you could cite us!
 
 ## Acknowledgments
 
-This work has been supported by the Austrian Science Fund (FWF), grant agreement PAT 8820923 ("*Rach3: A Computational Approach to Study Piano Rehearsals*"). Additionally, this work was supported by the National Research Foundation of Korea (NRF) grant funded by the Korea government (MSIT) (No. NRF-2023R1A2C3007605).
+This work has been supported by the Austrian Science Fund (FWF), grant agreement PAT 8820923 (Rach3: A Computational Approach to Study Piano Rehearsals) and PIN 1347924 (AURA: Augmenting musical interaction via EVAs), as well as by the European Research Council (ERC) under the EU’s Horizon 2020 research & innovation programme, grant agreement No.101019375 (Whither Music?), and by the National Research Foundation of Korea (NRF) grant funded by the Korea government (MSIT) under Grant RS-2023-NR077289.
 
 ## License
 

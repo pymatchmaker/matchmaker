@@ -102,7 +102,15 @@ class TestAudioStream(unittest.TestCase):
                 )
 
                 self.assertTrue(isinstance(stream, AudioStream))
-                self.assertTrue(stream.input_device_index == ad.device_index)
+                # Names are not unique on Windows, where each device is
+                # listed once per host API (MME, DirectSound, WASAPI, ...),
+                # so the name may resolve to another device of that name.
+                selected = [
+                    d
+                    for d in audio_devices
+                    if d.device_index == stream.input_device_index
+                ]
+                self.assertTrue(selected[0].name == ad.name)
 
                 # Set audio device from index
                 stream = AudioStream(

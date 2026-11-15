@@ -211,6 +211,17 @@ def _reference_korzeniowski(mm):
     return score_processor(mm.score_part)
 
 
+@reference_builder("score_cevts")
+def _reference_score_cevts(mm):
+    """Score compound events: one MIDI pitch set per unique onset beat."""
+    na = mm.score_part.note_array()
+    onset_beats = np.unique(na["onset_beat"])
+    return [
+        set(na["pitch"][na["onset_beat"] == ob].tolist())
+        for ob in onset_beats
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Argument resolution
 # ---------------------------------------------------------------------------

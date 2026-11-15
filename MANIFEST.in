@@ -1,0 +1,3 @@
+# Cython sources for building from the sdist. setuptools picks up the .pyx
+# files from setup.py, but not the .pxd declarations next to them.
+recursive-include matchmaker *.pyx *.pxd
