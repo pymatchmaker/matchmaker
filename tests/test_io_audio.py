@@ -309,3 +309,133 @@ class TestAudioStream(unittest.TestCase):
             (np.zeros(self.stream.hop_length, dtype=np.float32), original_data)
         )
         self.assertTrue(np.all(proc_output == expected_output))
+
+
+class TestPacedFileInput(unittest.TestCase):
+    def test_absolute_block_end_deadlines(self):
+        import queue
+        from types import SimpleNamespace
+
+        clock = [100.0]
+        arrivals = []
+
+        class StopEvent:
+            def wait(self, duration):
+                # Simulate a scheduler that oversleeps each deadline by 3 ms.
+                clock[0] += duration + 0.003
+                return False
+
+            def is_set(self):
+                return False
+
+        class InputQueue(queue.Queue):
+            def _put(self, item):
+                if item is not None:
+                    arrivals.append(clock[0])
+                super()._put(item)
+
+        stream = SimpleNamespace(hop_length=20, target_sr=1000)
+        source = np.arange(100, dtype=np.float32)
+        q = InputQueue()
+        with patch.object(time, "perf_counter", side_effect=lambda: clock[0]):
+            AudioStream._enqueue_audio(stream, source, q, StopEvent())
+        np.testing.assert_allclose(
+            np.asarray(arrivals) - 100, np.arange(1, 6) * 0.02 + 0.003
+        )
+        np.testing.assert_array_equal(
+            np.concatenate([q.get()[0] for _ in range(5)]), source
+        )
+        self.assertIsNone(q.get_nowait())
+
+    def test_feeder_can_be_cancelled(self):
+        import queue
+        import threading
+        from types import SimpleNamespace
+
+        stopped = threading.Event()
+        stopped.set()
+        q = queue.Queue()
+        AudioStream._enqueue_audio(
+            SimpleNamespace(hop_length=20, target_sr=1000), np.ones(100), q, stopped
+        )
+        self.assertIsNone(q.get_nowait())
+        self.assertTrue(q.empty())
+
+    def test_paced_and_fast_inputs_produce_identical_features(self):
+        from matchmaker.io.stream import STREAM_END
+
+        # Includes a silent tail and an incomplete final block.
+        source = np.r_[np.arange(27, dtype=np.float32), np.zeros(18)]
+        results = []
+        with patch.object(
+            AudioStream,
+            "_preload_audio",
+            lambda stream: setattr(stream, "_preloaded_audio", source.copy()),
+        ):
+            for wait in (False, True):
+                stream = AudioStream(
+                    processor=DummyProcessor(),
+                    file_path="unused.wav",
+                    sample_rate=1000,
+                    target_sr=1000,
+                    hop_length=10,
+                    wait=wait,
+                )
+                stream.run_offline()
+                frames = []
+                while True:
+                    item = stream.queue.get_nowait()
+                    if item is STREAM_END:
+                        break
+                    frames.append(item)
+                self.assertEqual(stream.input_index, 5)
+                self.assertTrue(stream.stream_start.is_set())
+                self.assertFalse(stream.listen)
+                results.append(frames)
+        self.assertEqual(len(results[0]), 4)
+        self.assertEqual(len(results[1]), 4)
+        for fast, paced in zip(*results):
+            np.testing.assert_array_equal(fast[0], paced[0])
+            self.assertEqual(fast[1], paced[1])
+
+    def test_processor_error_stops_feeder(self):
+        from matchmaker.io.stream import STREAM_END
+
+        def fail(item):
+            raise ValueError("synthetic processor failure")
+
+        with patch.object(
+            AudioStream,
+            "_preload_audio",
+            lambda stream: setattr(stream, "_preloaded_audio", np.ones(10000)),
+        ):
+            stream = AudioStream(
+                processor=fail,
+                file_path="unused.wav",
+                sample_rate=1000,
+                target_sr=1000,
+                hop_length=10,
+                wait=True,
+            )
+        started = time.perf_counter()
+        with self.assertRaisesRegex(ValueError, "synthetic processor failure"):
+            stream.run_offline()
+        self.assertLess(time.perf_counter() - started, 1)
+        self.assertFalse(stream.listen)
+        self.assertTrue(stream.stream_start.is_set())
+        self.assertIs(stream.queue.get_nowait(), STREAM_END)
+
+    def test_empty_input_unblocks_consumer(self):
+        from matchmaker.io.stream import STREAM_END
+
+        with patch.object(
+            AudioStream,
+            "_preload_audio",
+            lambda stream: setattr(stream, "_preloaded_audio", np.array([])),
+        ):
+            stream = AudioStream(
+                processor=DummyProcessor(), file_path="unused.wav", wait=True
+            )
+        stream.run_offline()
+        self.assertTrue(stream.stream_start.is_set())
+        self.assertIs(stream.queue.get_nowait(), STREAM_END)

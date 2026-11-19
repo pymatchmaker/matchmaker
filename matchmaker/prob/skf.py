@@ -275,9 +275,10 @@ class SwitchingKalmanFilterFollower(OnlineAlignment):
     Each hypothesis is a tuple (k, a) where k is the chord index and a is
     the age (number of frames the current chord has lasted).  Each hypothesis
     carries:
-      - prob : float, filtered probability p(k_n, a_n | y^n_1)
-      - mu_t : float, Kalman-filtered tempo mean E[t_k | ...]
-      - var_t: float, Kalman-filtered tempo variance Var[t_k | ...]
+
+    - prob : float, filtered probability p(k_n, a_n | y^n_1)
+    - mu_t : float, Kalman-filtered tempo mean E[t_k | ...]
+    - var_t: float, Kalman-filtered tempo variance Var[t_k | ...]
 
     Parameters
     ----------

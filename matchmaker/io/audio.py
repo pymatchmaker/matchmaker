@@ -5,6 +5,7 @@ Input audio stream
 """
 
 import queue
+import threading
 import time
 from types import TracebackType
 from typing import Dict, Optional, Tuple, Type, Union
@@ -51,6 +52,10 @@ class AudioStream(Stream):
     device_name_or_index : Optional[Union[str, int]]
         Name or index of the audio device to be used. Ignored
         if ``file_path`` is given.
+
+    wait : bool
+        For file input, supply each complete audio block at its playback time
+        on a separate thread. Processing can lag behind but input is not dropped.
 
     Notes
     -----
@@ -301,25 +306,57 @@ class AudioStream(Stream):
             audio_y = np.concatenate(
                 (audio_y, np.zeros(self.hop_length - remainder, dtype=np.float32))
             )
-        trimmed_audio = audio_y
-        time_interval = self.hop_length / float(sr)
-        # Do not stop early on digital silence (all-zeros tails).
-        while trimmed_audio.size > 0:
-            self.input_index += 1
-            self.last_data_received = time.time()
-            target_audio = trimmed_audio[: self.hop_length]
-            self._process_feature(target_audio, self.last_data_received)
-            trimmed_audio = trimmed_audio[self.hop_length :]
+        feeder = None
+        stop_feeder = threading.Event()
+        if self.wait:
+            data_queue = queue.Queue()
+            feeder = threading.Thread(
+                target=self._enqueue_audio, args=(audio_y, data_queue, stop_feeder)
+            )
+            feeder.start()
+            blocks = iter(data_queue.get, None)
+        else:
+            blocks = (
+                (audio_y[start : start + self.hop_length], time.time())
+                for start in range(0, len(audio_y), self.hop_length)
+            )
 
-            if not self.stream_start.is_set():
+        try:
+            for target_audio, received_time in blocks:
+                if not self.listen:
+                    break
+                self.input_index += 1
+                self.last_data_received = received_time
+                self._process_feature(target_audio, received_time)
                 self.stream_start.set()
+        finally:
+            stop_feeder.set()
+            if feeder is not None:
+                feeder.join()
+            self.queue.put(STREAM_END)
+            self.stream_start.set()
+            self.stop_listening()
 
-            if self.wait:
-                elapsed_time = time.time() - self.last_data_received
-                time.sleep(max(time_interval - elapsed_time, 0))
-
-        self.queue.put(STREAM_END)
-        self.stop_listening()
+    def _enqueue_audio(self, audio_y, data_queue, stop_event) -> None:
+        """Supply raw blocks at their end times, independently of processing."""
+        self._playback_start = time.perf_counter()
+        try:
+            for start in range(0, len(audio_y), self.hop_length):
+                end = start + self.hop_length
+                deadline = self._playback_start + end / float(self.target_sr)
+                # Absolute deadlines prevent accumulated sleep/processing drift.
+                # A block is not available until all its samples have arrived.
+                while True:
+                    remaining = deadline - time.perf_counter()
+                    if remaining <= 0:
+                        break
+                    if stop_event.wait(remaining):
+                        return
+                if stop_event.is_set():
+                    return
+                data_queue.put((audio_y[start:end], time.time()))
+        finally:
+            data_queue.put(None)
 
     def run_online(self) -> None:
         """Process audio in real-time from input device.
