@@ -1,5 +1,16 @@
 # Changes
 
+## Version 0.5.1
+
+### Fixed
+
+- `AudioStream` file input with `wait=True` supplies each audio block at its playback time on a separate thread, so slow processing no longer drifts the input timing.
+
+### Changed
+
+- Faster forward step for the pitch HMM followers (`"pthmm"`, `"hmm"`).
+- Read the Docs builds take the version from the installed package.
+
 ## Version 0.5.0
 
 ### Added

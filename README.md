@@ -397,6 +397,7 @@ Default method: `"pthmm"`
 | `"hmm"` | HMM score follower by Cancino-Chacón et al. (2023) |
 | `"pthmm"` | Pitch-based HMM score follower |
 | `"pfkorz"` | Particle filter score follower by Korzeniowski et al. (2013) |
+| `"dannenberg"` | Dynamic-programming score follower by Bloch and Dannenberg (1985) |
 | `"SL_OLTW"` | Symbolic-level OLTW note matcher from [parangonar](https://github.com/sildater/parangonar) (Peter et al., 2025) |
 | `"SLT_OLTW"` | Symbolic-level OLTW note matcher with tempo, from parangonar (Peter et al., 2025) |
 | `"OTM"` | Online transformer note matcher from parangonar (Peter, 2023) |
