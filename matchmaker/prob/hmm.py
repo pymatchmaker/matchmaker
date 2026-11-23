@@ -959,11 +959,17 @@ class BernoulliPitchObservationModel(ObservationModel):
 
     def __call__(self, observation: NDArrayFloat) -> NDArrayFloat:
         if not self.inserted_states or len(self.pitch_profiles) < 2:
-            return compute_bernoulli_pitch_probabilities(observation, self.pitch_profiles)
+            return compute_bernoulli_pitch_probabilities(
+                observation, self.pitch_profiles
+            )
         # inserted states (odd indices) share one uniform profile: evaluate it once
         obs_prob = np.empty(len(self.pitch_profiles))
-        obs_prob[0::2] = compute_bernoulli_pitch_probabilities(observation, self.pitch_profiles[0::2])
-        obs_prob[1::2] = compute_bernoulli_pitch_probabilities(observation, self.pitch_profiles[1:2])[0]
+        obs_prob[0::2] = compute_bernoulli_pitch_probabilities(
+            observation, self.pitch_profiles[0::2]
+        )
+        obs_prob[1::2] = compute_bernoulli_pitch_probabilities(
+            observation, self.pitch_profiles[1:2]
+        )[0]
         return obs_prob
 
 
@@ -1547,15 +1553,6 @@ class PitchIOIHMM(BaseHMM):
             **kwargs,
         )
 
-        # Rightmost non-zero transition column per row; the cumulative max bounds row slices.
-        self._last_col = None
-        if isinstance(self.transition_model, ConstantTransitionModel):
-            self.transition_model.use_log_probabilities = False
-            T = self.transition_model.transition_probabilities
-            self._last_col = np.maximum.accumulate(
-                len(T) - 1 - np.argmax(T[:, ::-1] != 0, axis=1)
-            )
-
     def step(self, features) -> None:
         perf_time = self.current_perf_time
         ioi_obs = (
@@ -1565,30 +1562,10 @@ class PitchIOIHMM(BaseHMM):
         )
         self._prev_perf_time = perf_time
 
-        observation = (features, ioi_obs, self.tempo_model.beat_period)
-        fv = self.forward_variable
-
-        # The first step uses the initial distribution; other transition models use the original path.
-        if self._last_col is None or fv is None:
-            current_state = self.forward_algorithm_step(
-                observation=observation, log_probabilities=False
-            )
-        else:
-            self.transition_model.use_log_probabilities = False
-            self.observation_model.use_log_probabilities = False
-            prior = np.zeros_like(fv)
-            nz = np.flatnonzero(fv)
-            if nz.size:
-                lo, hi = nz[0], nz[-1] + 1
-                m = self._last_col[hi - 1] + 1
-
-                # Restrict T.T @ fv to reached states; this slice form keeps the product BLAS-friendly.
-                prior[:m] = fv[lo:hi] @ self.transition_model.transition_probabilities[lo:hi, :m]
-            fv = self.observation_model(observation) * prior
-            fv /= max(fv.sum(), 1e-6)
-            self.forward_variable = fv
-            current_state = np.argmax(fv)
-
+        current_state = self.forward_algorithm_step(
+            observation=(features, ioi_obs, self.tempo_model.beat_period),
+            log_probabilities=False,
+        )
         self.input_index += 1
 
         prev_index = self.current_index
