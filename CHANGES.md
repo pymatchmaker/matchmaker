@@ -1,5 +1,11 @@
 # Changes
 
+## Version 0.5.2
+
+### Changed
+
+- Requires `python-hiddenmarkov>=0.3.0`, whose forward step now includes the speed-up from 0.5.1, so `"pthmm"` also gets it (about twice as fast on long pieces).
+
 ## Version 0.5.1
 
 ### Fixed
