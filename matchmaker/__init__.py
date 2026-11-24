@@ -15,7 +15,7 @@ __all__ = ["dp", "features", "io", "prob", "utils"]
 try:
     __version__ = version("pymatchmaker")
 except PackageNotFoundError:  # pragma: no cover
-    __version__ = "0.5.2rc1"
+    __version__ = "0.5.2"
 
 ASSETS_DIR = Path(__file__).parent / "assets"
 
